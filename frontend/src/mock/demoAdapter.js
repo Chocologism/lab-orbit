@@ -175,6 +175,7 @@ export async function demoAxiosAdapter(config) {
   if (cleanUrl === '/api/auth/complete-tutorial') {
     const cur = getStored('labhub_user', DEMO_MEMBERS[0])
     cur.is_tutorial_completed = true
+    cur.tutorial_completed = true
     setStored('labhub_user', cur)
     return respond({ success: true, message: '向导已完成' })
   }

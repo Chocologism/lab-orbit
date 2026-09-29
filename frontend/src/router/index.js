@@ -82,6 +82,16 @@ const router = createRouter({
 import { useSiteConfig } from '../composables/useSiteConfig'
 
 router.beforeEach(async (to, from, next) => {
+  if (to.query?.demo === '1' || to.query?.demo === 'true') {
+    localStorage.setItem('labhub_force_demo', '1')
+  } else if (to.query?.demo === '0' || to.query?.demo === 'false') {
+    localStorage.removeItem('labhub_force_demo')
+    if (localStorage.getItem('labhub_token')?.startsWith('demo_')) {
+      localStorage.removeItem('labhub_token')
+      localStorage.removeItem('labhub_user')
+    }
+  }
+
   if (isDemoMode()) {
     initDemoAuth()
   }

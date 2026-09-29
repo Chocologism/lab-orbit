@@ -820,6 +820,7 @@ export function useTutorial() {
       try {
         const u = JSON.parse(storedUserRaw)
         u.tutorial_completed = true
+        u.is_tutorial_completed = true
         localStorage.setItem('labhub_user', JSON.stringify(u))
       } catch {}
     }
