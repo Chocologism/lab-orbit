@@ -23,26 +23,35 @@ describe('useTutorial Composable', () => {
     mockLocalStorage.clear()
   })
 
-  it('provides 6 steps for standard student/member users', () => {
+  it('provides 8 steps for standard student/member users including library and style modules', () => {
     const { openTutorial, steps, currentStep } = useTutorial()
     openTutorial({ role: 'student', mandatory: true })
 
-    expect(steps.value.length).toBe(6)
+    expect(steps.value.length).toBe(8)
     expect(steps.value[0].id).toBe('home')
     expect(steps.value[1].id).toBe('schedule')
     expect(steps.value[2].id).toBe('arxiv')
-    expect(steps.value[3].id).toBe('resources')
-    expect(steps.value[4].id).toBe('mailbox')
-    expect(steps.value[5].id).toBe('assistant')
+    expect(steps.value[3].id).toBe('library')
+    expect(steps.value[4].id).toBe('resources')
+    expect(steps.value[5].id).toBe('mailbox')
+    expect(steps.value[6].id).toBe('assistant')
+    expect(steps.value[7].id).toBe('style')
     expect(currentStep.value.id).toBe('home')
+
+    // 确保 AI 助手步骤纯粹聚焦于 /assistant 工作台，绝不跳转配置页面打扰导览背景
+    const assistantStep = steps.value.find(s => s.id === 'assistant')
+    expect(assistantStep).toBeDefined()
+    expect(assistantStep.targetRoute).toBe('/assistant')
+    expect(assistantStep.subSteps.every(sub => sub.targetRoute === '/assistant' || sub.id === 'assistant_nav')).toBe(true)
+    expect(assistantStep.subSteps.some(sub => sub.targetRoute === '/account')).toBe(false)
   })
 
-  it('provides 11 steps for administrators including admin features', () => {
+  it('provides 13 steps for administrators including admin features', () => {
     const { openTutorial, steps } = useTutorial()
     openTutorial({ role: 'admin', mandatory: false })
 
-    expect(steps.value.length).toBe(11)
-    const adminStepIds = steps.value.slice(6).map(s => s.id)
+    expect(steps.value.length).toBe(13)
+    const adminStepIds = steps.value.slice(8).map(s => s.id)
     expect(adminStepIds).toEqual([
       'admin_branding',
       'admin_members',
@@ -50,7 +59,7 @@ describe('useTutorial Composable', () => {
       'admin_notices',
       'admin_moderation',
     ])
-    expect(steps.value.slice(6).every(s => s.isAdmin === true)).toBe(true)
+    expect(steps.value.slice(8).every(s => s.isAdmin === true)).toBe(true)
   })
 
   it('navigates through steps correctly with nextStep and prevStep', () => {
@@ -72,11 +81,11 @@ describe('useTutorial Composable', () => {
 
   it('calculates progress percentage accurately', () => {
     const { openTutorial, currentStepIndex, progressPercent, nextStep } = useTutorial()
-    openTutorial({ role: 'student' }) // 6 steps
+    openTutorial({ role: 'student' }) // 8 steps
 
-    expect(progressPercent.value).toBe(17) // round(1/6 * 100) = 17
+    expect(progressPercent.value).toBe(13) // round(1/8 * 100) = 13
     nextStep()
-    expect(progressPercent.value).toBe(33) // round(2/6 * 100) = 33
+    expect(progressPercent.value).toBe(25) // round(2/8 * 100) = 25
   })
 
   it('completes tutorial, calls API and updates localStorage cache', async () => {
@@ -151,19 +160,19 @@ describe('useTutorial Composable', () => {
 
     expect(isFirstStep.value).toBe(true)
     expect(userRole.value).toBe('student')
-    expect(steps.value.length).toBe(6)
+    expect(steps.value.length).toBe(8)
 
     // Switch to admin
     setUserRole('admin')
     expect(userRole.value).toBe('admin')
-    expect(steps.value.length).toBe(11)
+    expect(steps.value.length).toBe(13)
     expect(steps.value.some(s => s.isAdmin)).toBe(true)
     expect(isFirstStep.value).toBe(true)
 
     // Switch back to member
     setUserRole('member')
     expect(userRole.value).toBe('member')
-    expect(steps.value.length).toBe(6)
+    expect(steps.value.length).toBe(8)
     expect(steps.value.some(s => s.isAdmin)).toBe(false)
   })
 })

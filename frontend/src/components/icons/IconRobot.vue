@@ -29,3 +29,15 @@ defineProps({
     <path d="M9 13v2" />
   </svg>
 </template>
+
+<style scoped>
+.icon-robot {
+  fill: none !important;
+  transition: stroke 0.2s ease, filter 0.2s ease, transform 0.2s ease;
+}
+.icon-robot path,
+.icon-robot rect {
+  fill: none !important;
+  stroke: currentColor;
+}
+</style>

@@ -458,6 +458,7 @@ function logout() {
 
         <!-- 风格设置按钮 -->
         <router-link
+          id="tour-nav-style"
           to="/style"
           class="sidebar-tool iso-pro"
           aria-label="风格"
@@ -1340,15 +1341,36 @@ function logout() {
   box-shadow: inset 0 0 16px rgba(197, 230, 223, 0.3), 0 0 12px rgba(197, 230, 223, 0.25) !important;
 }
 
-[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon {
+[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon,
+[data-color-scheme="classic-cyan"] .iso-pro:hover .iso-icon {
   color: #e4f7f2 !important;
 }
 
-[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon :deep(svg:not([fill="none"])) {
+[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon :deep(svg:not([fill="none"]):not(.icon-robot)),
+[data-color-scheme="classic-cyan"] .iso-pro:hover .iso-icon :deep(svg:not([fill="none"]):not(.icon-robot)) {
   fill: #e4f7f2 !important;
 }
 
-[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon :deep(svg[fill="none"]) {
+[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon :deep(svg[fill="none"]),
+[data-color-scheme="classic-cyan"] .iso-pro:hover .iso-icon :deep(svg[fill="none"]),
+[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon :deep(.icon-robot),
+[data-color-scheme="classic-cyan"] .iso-pro:hover .iso-icon :deep(.icon-robot),
+[data-theme-style="vanta-fog"] .sidebar-tool.router-link-active .iso-icon :deep(.icon-robot),
+[data-color-scheme="classic-cyan"] .sidebar-tool.router-link-active .iso-icon :deep(.icon-robot) {
+  fill: none !important;
+  stroke: #e4f7f2 !important;
+  filter: drop-shadow(0 0 5px rgba(197, 230, 223, 0.45));
+}
+
+[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon :deep(.icon-robot path),
+[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon :deep(.icon-robot rect),
+[data-color-scheme="classic-cyan"] .iso-pro:hover .iso-icon :deep(.icon-robot path),
+[data-color-scheme="classic-cyan"] .iso-pro:hover .iso-icon :deep(.icon-robot rect),
+[data-theme-style="vanta-fog"] .sidebar-tool.router-link-active .iso-icon :deep(.icon-robot path),
+[data-theme-style="vanta-fog"] .sidebar-tool.router-link-active .iso-icon :deep(.icon-robot rect),
+[data-color-scheme="classic-cyan"] .sidebar-tool.router-link-active .iso-icon :deep(.icon-robot path),
+[data-color-scheme="classic-cyan"] .sidebar-tool.router-link-active .iso-icon :deep(.icon-robot rect) {
+  fill: none !important;
   stroke: #e4f7f2 !important;
 }
 

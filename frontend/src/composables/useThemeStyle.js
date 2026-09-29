@@ -1,18 +1,9 @@
 import { ref } from 'vue'
 
-export const DEFAULT_COLOR_SCHEME = 'obsidian-gray'
-export const DEFAULT_BG_TYPE = 'earth-orbit'
+export const DEFAULT_COLOR_SCHEME = 'classic-cyan'
+export const DEFAULT_BG_TYPE = 'clouds-static'
 
 export const COLOR_SCHEMES = [
-  {
-    id: 'obsidian-gray',
-    name: '曜石碳灰',
-    subtitle: '高级冷灰高光 · 纯粹石墨基底',
-    colors: ['#090d16', '#94a3b8', '#161e2e'], // Base, Primary Accent, Secondary Surface
-    primaryColor: '#94a3b8',
-    baseColor: '#090d16',
-    surfaceColor: '#161e2e'
-  },
   {
     id: 'classic-cyan',
     name: '经典冷青与玄青',
@@ -21,6 +12,15 @@ export const COLOR_SCHEMES = [
     primaryColor: '#c5e6df',
     baseColor: '#081f28',
     surfaceColor: '#102f33'
+  },
+  {
+    id: 'obsidian-gray',
+    name: '曜石碳灰',
+    subtitle: '高级冷灰高光 · 纯粹石墨基底',
+    colors: ['#090d16', '#94a3b8', '#161e2e'], // Base, Primary Accent, Secondary Surface
+    primaryColor: '#94a3b8',
+    baseColor: '#090d16',
+    surfaceColor: '#161e2e'
   },
   {
     id: 'nebula-purple',
@@ -34,12 +34,6 @@ export const COLOR_SCHEMES = [
 ]
 
 export const BG_OPTIONS = [
-  {
-    id: 'earth-orbit',
-    name: '地球深空（动态）',
-    subtitle: '超清深空轨道视频 · 晨曦与地球大气',
-    type: 'video'
-  },
   {
     id: 'clouds-static',
     name: '云山日光（静态）',
@@ -69,12 +63,12 @@ export const BG_OPTIONS = [
 // 兼容旧版 THEME_STYLES 导出
 export const THEME_STYLES = [
   {
-    id: 'earth-orbit',
-    name: '地球深空（动态）',
-    subtitle: '曜石碳灰 · 地球深空',
-    colors: ['#090d16', '#94a3b8', '#161e2e'],
-    primaryColor: '#94a3b8',
-    bgPreview: '#090d16'
+    id: 'clouds-static',
+    name: '云山日光（静态）',
+    subtitle: '云山日光 · 经典冷青与玄青',
+    colors: ['#081f28', '#c5e6df', '#102f33'],
+    primaryColor: '#c5e6df',
+    bgPreview: '#081f28'
   },
   {
     id: 'galaxy',
@@ -91,21 +85,13 @@ export const THEME_STYLES = [
     colors: ['#081f28', '#c5e6df', '#102f33'],
     primaryColor: '#c5e6df',
     bgPreview: '#081f28'
-  },
-  {
-    id: 'clouds-static',
-    name: '云山日光（静态）',
-    subtitle: '云山日光 · 经典冷青与玄青',
-    colors: ['#081f28', '#c5e6df', '#102f33'],
-    primaryColor: '#c5e6df',
-    bgPreview: '#081f28'
   }
 ]
 
 const COLOR_SCHEME_KEY = 'cssbd_color_scheme'
 const BG_TYPE_KEY = 'cssbd_bg_type'
 const LEGACY_STORAGE_KEY = 'cssbd_theme_style'
-export const DEFAULT_MIGRATION_KEY = 'cssbd_default_v20260925'
+export const DEFAULT_MIGRATION_KEY = 'laborbit_default_v20260930_cyan_clouds'
 export const CUSTOM_COLOR_SCHEME_KEY = 'cssbd_custom_color_scheme'
 export const GLASS_STYLE_KEY = 'cssbd_glass_style'
 export const BG_DIM_KEY = 'cssbd_bg_dim_percent_v2'
@@ -119,14 +105,14 @@ export function migratePreviousDefaultUsers() {
     const savedBg = localStorage.getItem(BG_TYPE_KEY)
     const savedLegacy = localStorage.getItem(LEGACY_STORAGE_KEY)
 
-    const isOldDefaultScheme = !savedScheme || savedScheme === 'classic-cyan' || savedScheme === 'nebula-purple'
-    const isOldDefaultBg = !savedBg || savedBg === 'clouds-static' || savedBg === 'galaxy'
-    const isOldLegacy = savedLegacy === 'clouds-static' || savedLegacy === 'galaxy' || savedLegacy === 'vanta-fog'
+    const isOldDefaultScheme = !savedScheme || savedScheme === 'obsidian-gray'
+    const isOldDefaultBg = !savedBg || savedBg === 'earth-orbit'
+    const isOldLegacy = !savedLegacy || savedLegacy === 'earth-orbit'
 
     if (savedScheme !== 'custom' && savedBg !== 'custom-local' && (isOldDefaultScheme || isOldDefaultBg || isOldLegacy)) {
       localStorage.setItem(COLOR_SCHEME_KEY, DEFAULT_COLOR_SCHEME)
       localStorage.setItem(BG_TYPE_KEY, DEFAULT_BG_TYPE)
-      localStorage.setItem(LEGACY_STORAGE_KEY, 'earth-orbit')
+      localStorage.setItem(LEGACY_STORAGE_KEY, 'clouds-static')
     }
     localStorage.setItem(DEFAULT_MIGRATION_KEY, '1')
   } catch (e) {
@@ -502,12 +488,12 @@ function getInitialBgType() {
   if (typeof window === 'undefined') return DEFAULT_BG_TYPE
   try {
     const saved = localStorage.getItem(BG_TYPE_KEY)
-    if (saved === 'earth-orbit' || saved === 'galaxy' || saved === 'vanta-fog' || saved === 'clouds-static' || saved === 'custom-local') {
+    if (saved === 'galaxy' || saved === 'vanta-fog' || saved === 'clouds-static' || saved === 'custom-local') {
       return saved
     }
     // 从旧版兼容器迁移
     const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
-    if (legacy === 'earth-orbit' || legacy === 'galaxy' || legacy === 'vanta-fog' || legacy === 'clouds-static') {
+    if (legacy === 'galaxy' || legacy === 'vanta-fog' || legacy === 'clouds-static') {
       return legacy
     }
   } catch (e) {
@@ -521,11 +507,10 @@ export const currentBgType = ref(getInitialBgType())
 
 // 兼容器：保留 currentThemeStyle 响应式对象
 function resolveLegacyTheme(scheme, bg) {
-  if (scheme === 'obsidian-gray') return 'earth-orbit'
   if (scheme === 'nebula-purple') return 'galaxy'
   if (scheme === 'custom') return 'custom'
   if (bg === 'vanta-fog') return 'vanta-fog'
-  if (bg === 'earth-orbit') return 'earth-orbit'
+  if (bg === 'galaxy') return 'galaxy'
   return 'clouds-static'
 }
 
@@ -552,12 +537,12 @@ export function applyThemeToDOM(scheme = currentColorScheme.value, bg = currentB
   if (typeof document === 'undefined' || !document.documentElement) return
   const doc = document.documentElement
 
-  // 如果传入的是旧版风格名称（如 'earth-orbit' / 'galaxy' / 'vanta-fog' / 'clouds-static'），智能解构为对应的配色与背景
+  // 如果传入的是旧版风格名称（如 'galaxy' / 'vanta-fog' / 'clouds-static'），智能解构为对应的配色与背景
   let actualScheme = scheme
   let actualBg = bg
   if (scheme === 'earth-orbit') {
-    actualScheme = 'obsidian-gray'
-    if (!bg || bg === 'earth-orbit') actualBg = currentBgType.value || 'earth-orbit'
+    actualScheme = 'classic-cyan'
+    actualBg = 'clouds-static'
   } else if (scheme === 'galaxy') {
     actualScheme = 'nebula-purple'
     if (!bg || bg === 'galaxy') actualBg = currentBgType.value || 'galaxy'
@@ -573,11 +558,11 @@ export function applyThemeToDOM(scheme = currentColorScheme.value, bg = currentB
     actualScheme = DEFAULT_COLOR_SCHEME
   }
 
-  actualBg = (actualBg === 'earth-orbit' || actualBg === 'galaxy' || actualBg === 'vanta-fog' || actualBg === 'clouds-static' || actualBg === 'custom-local')
+  actualBg = (actualBg === 'galaxy' || actualBg === 'vanta-fog' || actualBg === 'clouds-static' || actualBg === 'custom-local')
     ? actualBg
     : (currentBgType.value || DEFAULT_BG_TYPE)
 
-  const legacyTheme = actualScheme === 'obsidian-gray' ? 'earth-orbit' : (actualScheme === 'nebula-purple' ? 'galaxy' : (actualScheme === 'custom' ? 'custom' : 'vanta-fog'))
+  const legacyTheme = actualScheme === 'obsidian-gray' ? 'clouds-static' : (actualScheme === 'nebula-purple' ? 'galaxy' : (actualScheme === 'custom' ? 'custom' : 'vanta-fog'))
 
   // 1. 设置解耦属性
   doc.setAttribute('data-color-scheme', actualScheme)
@@ -673,7 +658,7 @@ export function useThemeStyle() {
   }
 
   function setBgType(bgType) {
-    if (bgType !== 'earth-orbit' && bgType !== 'galaxy' && bgType !== 'vanta-fog' && bgType !== 'clouds-static' && bgType !== 'custom-local') return
+    if (bgType !== 'galaxy' && bgType !== 'vanta-fog' && bgType !== 'clouds-static' && bgType !== 'custom-local') return
     currentBgType.value = bgType
     currentThemeStyle.value = resolveLegacyTheme(currentColorScheme.value, bgType)
     applyThemeToDOM(currentColorScheme.value, bgType)
@@ -688,8 +673,8 @@ export function useThemeStyle() {
   // 兼容旧版 setThemeStyle 调用
   function setThemeStyle(style) {
     if (style === 'earth-orbit') {
-      setColorScheme('obsidian-gray')
-      setBgType('earth-orbit')
+      setColorScheme('classic-cyan')
+      setBgType('clouds-static')
     } else if (style === 'galaxy') {
       setColorScheme('nebula-purple')
       setBgType('galaxy')

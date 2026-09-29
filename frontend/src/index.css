@@ -1315,9 +1315,19 @@ html[data-bg-style="clouds-static"] body {
   box-shadow: inset 0 0 16px rgba(197, 230, 223, 0.3), 0 0 12px rgba(197, 230, 223, 0.25);
 }
 [data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon,
-[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon svg {
+[data-color-scheme="classic-cyan"] .iso-pro:hover .iso-icon {
   color: #e4f7f2;
+}
+[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon svg:not([fill="none"]):not(.icon-robot),
+[data-color-scheme="classic-cyan"] .iso-pro:hover .iso-icon svg:not([fill="none"]):not(.icon-robot) {
   fill: #e4f7f2;
+}
+[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon svg[fill="none"],
+[data-color-scheme="classic-cyan"] .iso-pro:hover .iso-icon svg[fill="none"],
+[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon .icon-robot,
+[data-color-scheme="classic-cyan"] .iso-pro:hover .iso-icon .icon-robot {
+  fill: none !important;
+  stroke: #e4f7f2 !important;
 }
 [data-theme-style="vanta-fog"] .iso-pro .iso-text {
   background: rgba(14, 38, 46, 0.95);

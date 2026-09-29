@@ -29,8 +29,11 @@ import ArxivPaperCopilot from '../components/ArxivPaperCopilot.vue'
 import SlidingSegmented from '../components/SlidingSegmented.vue'
 import ModelSelectPopover from '../components/ModelSelectPopover.vue'
 import { useSiteConfig } from '../composables/useSiteConfig.js'
+import { useTutorial } from '../composables/useTutorial.js'
+import { isDemoMode } from '../mock/isDemo.js'
 
 const { siteConfig } = useSiteConfig()
+const { showTutorial } = useTutorial()
 
 defineOptions({
   name: 'AssistantView'
@@ -315,13 +318,21 @@ onMounted(() => {
       saveAiConfig(config)
     }
   }
-  if (!isConfigured.value) {
+  // 当处于系统新手向导或 Demo 虚拟展示模式下时，严禁自动打开配置弹窗，避免配置表单在背景遮挡向导对工作台的讲解
+  if (!isConfigured.value && !showTutorial.value && !isDemoMode()) {
     showConfigModal.value = true
   }
   nextTick(() => {
     scrollToBottom(false)
     enhanceCodeBlocks()
   })
+})
+
+// 当新手向导处于开启状态时，自动关闭可能残留的配置模态框，确保背景纯净
+watch(showTutorial, (isActive) => {
+  if (isActive && showConfigModal.value) {
+    showConfigModal.value = false
+  }
 })
 
 onActivated(() => {

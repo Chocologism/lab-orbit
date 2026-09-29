@@ -163,6 +163,19 @@ const GENERAL_STEPS = [
         actionPrompt: '点击【文本智能导入】即可体验粘贴文本或拖入海报一键解析'
       },
       {
+        id: 'schedule_pending_queue',
+        targetId: 'tour-pending-queue-btn',
+        targetSelector: '#tour-pending-queue-btn, .pending-queue-btn, .smart-paste-btn',
+        targetRoute: '/seminars?tab=timeline',
+        placement: 'bottom',
+        requiresClick: false,
+        title: '协同待处理导入队列',
+        subtitle: '待审日程协同沉淀与快速发布',
+        description: '从邮件识别、海报长图 OCR 或组员暂存的候选日程均会智能归集于【待处理导入队列】，支持组内成员协同复核、编辑并一键批量写入排期。',
+        purposeNote: '多模态解析日程的协同审核与批量发布通道。',
+        actionPrompt: '协同待处理队列支持多成员共同复核与一键确认排期'
+      },
+      {
         id: 'schedule_week_tab',
         targetId: 'tab-week',
         targetSelector: '#tab-week',
@@ -314,6 +327,65 @@ const GENERAL_STEPS = [
     ]
   },
   {
+    id: 'library',
+    title: '课题组文献库与 Zotero 同步',
+    subtitle: '组内精选学术文献资产与知识沉淀',
+    description: '课题组全量精读文献与经典论著知识库。支持 Zotero 云端双向关联同步、论文分类检索、全文 PDF 预览与元数据解析。',
+    icon: 'book',
+    tag: '学术文库',
+    targetRoute: '/library',
+    targetNavName: '文献库',
+    actionPrompt: '点击导航栏【文献库】查阅组内沉淀学术文献',
+    keyHighlights: [
+      '课题组全量精读论文、组会报告文献统一沉淀',
+      '支持关联 Zotero 个人与群组文库，云端文献双向同步',
+      '按来源分类（推荐、组会、定向收录）与关键词极速检索',
+      '支持原文 PDF 一键预览与快速推送到 AI 深度研讨'
+    ],
+    subSteps: [
+      {
+        id: 'library_nav',
+        targetId: 'tour-nav-library',
+        targetSelector: '#tour-nav-library, a[href="/library"]',
+        targetRoute: '/arxiv',
+        placement: 'right',
+        requiresClick: true,
+        isNavStep: true,
+        title: '进入【文献库】',
+        subtitle: '点击侧边栏文献库图标',
+        description: '点击左侧导航栏中的文献库图标，浏览课题组沉淀的全部学术文献与研读记录。',
+        purposeNote: '切换至文献库模块。',
+        actionPrompt: '点击左侧【文献库】图标前往页面'
+      },
+      {
+        id: 'library_search',
+        targetId: 'tour-library-search',
+        targetSelector: '#tour-library-search, .library-search, .library-wave-box',
+        targetRoute: '/library',
+        placement: 'bottom',
+        requiresClick: false,
+        title: '全库文献检索与来源过滤',
+        subtitle: '多维检索与标签过滤',
+        description: '支持按标题、作者、arXiv 编号与关键词即时检索；上方标签栏可快速在“来自推荐”、“定向收录”与“来自组会”之间一键切换。',
+        purposeNote: '快速定位所需研读的组例文献。',
+        actionPrompt: '输入关键词或点击标签分类快速过滤文献'
+      },
+      {
+        id: 'library_paper_card',
+        targetId: 'tour-library-card',
+        targetSelector: '#tour-library-card, .library-paper:first-child, .library-paper',
+        targetRoute: '/library',
+        placement: 'top',
+        requiresClick: false,
+        title: '文献详情、评语与 Zotero 归档',
+        subtitle: '研读记录与引用沉淀',
+        description: '卡片完整展示推荐人、评语见解与期刊信息；点击即可查阅原文或直接推送到 AI 助手开展深度精读。',
+        purposeNote: '查看文献研读批注与一键研讨。',
+        actionPrompt: '点击卡片可查看推荐见解与精读上下文'
+      }
+    ]
+  },
+  {
     id: 'resources',
     title: '教材资料与知识文库',
     subtitle: '专业教材专著、代码仓库与科研工具矩阵',
@@ -333,7 +405,7 @@ const GENERAL_STEPS = [
         id: 'resources_nav',
         targetId: 'tour-nav-resources',
         targetSelector: '#tour-nav-resources, a[href="/resources"]',
-        targetRoute: '/arxiv',
+        targetRoute: '/library',
         placement: 'right',
         requiresClick: true,
         isNavStep: true,
@@ -431,18 +503,19 @@ const GENERAL_STEPS = [
   },
   {
     id: 'assistant',
-    title: 'AI 科研助手与个人中心',
-    subtitle: '学术大模型答疑、公式推导与偏好定制',
-    description: '适配课题组学术方向的大模型助理，支持专业理论答疑、LaTeX 实时推导与个性化界面风格定制。',
+    title: 'AI 科研智囊助手',
+    subtitle: '学科专业大模型答疑、公式推导与学术翻译',
+    description: '适配课题组前沿方向的大模型助理。精通专业理论答疑、LaTeX 实时数学推导、代码调试与前沿论文伴读。',
     icon: 'sparkles',
     tag: 'AI 智囊',
     targetRoute: '/assistant',
-    targetNavName: '科研助手',
-    actionPrompt: '点击导航栏进入【科研助手】体验学术问答',
+    targetNavName: 'AI 助手',
+    actionPrompt: '点击导航栏【AI 助手】体验智能科研对话',
     keyHighlights: [
-      '适配课题组方向的科研大模型全天候智囊',
-      '精通专业理论公式推导、学术翻译与代码编写',
-      '支持在个人中心自由定制多款高颜值视觉主题皮肤'
+      '深度适配课题组科研方向的大模型全天候学术助理',
+      '精通专业物理/数学公式推导、LaTeX 实时渲染与学术润色',
+      '多会话独立隔离管理与上下文即时切换',
+      '支持与前沿 arXiv 论文联动的深度伴读与代码调试'
     ],
     subSteps: [
       {
@@ -455,49 +528,120 @@ const GENERAL_STEPS = [
         isNavStep: true,
         title: '进入【AI 助手】',
         subtitle: '点击侧边栏机器人图标',
-        description: '点击左侧导航栏中的机器人图标，体验课题组学术大模型科研智囊。',
+        description: '点击左侧导航栏中的机器人图标，进入课题组学术大模型科研对话工作台。',
         purposeNote: '切换至 AI 科研助手模块。',
         actionPrompt: '点击左侧【AI 助手】图标前往页面'
       },
       {
         id: 'assistant_workspace',
         targetId: 'tour-assistant-workspace',
-        targetSelector: '#tour-assistant-workspace, .chat-input-area, .assistant-main',
+        targetSelector: '#tour-assistant-workspace, .chat-input-area, .assistant-main, .assistant-content-body',
         targetRoute: '/assistant',
         placement: 'top',
         requiresClick: false,
         title: '公式推导与学术问答',
-        subtitle: '全天候专业科研智囊',
-        description: '精通专业理论推导，支持实时渲染复杂的 LaTeX 数学公式与物理方程，并支持学术翻译与代码调试。',
-        purposeNote: '开展文献精读、公式推演与学术咨询。',
+        subtitle: '理论研讨与代码调试',
+        description: '精通专业理论推导，支持实时渲染复杂的 LaTeX 数学公式与物理方程，并支持学术论文润色、翻译与算法代码调试。',
+        purposeNote: '开展前沿理论研讨、公式推演与学术咨询。',
         actionPrompt: '遇到公式推导疑问或学术翻译时在此提问交流'
       },
       {
-        id: 'account_nav',
-        targetId: 'tour-nav-account',
-        targetSelector: '#tour-nav-account, a[href="/account"], .account-btn-duck',
+        id: 'assistant_sessions',
+        targetId: 'tour-assistant-sidebar',
+        targetSelector: '#tour-assistant-sidebar, .assistant-sidebar, .new-chat-btn, .chat-mode-workspace',
+        targetRoute: '/assistant',
+        placement: 'right',
+        requiresClick: false,
+        title: '独立会话管理与沙箱',
+        subtitle: '沙箱隔离与多话题切换',
+        description: '左侧会话栏支持新建独立会话、重命名研讨主题与快速切换，所有对话沙箱纯本地隔离，保护科研数据隐私与思考连续性。',
+        purposeNote: '多课题并行推进，分类归档学术灵感。',
+        actionPrompt: '点击新建会话即可开启全新学术专题讨论'
+      },
+      {
+        id: 'assistant_arxiv_copilot',
+        targetId: 'tour-assistant-copilot',
+        targetSelector: '#tour-assistant-copilot, .assistant-mode-tabs, .assistant-nav-bar',
+        targetRoute: '/assistant',
+        placement: 'bottom',
+        requiresClick: false,
+        title: 'arXiv 论文深度伴读模式',
+        subtitle: '论文全文载入与多轮问答',
+        description: '可在顶栏切换【与 arXiv 对话】模式，输入论文编号即可将整篇学术预印本作为上下文，开展创新点溯源与公式复现研讨。',
+        purposeNote: '深度精读前沿文献，AI 全文精准伴读。',
+        actionPrompt: '切换至 arXiv 伴读模式可展开论文全文研讨'
+      }
+    ]
+  },
+  {
+    id: 'style',
+    title: '个性化视觉风格中心',
+    subtitle: '多维色彩空间、动态背景与玻璃质感自由定制',
+    description: '全新视觉中心！支持经典冷青与玄青、星云紫与曜黑等预设方案，搭配云山日光静态壁纸、WebGL 宇宙星空与实时流体水雾，打造极致科研沉浸感。',
+    icon: 'palette',
+    tag: '风格定制',
+    targetRoute: '/style',
+    targetNavName: '风格',
+    actionPrompt: '点击导航栏【风格】进入视觉定制中心',
+    keyHighlights: [
+      '经典冷青与玄青、星云紫与深曜黑、曜石碳灰等多款预设',
+      '支持高级自定义十六进制调色盘自由微调',
+      '云山日光静态海景、星际穿越与流体水雾动态背景无缝切换',
+      '流体折射与纯净磨砂双玻璃质感选择，配以实时背景明暗透光滑块'
+    ],
+    subSteps: [
+      {
+        id: 'style_nav',
+        targetId: 'tour-nav-style',
+        targetSelector: '#tour-nav-style, a[href="/style"]',
         targetRoute: '/assistant',
         placement: 'right',
         requiresClick: true,
         isNavStep: true,
-        title: '进入【个人中心】',
-        subtitle: '点击底部用户头像',
-        description: '点击左侧导航栏底部的用户头像，进入个人中心，定制你的专属工作台外观与偏好。',
-        purposeNote: '切换至个人中心与偏好设置。',
-        actionPrompt: '点击左下角用户头像进入个人中心'
+        title: '进入【视觉风格中心】',
+        subtitle: '点击侧边栏调色盘图标',
+        description: '点击左侧导航栏中的风格中心图标，定制专属于你的高颜值科研工作台外观。',
+        purposeNote: '切换至个性化视觉风格中心。',
+        actionPrompt: '点击左侧【风格】图标前往页面'
       },
       {
-        id: 'account_appearance',
-        targetId: 'tour-appearance-settings',
-        targetSelector: '#tour-appearance-settings, .theme-settings-section',
-        targetRoute: '/account',
+        id: 'style_color_presets',
+        targetId: 'section-color',
+        targetSelector: '#section-color, .theme-settings-section, .theme-cards-grid',
+        targetRoute: '/style',
+        placement: 'bottom',
+        requiresClick: false,
+        title: '经典冷青、玄青与色彩方案',
+        subtitle: '预设配色与自定义调色盘',
+        description: '系统提供【经典冷青与玄青】、【星云紫与深曜黑】、【曜石碳灰】等精雕细琢的学术配色；亦可展开自定义调色盘微调基准底色与高光。',
+        purposeNote: '根据个人偏好与环境光线随心切换配色方案。',
+        actionPrompt: '点击配色卡片即可即时预览全站视觉效果'
+      },
+      {
+        id: 'style_backgrounds',
+        targetId: 'section-bg',
+        targetSelector: '#section-bg, .bg-cards-grid, #section-glass',
+        targetRoute: '/style',
         placement: 'top',
         requiresClick: false,
-        title: '视觉主题与导览重温',
-        subtitle: '界面配色与导览快捷入口',
-        description: '在此可自由切换界面主题配色风格；若后续需要重新体验新手引导，可在页面下方的快捷卡片中随时重新唤起。',
-        purposeNote: '个性化界面配色与重温新手引导。',
-        actionPrompt: '可更换界面主题配色，或在需要时重温新手导览'
+        title: '动态与静态背景沉浸效果',
+        subtitle: '日光云海、星际穿越与水波水雾',
+        description: '默认配备静谧明晰的【云山日光（静态）】，亦可切换为 WebGL 粒子交互的【星际穿越】或流体着色器【水波云雾】；更支持上传本地高清壁纸与无声视频。',
+        purposeNote: '自选最舒适的科研工作底色。',
+        actionPrompt: '自选静态云海或动态星空水雾背景，打造专属科研空间'
+      },
+      {
+        id: 'style_glass_and_dim',
+        targetId: 'section-glass',
+        targetSelector: '#section-glass, .glass-options-grid, .bg-dim-slider-section',
+        targetRoute: '/style',
+        placement: 'top',
+        requiresClick: false,
+        title: '玻璃质感与透光明暗调节',
+        subtitle: '流体折射/纯净磨砂与背景亮度滑块',
+        description: '支持在【流体折射】（液体流动光泽）与【纯净磨砂】（朦胧毛玻璃）双质感间切换，拖动透光亮度滑块可随心微调背景明暗，确保文字最高辨识度。',
+        purposeNote: '微调卡片质感与背景对比度，呵护用眼舒适度。',
+        actionPrompt: '可按需切换卡片玻璃质感并调节背景透光度'
       }
     ]
   },

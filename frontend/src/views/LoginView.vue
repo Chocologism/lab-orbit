@@ -259,10 +259,10 @@ const handleRegister = async () => {
     )
     remember(data)
     try {
-      localStorage.setItem('cssbd_color_scheme', 'obsidian-gray')
-      localStorage.setItem('cssbd_bg_type', 'earth-orbit')
-      localStorage.setItem('cssbd_theme_style', 'earth-orbit')
-      localStorage.setItem('cssbd_default_v20260925', '1')
+      localStorage.setItem('cssbd_color_scheme', 'classic-cyan')
+      localStorage.setItem('cssbd_bg_type', 'clouds-static')
+      localStorage.setItem('cssbd_theme_style', 'clouds-static')
+      localStorage.setItem('laborbit_default_v20260930_cyan_clouds', '1')
     } catch (e) {}
     router.push('/')
   } catch (error) {
