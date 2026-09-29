@@ -144,5 +144,27 @@ describe('useTutorial Composable', () => {
     expect(showTutorial.value).toBe(false)
     expect(authApi.completeTutorial).toHaveBeenCalledTimes(1)
   })
+
+  it('allows dynamically switching user role via setUserRole and recomputes steps', () => {
+    const { openTutorial, userRole, setUserRole, steps, isFirstStep } = useTutorial()
+    openTutorial({ role: 'student' })
+
+    expect(isFirstStep.value).toBe(true)
+    expect(userRole.value).toBe('student')
+    expect(steps.value.length).toBe(6)
+
+    // Switch to admin
+    setUserRole('admin')
+    expect(userRole.value).toBe('admin')
+    expect(steps.value.length).toBe(11)
+    expect(steps.value.some(s => s.isAdmin)).toBe(true)
+    expect(isFirstStep.value).toBe(true)
+
+    // Switch back to member
+    setUserRole('member')
+    expect(userRole.value).toBe('member')
+    expect(steps.value.length).toBe(6)
+    expect(steps.value.some(s => s.isAdmin)).toBe(false)
+  })
 })
 

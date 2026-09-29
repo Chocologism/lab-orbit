@@ -184,18 +184,24 @@ describe('Smart Paste Import & Collaborative Queue Workflow', () => {
     })
 
     it('extracts text from selected PDF files and appends to combined text', async () => {
-      const { resolveContentForParsing } = await import('../utils/pasteClassifier')
-      const resolved = await resolveContentForParsing({
-        rawText: '学术交流通知正文',
-        includeText: true,
-        selectedFiles: [
-          { id: 'f1', filename: '日程手册.pdf', url: 'https://example.com/non-existent-mock.pdf', content_type: 'application/pdf' }
-        ]
-      })
+      const originalFetch = globalThis.fetch
+      globalThis.fetch = () => Promise.reject(new Error('Network offline in test'))
+      try {
+        const { resolveContentForParsing } = await import('../utils/pasteClassifier')
+        const resolved = await resolveContentForParsing({
+          rawText: '学术交流通知正文',
+          includeText: true,
+          selectedFiles: [
+            { id: 'f1', filename: '日程手册.pdf', url: 'https://example.com/non-existent-mock.pdf', content_type: 'application/pdf' }
+          ]
+        })
 
-      // Fetch will fail or return empty on mock url, handled safely without crashing
-      expect(resolved.combinedText).toContain('学术交流通知正文')
-      expect(resolved.targetFiles.length).toBe(1)
+        // Fetch will fail or return empty on mock url, handled safely without crashing
+        expect(resolved.combinedText).toContain('学术交流通知正文')
+        expect(resolved.targetFiles.length).toBe(1)
+      } finally {
+        globalThis.fetch = originalFetch
+      }
     })
 
     it('gracefully provides fallback fields when text is omitted and only files/posters are provided', () => {

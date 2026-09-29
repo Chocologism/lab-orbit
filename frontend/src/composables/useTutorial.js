@@ -831,6 +831,10 @@ export function useTutorial() {
     finishTutorial()
   }
 
+  function setUserRole(role) {
+    userRole.value = (role === 'admin' || role === 'teacher') ? 'admin' : 'member'
+  }
+
   return {
     showTutorial,
     currentStepIndex,
@@ -847,6 +851,8 @@ export function useTutorial() {
     isFirstStep,
     isLastStep,
     progressPercent,
+    userRole,
+    setUserRole,
     openTutorial,
     nextStep,
     prevStep,

@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTutorial } from '../composables/useTutorial'
+import { isDemoMode, switchDemoRole } from '../mock/isDemo'
 import AppIcon from './AppIcon.vue'
 
 const route = useRoute()
@@ -22,6 +23,8 @@ const {
   isFirstStep,
   isLastStep,
   progressPercent,
+  userRole,
+  setUserRole,
   nextStep,
   prevStep,
   nextSubStep,
@@ -30,6 +33,31 @@ const {
   finishTutorial,
   skipTutorial,
 } = useTutorial()
+
+const isDemo = computed(() => isDemoMode())
+const currentDemoRole = computed(() => {
+  if (userRole.value === 'admin' || userRole.value === 'teacher') {
+    return 'admin'
+  }
+  return 'member'
+})
+
+function handleSwitchRole(newRole) {
+  if (!isDemo.value) return
+  if (currentDemoRole.value === newRole) return
+
+  // 1. 调用演示模式 Mock 切换用户
+  const updated = switchDemoRole(newRole)
+
+  // 2. 同步更新向导内部角色与步骤
+  setUserRole(newRole)
+
+  // 3. 全局广播账号与视角切换事件，驱动 Navbar、MobileHeader 及全站各视图同步刷新
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('account-updated', { detail: updated }))
+    window.dispatchEvent(new CustomEvent('admin-mode-changed', { detail: { mode: newRole === 'admin' ? 'admin' : 'user' } }))
+  }
+}
 
 const isMinimized = ref(false)
 const cardRef = ref(null)
@@ -640,6 +668,52 @@ onBeforeUnmount(() => {
                 {{ currentSubStep?.description || currentStep.description }}
               </div>
 
+              <!-- 演示环境第一步：角色身份切换控件 -->
+              <div v-if="isDemo && isFirstStep" class="demo-role-stage">
+                <div class="demo-role-header">
+                  <div class="demo-role-badge">
+                    <span class="demo-role-pulse"></span>
+                    <span class="demo-role-header-text">体验身份切换</span>
+                  </div>
+                  <span class="demo-role-desc">可在第一步自由切换体验身份</span>
+                </div>
+                <div class="demo-role-segmented" role="radiogroup" aria-label="演示体验身份切换">
+                  <button
+                    type="button"
+                    class="demo-role-btn"
+                    :class="{ 'is-active': currentDemoRole === 'admin' }"
+                    role="radio"
+                    :aria-checked="currentDemoRole === 'admin'"
+                    title="切换为管理员（导师）视角体验完整排期治理功能"
+                    @click="handleSwitchRole('admin')"
+                  >
+                    <span class="role-icon">👑</span>
+                    <div class="role-text-col">
+                      <span class="role-title">管理员 (导师)</span>
+                      <span class="role-sub">11个模块 · 含排期与通告</span>
+                    </div>
+                    <span v-if="currentDemoRole === 'admin'" class="role-active-indicator" aria-hidden="true">✓</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    class="demo-role-btn"
+                    :class="{ 'is-active': currentDemoRole === 'member' }"
+                    role="radio"
+                    :aria-checked="currentDemoRole === 'member'"
+                    title="切换为普通成员（学生）视角体验通用学术协作"
+                    @click="handleSwitchRole('member')"
+                  >
+                    <span class="role-icon">🎓</span>
+                    <div class="role-text-col">
+                      <span class="role-title">普通成员 (学生)</span>
+                      <span class="role-sub">6个模块 · 专注文献与组会</span>
+                    </div>
+                    <span v-if="currentDemoRole === 'member'" class="role-active-indicator" aria-hidden="true">✓</span>
+                  </button>
+                </div>
+              </div>
+
               <!-- 互动操作指引盒 -->
               <div v-if="currentSubStep?.actionPrompt || currentSubStep?.purposeNote" class="tour-action-guide-box">
                 <div v-if="currentSubStep.purposeNote" class="guide-purpose-row">
@@ -1125,6 +1199,134 @@ onBeforeUnmount(() => {
   line-height: 1.55;
   color: #cbd5e1;
   margin-bottom: 8px;
+}
+
+/* 演示环境第一步：角色身份切换控件 */
+.demo-role-stage {
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  background: rgba(9, 32, 41, 0.75);
+  border: 1px solid rgba(218, 238, 235, 0.18);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.demo-role-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.demo-role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #c5e6df;
+}
+
+.demo-role-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+  animation: pulseGlow 2s infinite;
+}
+
+.demo-role-header-text {
+  letter-spacing: 0.02em;
+}
+
+.demo-role-desc {
+  font-size: 10.5px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.demo-role-segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  background: rgba(6, 21, 28, 0.65);
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(218, 238, 235, 0.12);
+}
+
+.demo-role-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  color: #cbd5e1;
+  text-align: left;
+  transition: all 0.16s ease;
+  user-select: none;
+}
+
+.demo-role-btn:hover {
+  background: rgba(208, 231, 232, 0.08);
+  color: #ffffff;
+}
+
+.demo-role-btn.is-active {
+  background: rgba(208, 231, 232, 0.16);
+  border-color: rgba(197, 230, 223, 0.4);
+  color: #f5f8f6;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.role-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.role-text-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.role-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.role-sub {
+  font-size: 9.5px;
+  color: #94a3b8;
+  line-height: 1.2;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+.demo-role-btn.is-active .role-sub {
+  color: #c5e6df;
+}
+
+.role-active-indicator {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: #afecd5;
+  flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+  .demo-role-segmented {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* 互动操作与目的指引框 */

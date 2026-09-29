@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { isDemoMode, switchDemoRole } from '../mock/isDemo'
 import { resetDemoStorage } from '../mock/demoAdapter'
 import { useTutorial } from '../composables/useTutorial'
@@ -19,6 +19,11 @@ function refreshCurrentUser() {
 
 onMounted(() => {
   refreshCurrentUser()
+  window.addEventListener('account-updated', refreshCurrentUser)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('account-updated', refreshCurrentUser)
 })
 
 function handleReset() {
