@@ -335,14 +335,14 @@ function doExportCalendar() {
   try {
     const rangeStr = `${week.value[0]} 至 ${week.value[6]}`
     const suffix = exportScope.value === 'interested' ? ' (我的想听)' : ''
-    const calName = `CSBD 周日程${suffix} (${rangeStr})`
+    const calName = `课题组周日程${suffix} (${rangeStr})`
     const icsContent = weekScheduleIcs(list, calName)
     const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
     const scopeTag = exportScope.value === 'interested' ? '-interested' : ''
-    link.download = `csbd-schedule-${week.value[0]}${scopeTag}.ics`
+    link.download = `lab-schedule-${week.value[0]}${scopeTag}.ics`
     link.click()
     URL.revokeObjectURL(url)
     showExportDialog.value = false

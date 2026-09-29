@@ -83,7 +83,7 @@ export function isNoticeEmail(email: { subject?: string; snippet?: string; body_
   const sender = `${email.sender_name || ''} ${email.sender_email || ''}`.toLowerCase();
   const combined = `${title} \n ${snippet} \n ${body}`;
 
-  const isDeptSender = /研究生部|研究生院|教务处|科研处|科技处|人事处|人教处|院务|院办|党政办|综合办|行政办|学生工作|学工处|资产处|财务处|科发处|管理部|培养处|学位办|招生办|pmo\.ac\.cn|nju\.edu\.cn|cas\.cn|ustc\.edu\.cn/i.test(sender);
+  const isDeptSender = /研究生部|研究生院|教务处|科研处|科技处|人事处|人教处|院务|院办|党政办|综合办|行政办|学生工作|学工处|资产处|财务处|科发处|管理部|培养处|学位办|招生办/i.test(sender);
 
   if (/通知|意见征集|征求意见|征集意见|实施细则|管理办法|暂行办法|方案|工作安排|工作通知|日程安排|申报通知|评审通知|公示|关于.*?的函|关于.*?的通知|关于.*?的决定|答辩|学位|奖学金|助学金|选拔|推免|考务|考试|放假|值班|安全检查|notice|announcement|circular|bulletin/i.test(title)) {
     return true;

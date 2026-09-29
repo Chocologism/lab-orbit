@@ -46,7 +46,7 @@ export function isNoticeEmail(email) {
   const sender = `${email.sender_name || ''} ${email.sender_email || ''}`.toLowerCase()
   const combined = `${title} \n ${snippet} \n ${body}`
 
-  const isDeptSender = /研究生部|研究生院|教务处|科研处|科技处|人事处|人教处|院务|院办|党政办|综合办|行政办|学生工作|学工处|资产处|财务处|科发处|管理部|培养处|学位办|招生办|pmo\.ac\.cn|nju\.edu\.cn|cas\.cn|ustc\.edu\.cn/i.test(sender)
+  const isDeptSender = /研究生部|研究生院|教务处|科研处|科技处|人事处|人教处|院务|院办|党政办|综合办|行政办|学生工作|学工处|资产处|财务处|科发处|管理部|培养处|学位办|招生办/i.test(sender)
 
   if (/通知|意见征集|征求意见|征集意见|实施细则|管理办法|暂行办法|方案|工作安排|工作通知|日程安排|申报通知|评审通知|公示|关于.*?的函|关于.*?的通知|关于.*?的决定|答辩|学位|奖学金|助学金|选拔|推免|考务|考试|放假|值班|安全检查|notice|announcement|circular|bulletin/i.test(title)) {
     return true
@@ -182,9 +182,7 @@ export function pickChinesePartIfDual(str = '') {
 }
 
 /**
- * 根据邮件及地点上下文判断所属单位并规范化地点前缀：
- * - 南大报告：最前面填入“南大 ”（包含空格，如“南大 天文楼302会议室”）
- * - 紫台报告：最前面填入“紫台”（如“紫台仙林 5-516 会议室”或“紫台5-516 会议室”）
+ * 根据邮件及地点上下文规范化地点文本与前缀
  */
 export function applyInstitutionLocationPrefix(location = '', context = '') {
   let loc = (location || '').trim()
@@ -192,9 +190,8 @@ export function applyInstitutionLocationPrefix(location = '', context = '') {
 
   const combined = `${context} ${loc}`
   const isNju = /南京大学|南大|nju\.edu\.cn|\bnju\b|天文与空间科学学院|左涤江|天文楼/i.test(combined)
-  const isPmo = /紫金山天文台|紫台|pmo\.ac.cn|\bpmo\b|仙林园区|5-516|大平房|青促会/i.test(combined)
 
-  if (isNju && !isPmo) {
+  if (isNju) {
     if (/^南大\s*/.test(loc)) {
       return loc.replace(/^南大\s*/, '南大 ')
     }
@@ -202,28 +199,6 @@ export function applyInstitutionLocationPrefix(location = '', context = '') {
       return loc.replace(/^南京大学\s*/, '南大 ')
     }
     return loc ? `南大 ${loc}` : '南大 '
-  }
-
-  if (isPmo && !isNju) {
-    if (/^紫台\s*/.test(loc)) {
-      return loc
-    }
-    if (/^紫金山天文台\s*/.test(loc)) {
-      return loc.replace(/^紫金山天文台\s*/, '紫台')
-    }
-    return loc ? `紫台${loc}` : '紫台'
-  }
-
-  if (isNju && isPmo) {
-    if (/紫台|紫金山|5-516|仙林园区|大平房/i.test(loc)) {
-      if (/^紫台\s*/.test(loc)) return loc
-      if (/^紫金山天文台\s*/.test(loc)) return loc.replace(/^紫金山天文台\s*/, '紫台')
-      return loc ? `紫台${loc}` : '紫台'
-    } else {
-      if (/^南大\s*/.test(loc)) return loc.replace(/^南大\s*/, '南大 ')
-      if (/^南京大学\s*/.test(loc)) return loc.replace(/^南京大学\s*/, '南大 ')
-      return loc ? `南大 ${loc}` : '南大 '
-    }
   }
 
   return loc

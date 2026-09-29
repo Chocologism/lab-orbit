@@ -116,7 +116,7 @@ export function generatePaperRis(
     lines.push(`N1  - 【学术中文摘要】: ${decodeHtmlEntities(translation.abstract).replace(/\r?\n/g, ' ')}`)
   }
 
-  lines.push('DB  - CSSBD-Hub')
+  lines.push('DB  - LabOrbit')
   lines.push('ER  - ')
   lines.push('') // Trailing newline
 

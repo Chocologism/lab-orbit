@@ -29,7 +29,7 @@ export function classifyPastedText(text = '') {
   if (/学术报告|主讲人|报告人|主讲嘉宾|报告嘉宾|特邀嘉宾|报告题目|题目为|题为|做题为/i.test(raw)) talkScore += 5
   if (/seminar|colloquium|\btalk\b|speaker|presenter/i.test(lower)) talkScore += 4
   if (/(?:报告|讲座)(?:时间|地点|摘要)/i.test(raw)) talkScore += 4
-  if (/腾讯会议|zoom|报告厅|会议室|302会议室|5-516/i.test(raw)) talkScore += 2
+  if (/腾讯会议|zoom|报告厅|会议室|302会议室|研讨室|多功能厅/i.test(raw)) talkScore += 2
   if (/邀请(?:到了|到|了)?(?:[^,，。；\n\r]*?的)?\s*[A-Za-z\u4e00-\u9fa5·]{2,6}\s*(?:博士|教授|研究员|特聘研究员|副教授|院士|老师)/i.test(raw)) talkScore += 4
 
   // 会议特征词
@@ -358,7 +358,7 @@ export function extractFieldsByRule(text = '', type = 'talk', { imageUrls = [], 
     }
   }
 
-  // 规范化南大/紫台地点前缀
+  // 规范化地点前缀
   parsedTalk.location = applyInstitutionLocationPrefix(parsedTalk.location, text)
   parsedTalk.title = pickChinesePartIfDual(parsedTalk.title || '学术报告')
   if (PLACEHOLDER_TEXT_REGEX.test(parsedTalk.title)) {

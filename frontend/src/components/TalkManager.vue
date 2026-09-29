@@ -717,22 +717,22 @@ defineExpose({ open, select })
         </label>
         <label>
           举办城市
-          <input v-model="form.city" placeholder="如：合肥 / 北京 / 线上" />
+          <input v-model="form.city" placeholder="如：北京 / 上海 / 线上" />
         </label>
       </div>
       <div class="form-row" :class="{ 'form-row-2': form.event_type === 'conference' }">
         <label>
           {{ form.event_type === 'conference' ? '主办单位 / 发起方' : '报告人' }}
-          <input v-model="form.speaker" :placeholder="form.event_type === 'conference' ? '如：中国科学技术大学 / 国家天文台' : '如：张三 教授 / 博士'" />
+          <input v-model="form.speaker" :placeholder="form.event_type === 'conference' ? '如：主办高校 / 重点实验室 / 学会' : '如：张三 教授 / 博士'" />
         </label>
         <label v-if="form.event_type === 'conference'">
           信息来源
-          <input v-model="form.source" placeholder="如：天文系通知邮件 / 官网通知" />
+          <input v-model="form.source" placeholder="如：学术通知邮件 / 官网公告" />
         </label>
       </div>
       <label>
         {{ form.event_type === 'conference' ? '详细地点 / 线上会议平台' : '地点 / 会议号' }}
-        <input v-model="form.location" :placeholder="form.event_type === 'conference' ? '如：丰大国际大酒店三楼宴会厅 或 腾讯会议 123-456-789' : '如：天文楼 502 或 腾讯会议 123-456-789'" />
+        <input v-model="form.location" :placeholder="form.event_type === 'conference' ? '如：国际会议中心三楼宴会厅 或 腾讯会议 123-456-789' : '如：理科楼 302 或 腾讯会议 123-456-789'" />
       </label>
 
       <!-- 会议关键时间节点 -->

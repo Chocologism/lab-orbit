@@ -172,10 +172,10 @@ const currentProviderInfo = computed(() => {
 const activeModel = computed(() => {
   if (!Array.isArray(config.models) || config.models.length === 0) {
     return {
-      id: config.model || 'deepseek-flash',
-      name: config.model || 'DeepSeek V4.1 Flash (USTC via VLab)',
-      contextWindow: 1000000,
-      supportsReasoningEffort: true,
+      id: config.model || 'deepseek-chat',
+      name: config.model || 'DeepSeek-V3',
+      contextWindow: 64000,
+      supportsReasoningEffort: false,
       reasoningEffort: 'off'
     }
   }
@@ -192,7 +192,7 @@ const hasSavedConfig = ref(Boolean(localStorage.getItem(AI_STORAGE_KEY)))
 // 是否已配置就绪（必须在本地保存有配置，且必须通过连通性测试；配置成功前严禁开启对话）
 const isConfigured = computed(() => {
   if (!hasSavedConfig.value) return false
-  if (config.provider !== 'ustc_vlab' && config.provider !== 'ollama') {
+  if (config.provider !== 'ollama') {
     if (!config.apiKey || !config.apiKey.trim()) return false
   }
   if (!config.baseUrl || !config.baseUrl.trim()) return false
@@ -527,7 +527,7 @@ function removeCustomModel(index) {
 
 // 保存配置
 function handleSaveConfig() {
-  if (config.provider !== 'ollama' && config.provider !== 'ustc_vlab' && !config.apiKey.trim()) {
+  if (config.provider !== 'ollama' && !config.apiKey.trim()) {
     notify('请填写有效的 API Key 后再保存。', 'error')
     return
   }
@@ -592,18 +592,6 @@ function handleConfigOverlayClick(event) {
     showConfigModal.value = false
   }
   isConfigBackdropMouseDown = false
-}
-
-function handleJumpToVlabTutorial() {
-  showConfigModal.value = false
-  router.push({
-    path: '/resources',
-    query: {
-      category: '工具',
-      highlight: 'vlab-tunnel',
-      open: 'true'
-    }
-  })
 }
 
 let isImageLightboxMouseDown = false
@@ -1365,16 +1353,12 @@ async function handleClearChat() {
           </div>
           <h3>开启大模型科研对话</h3>
           <p>
-            当前尚未完成大模型配置或连通性测试。使用 <strong>USTC via Vlab (推荐)</strong> 可通过本地 SSH 隧道免密连接科大昇腾算力大模型。测试连通成功后即可开启对话。
+            当前尚未完成大模型配置或连通性测试。支持 DeepSeek、硅基流动、OpenAI、Moonshot 及 Ollama 本地模型。测试连通成功后即可开启对话。
           </p>
           <div class="unconfigured-actions">
             <button type="button" class="button primary" @click="showConfigModal = true">
               <AppIcon name="gear" :size="18" />
               <span>立即配置大模型</span>
-            </button>
-            <button type="button" class="button secondary" @click="handleJumpToVlabTutorial">
-              <AppIcon name="book" :size="16" />
-              <span>查看 VLab 配置教程</span>
             </button>
           </div>
         </div>
@@ -1651,51 +1635,18 @@ async function handleClearChat() {
                 type="button"
                 class="provider-pill-btn"
                 :class="{
-                  'is-selected': config.provider === prov.id,
-                  'is-highlight': prov.id === 'ustc_vlab'
+                  'is-selected': config.provider === prov.id
                 }"
                 @click="handleProviderChange(prov.id)"
               >
                 {{ prov.name }}
               </button>
             </div>
-            <p v-if="config.provider === 'ustc_vlab'" class="field-hint">
-              通过校内 VLab 虚拟机 SSH 隧道 (127.0.0.1:4000) 访问<a
-                href="https://llm.ustc.edu.cn/"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="hint-link"
-              >中国科大大模型公共服务平台</a>。代理端已内置认证，选中此服务商无需输入 API Key。
-            </p>
-            <p v-else class="field-hint">{{ currentProviderInfo?.hint }}</p>
+            <p class="field-hint">{{ currentProviderInfo?.hint }}</p>
           </div>
 
-          <!-- API Key: 当为 USTC via Vlab 或 Ollama 时彻底免输 -->
-          <div
-            v-if="config.provider === 'ustc_vlab'"
-            class="ustc-vlab-notice-box"
-            :class="{ 'is-connected': connectivityPassed }"
-          >
-            <AppIcon :name="connectivityPassed ? 'check' : 'info'" :size="18" class="notice-icon" />
-            <div class="notice-body">
-              <div class="notice-text">
-                <strong>{{ connectivityPassed ? '免密直连模式已连通' : '免密直连模式（需本地 SSH 隧道保持运行）' }}</strong>
-                <span>{{ connectivityPassed ? '本地 SSH 隧道 (127.0.0.1:4000) 状态正常，鉴权由跳板机代理端自动注入，可直接开始对话。' : '该模式通过本机 SSH 隧道（127.0.0.1:4000）对接 VLab 代理。请确保已建立隧道并点击下方「测试连通性」验证通过。' }}</span>
-              </div>
-              <button
-                type="button"
-                class="notice-action-btn"
-                title="查看中国科大大模型 VLab 虚拟机 SSH 隧道配置教程"
-                @click="handleJumpToVlabTutorial"
-              >
-                <AppIcon name="book" :size="14" />
-                <span>配置教程</span>
-                <AppIcon name="arrow-up-right" :size="11" />
-              </button>
-            </div>
-          </div>
-
-          <div v-else-if="config.provider !== 'ollama'" class="form-group">
+          <!-- API Key: 当为 Ollama 时免输 -->
+          <div v-if="config.provider !== 'ollama'" class="form-group">
             <label class="form-label">
               <span>API Key</span>
               <button type="button" class="text-toggle-btn" @click="showApiKey = !showApiKey">
@@ -3458,83 +3409,7 @@ async function handleClearChat() {
   border-color: color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
-.ustc-vlab-notice-box {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 16px;
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
-  border-radius: 12px;
-  transition: all 0.25s ease;
-}
 
-.ustc-vlab-notice-box.is-connected {
-  background: rgba(104, 211, 145, 0.1);
-  border-color: rgba(104, 211, 145, 0.35);
-}
-
-.notice-icon {
-  color: var(--accent);
-  margin-top: 2px;
-  flex-shrink: 0;
-}
-
-.ustc-vlab-notice-box.is-connected .notice-icon {
-  color: #48bb78;
-}
-
-.notice-body {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-
-.notice-text {
-  flex: 1;
-  min-width: 220px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.notice-text strong {
-  font-size: 13px;
-  color: var(--text);
-}
-
-.notice-text span {
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.notice-action-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.notice-action-btn:hover {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-  transform: translateY(-1px);
-}
 
 /* 模型管理表格样式 */
 .models-header-row {
@@ -3849,42 +3724,7 @@ async function handleClearChat() {
   text-decoration: underline;
 }
 
-.vlab-field-hint {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-}
 
-.hint-tutorial-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: rgba(184, 155, 248, 0.12);
-  border: 1px solid rgba(184, 155, 248, 0.3);
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.2s ease;
-  margin-top: 2px;
-}
-
-.hint-tutorial-btn:hover {
-  background: rgba(184, 155, 248, 0.22);
-  border-color: var(--accent);
-}
-
-[data-theme-style="vanta-fog"] .hint-tutorial-btn,
-[data-color-scheme="classic-cyan"] .hint-tutorial-btn {
-  background: rgba(197, 230, 223, 0.15) !important;
-  border-color: rgba(197, 230, 223, 0.35) !important;
-  color: var(--accent, #c5e6df) !important;
-}
 
 .field-subnote {
   font-size: 11px;

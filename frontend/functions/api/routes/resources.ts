@@ -154,9 +154,6 @@ app.put('/books/:id', async (c) => {
 app.delete('/books/:id', async (c) => {
   const user = c.get('user');
   const rawId = c.req.param('id');
-  if (rawId === 'vlab-tunnel') {
-    return c.json({ detail: '内置系统教程不允许删除' }, 403);
-  }
   const id = parseInt(rawId, 10);
   if (isNaN(id)) {
     return c.json({ detail: '资料条目不存在' }, 404);
@@ -164,11 +161,6 @@ app.delete('/books/:id', async (c) => {
 
   const book = await c.env.DB.prepare('SELECT id, title, created_by_id FROM resource_books WHERE id = ?').bind(id).first<{ id: number; title: string; created_by_id: number }>();
   if (!book) return c.json({ detail: '资料条目不存在' }, 404);
-
-  const isSystem = Boolean(book.title && (book.title.includes('VLab') || book.title.includes('隧道')));
-  if (isSystem && user.role !== 'admin') {
-    return c.json({ detail: '内置系统教程无法被普通用户移除' }, 403);
-  }
 
   if (book.created_by_id !== user.id && user.role !== 'admin' && user.role !== 'teacher') {
     return c.json({ detail: '权限不足，无法删除此资料' }, 403);

@@ -423,7 +423,7 @@ export function hasPlatformSearchIntent(query) {
   const q = query.trim().toLowerCase()
   if (q.length < 2) return false
 
-  const pattern = /(文献|论文|文章|arxiv|推荐流|文献库|通知|公告|邮件|收件箱|信件|日程|组会|周会|学术报告|讲座|会议|汇报|报告人|分享人|主讲|资料|资源|卡片|算力|vlab|使用方法|功能|怎么用|入口|谁讲|谁汇报|哪天|时间|有没有|查一下|找一下|搜一下|查看)/i
+  const pattern = /(文献|论文|文章|arxiv|推荐流|文献库|通知|公告|邮件|收件箱|信件|日程|组会|周会|学术报告|讲座|会议|汇报|报告人|分享人|主讲|资料|资源|卡片|算力|使用方法|功能|怎么用|入口|谁讲|谁汇报|哪天|时间|有没有|查一下|找一下|搜一下|查看)/i
   return pattern.test(q)
 }
 

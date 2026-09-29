@@ -778,11 +778,11 @@ onMounted(() => {
         <div class="font-preview-body">
           <div class="font-preview-row">
             <span class="preview-tag muted">中文排版</span>
-            <p class="font-preview-line-title">宇宙结构与巡天大数据研究团组</p>
+            <p class="font-preview-line-title">前沿交叉科研与计算实验室</p>
           </div>
           <div class="font-preview-row">
             <span class="preview-tag muted">西文排版</span>
-            <p class="font-preview-line-en">Cosmological Structure and Big Data Research Group</p>
+            <p class="font-preview-line-en">Frontier Interdisciplinary Science & Computing Laboratory</p>
           </div>
           <div class="font-preview-row">
             <span class="preview-tag muted">科学数字与符号</span>

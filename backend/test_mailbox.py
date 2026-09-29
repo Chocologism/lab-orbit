@@ -60,7 +60,7 @@ def test_mailbox_config_crud_and_isolation():
     res_err = client.post("/api/mailbox/config", headers=admin_headers, json={
         "email_address": "admin@lab.edu",
         "protocol": "imap",
-        "server_host": "mail.cstnet.cn",
+        "server_host": "mail.example.org",
         "server_port": 993,
         "use_ssl": True,
         "username": "admin@lab.edu",
@@ -72,7 +72,7 @@ def test_mailbox_config_crud_and_isolation():
     save_res = client.post("/api/mailbox/config", headers=admin_headers, json={
         "email_address": "admin@lab.edu",
         "protocol": "imap",
-        "server_host": "mail.cstnet.cn",
+        "server_host": "mail.example.org",
         "server_port": 993,
         "use_ssl": True,
         "username": "admin@lab.edu",
@@ -82,7 +82,7 @@ def test_mailbox_config_crud_and_isolation():
     data = save_res.json()
     assert data["has_config"] is True
     assert data["email_address"] == "admin@lab.edu"
-    assert data["server_host"] == "mail.cstnet.cn"
+    assert data["server_host"] == "mail.example.org"
     assert data["has_password"] is True
     assert "password" not in data or data.get("password") is None
 
@@ -144,7 +144,7 @@ def test_cached_emails_and_detail():
                 user_id=admin_user.id,
                 email_address="admin@lab.edu",
                 protocol="imap",
-                server_host="mail.cstnet.cn",
+                server_host="mail.example.org",
                 server_port=993,
                 use_ssl=True,
                 username="admin@lab.edu",
@@ -234,7 +234,7 @@ def test_sync_mailbox_stream():
     client.post("/api/mailbox/config", headers=admin_headers, json={
         "email_address": "admin@lab.edu",
         "protocol": "imap",
-        "server_host": "mail.cstnet.cn",
+        "server_host": "mail.example.org",
         "server_port": 993,
         "use_ssl": True,
         "username": "admin@lab.edu",

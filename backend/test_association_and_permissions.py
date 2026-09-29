@@ -51,7 +51,7 @@ def test_auto_association_and_stats():
     res = client.post("/api/seminars", headers=admin_headers, json={
         "date": "2026-11-20",
         "time": "14:00",
-        "location": "仙林主楼",
+        "location": "科研主楼",
         "topic": "待定",
         "presenter_name": unique_presenter,
         "presentations": [
@@ -146,7 +146,7 @@ def test_granular_permissions():
     sem_res = client.post("/api/seminars", headers=admin_headers, json={
         "date": "2026-11-25",
         "time": "15:00",
-        "location": "仙林主楼",
+        "location": "科研主楼",
         "topic": "权限管控测试场次",
         "presenter_id": zhang_id,
         "presenter_name": "测试人员张三A",

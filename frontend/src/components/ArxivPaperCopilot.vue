@@ -881,10 +881,10 @@ const isConfigured = computed(() => {
 const activeModel = computed(() => {
   if (!Array.isArray(config.models) || config.models.length === 0) {
     return {
-      id: config.model || 'deepseek-flash',
-      name: config.model || 'DeepSeek V4.1 Flash (USTC via VLab)',
-      contextWindow: 1000000,
-      supportsReasoningEffort: true,
+      id: config.model || 'deepseek-chat',
+      name: config.model || 'DeepSeek-V3',
+      contextWindow: 128000,
+      supportsReasoningEffort: false,
       reasoningEffort: 'off'
     }
   }

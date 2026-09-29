@@ -287,7 +287,7 @@ async function handleCompleteSetup() {
               v-model="form.institution" 
               type="text" 
               class="input-field" 
-              placeholder="如：清华大学计算机系 / 中科院" 
+              placeholder="如：清华大学计算机系 / 前沿交叉科学研究院" 
             />
           </div>
           <div class="form-group">

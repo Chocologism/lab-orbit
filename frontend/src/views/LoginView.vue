@@ -52,11 +52,11 @@
             <form class="auth-form" @submit.prevent="handleLogin">
               <WaveInput
                 v-model="loginForm.email"
-                label="组内邮箱"
+                label="登录邮箱"
                 type="email"
                 required
                 autocomplete="username"
-                hint="推荐使用 @pmo.ac.cn 邮箱，亦支持其他常用邮箱"
+                hint="支持各类学术邮箱与常用邮箱"
               />
               <WaveInput
                 v-model="loginForm.password"
@@ -91,11 +91,11 @@
               />
               <WaveInput
                 v-model="regForm.email"
-                label="组内邮箱"
+                label="注册邮箱"
                 type="email"
                 required
                 autocomplete="email"
-                hint="推荐使用 @pmo.ac.cn 邮箱，亦支持其他常用邮箱"
+                hint="支持各类学术邮箱与常用邮箱"
               />
               <WaveInput
                 v-model="regForm.password"

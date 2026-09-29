@@ -58,12 +58,12 @@ describe('aiService - Connectivity and Readiness State', () => {
     expect(store[AI_CONNECTIVITY_KEY]).toBeUndefined()
   })
 
-  it('evaluates isAiAssistantReady correctly for ustc_vlab without apiKey', () => {
+  it('evaluates isAiAssistantReady correctly for providers without apiKey', () => {
     saveAiConfig({
-      provider: 'ustc_vlab',
-      baseUrl: 'http://127.0.0.1:4000/v1',
+      provider: 'ollama',
+      baseUrl: 'http://127.0.0.1:11434/v1',
       apiKey: '',
-      models: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }]
+      models: [{ id: 'deepseek-r1:8b', name: 'DeepSeek R1' }]
     })
 
     // Connectivity not yet passed
@@ -276,9 +276,10 @@ describe('aiService - Email Schedule Extraction', () => {
 
     const extracted = await extractScheduleFromEmailWithAi(mockEmail, {
       config: {
-        baseUrl: 'http://127.0.0.1:4000/v1',
-        model: 'deepseek-flash',
-        provider: 'ustc_vlab'
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: 'sk-test',
+        model: 'deepseek-chat',
+        provider: 'deepseek'
       }
     })
 
@@ -294,13 +295,13 @@ describe('aiService - Email Schedule Extraction', () => {
   it('prefers Chinese when email contains dual Chinese and English metadata and adds institution prefix', async () => {
     const mockEmail = {
       id: 99,
-      subject: '紫台学术前沿论坛通知：宇宙加速膨胀射电测量',
-      from: 'seminar@pmo.ac.cn',
+      subject: '南京大学学术前沿论坛通知：宇宙加速膨胀射电测量',
+      from: 'seminar@nju.edu.cn',
       date: '2026-09-20',
       body_text: `各位老师同学：
 题目: 宇宙加速膨胀射电测量 / Radio Measurement of Cosmic Acceleration
 报告人: Fan Liu (刘凡)
-地点: 5-516 会议室 (Conference Room 5-516)
+地点: 天文楼302会议室 (Room 302, Astronomy Building)
 时间: 2026-09-25 15:30`
     }
 
@@ -313,7 +314,7 @@ describe('aiService - Email Schedule Extraction', () => {
               date: '2026-09-25',
               time: '15:30',
               speaker: 'Fan Liu (刘凡)',
-              location: '5-516 会议室 (Conference Room 5-516)',
+              location: '天文楼302会议室 (Room 302, Astronomy Building)',
               notes: '题目: 宇宙加速膨胀射电测量...'
             })
           }
@@ -332,17 +333,18 @@ describe('aiService - Email Schedule Extraction', () => {
 
     const extracted = await extractScheduleFromEmailWithAi(mockEmail, {
       config: {
-        baseUrl: 'http://127.0.0.1:4000/v1',
-        model: 'deepseek-flash',
-        provider: 'ustc_vlab'
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: 'sk-test',
+        model: 'deepseek-chat',
+        provider: 'deepseek'
       }
     })
 
     // 优先填入中文
     expect(extracted.title).toBe('宇宙加速膨胀射电测量')
     expect(extracted.speaker).toBe('刘凡')
-    // 紫台报告在地点前填入“紫台”
-    expect(extracted.location).toBe('紫台5-516 会议室')
+    // 南大报告在地点前填入“南大 ”
+    expect(extracted.location).toBe('南大 天文楼302会议室')
     // 验证 max_tokens 优化
     expect(capturedBody.max_tokens).toBe(600)
   })
@@ -375,12 +377,13 @@ describe('aiService - Reasoning Effort Sanitization and Completion Payload', () 
     })
 
     const testConfig = {
-      baseUrl: 'http://127.0.0.1:4000/v1',
-      model: 'deepseek-flash',
-      provider: 'ustc_vlab',
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiKey: 'sk-test',
+      model: 'deepseek-chat',
+      provider: 'deepseek',
       models: [
         {
-          id: 'deepseek-flash',
+          id: 'deepseek-chat',
           supportsReasoningEffort: true,
           reasoningEffort: 'off'
         }
@@ -395,14 +398,12 @@ describe('aiService - Reasoning Effort Sanitization and Completion Payload', () 
 
     expect(capturedBody).toBeDefined()
     expect(capturedBody.reasoning_effort).toBeUndefined()
-    expect(capturedBody.model).toBe('deepseek-flash')
+    expect(capturedBody.model).toBe('deepseek-chat')
   })
 })
 
 describe('aiService - Multimodal Vision and Poster Extraction', () => {
   it('identifies vision-capable models by model name and configuration', () => {
-    expect(isModelVisionCapable({ model: 'deepseek-flash' })).toBe(true)
-    expect(isModelVisionCapable({ model: 'deepseek-v4.1' })).toBe(true)
     expect(isModelVisionCapable({ model: 'deepseek-vl' })).toBe(true)
     expect(isModelVisionCapable({ model: 'deepseek-vl2' })).toBe(true)
     expect(isModelVisionCapable({ model: 'gpt-4o' })).toBe(true)
@@ -440,7 +441,7 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
       body_text: `报告题目: 宇宙第一代恒星与暗物质湮灭
 报告人: 张研究员
 时间: 2026-09-28 14:00
-地点: 紫台仙林 5-516 会议室
+地点: 物理楼 302 会议室
 报告摘要: 本次学术报告将系统介绍空间巡天在宇宙第一代恒星形成演化过程中的关键观测证据，深入讨论暗物质粒子湮灭对高红移星系电离结构的影响机制。我们结合最新一代流体动力学数值模拟，详细展示了高能伽马射线背景辐射各向异性谱形的最新拟合结果，并对中国空间站巡天望远镜（CSST）以及未来深空巡天探测规划进行展望。
 欢迎各位老师、同学踊跃参会！`
     })).toBe(false)
@@ -508,9 +509,9 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
     const briefEmail = {
       id: 102,
       subject: '报告通知',
-      from: 'admin@pmo.ac.cn',
+      from: 'admin@example.edu',
       date: '2026-09-22',
-      body_text: '各位老师同学：本周五下午在紫台仙林会议室举办学术报告《空间引力波探测》，欢迎准时参加。详见海报。',
+      body_text: '各位老师同学：本周五下午在理科楼 302 会议室举办学术报告《空间引力波探测》，欢迎准时参加。详见海报。',
       poster_url: 'data:image/jpeg;base64,ZmFrZWltYWdlZGF0YQ=='
     }
 
@@ -537,7 +538,7 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
                   date: '2026-09-25',
                   time: '10:00',
                   speaker: '报告人',
-                  location: '紫台会议室',
+                  location: '物理楼会议室',
                   notes: '详见海报。'
                 })
               }
@@ -866,9 +867,9 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
         date_str: '2026-09-13 14:00:00',
         snippet: '请于9月23日前提交相关申请材料。',
         attachments: JSON.stringify([
-          { id: 'att-1', filename: '申请表.docx', url: 'https://pmo.ac.cn/files/form.docx', size: 24000 }
+          { id: 'att-1', filename: '申请表.docx', url: 'https://example.edu/files/form.docx', size: 24000 }
         ]),
-        poster_url: 'https://pmo.ac.cn/images/notice.jpg'
+        poster_url: 'https://example.edu/images/notice.jpg'
       }
     ]
 

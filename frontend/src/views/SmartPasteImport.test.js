@@ -22,11 +22,11 @@ describe('Smart Paste Import & Collaborative Queue Workflow', () => {
   describe('Type Auto-Recognition', () => {
     it('accurately identifies academic talk text with seminar keywords', () => {
       const text = `
-        国家天文台学术报告通知
-        主讲人：王五 教授（中国科学技术大学）
+        学术前沿学术报告通知
+        主讲人：王五 教授（前沿交叉科学研究院）
         报告题目：黑洞双星吸积盘演化模拟
         时间：2026-10-12 10:00
-        地点：科研楼 5-516 会议室
+        地点：科研楼 302 会议室
         摘要：通过三维广义相对论磁流体力学（GRMHD）数值模拟...
       `
       expect(classifyPastedText(text)).toBe('talk')
@@ -34,12 +34,12 @@ describe('Smart Paste Import & Collaborative Queue Workflow', () => {
 
     it('accurately identifies academic conference text with registration deadlines', () => {
       const text = `
-        中国天文学会2026年学术年会第一轮通知
-        由中国天文学会主办，拟于2026年10月20日至24日在陕西西安召开。
+        前沿交叉科学2026年学术年会第一轮通知
+        由前沿交叉科学学会主办，拟于2026年10月20日至24日在陕西西安召开。
         重要日程：
         摘要提交截止：2026年8月31日
         注册截止：2026年9月15日
-        大会网站：https://meeting.cas.cn/astronomy2026
+        大会网站：https://meeting.example.edu/astronomy2026
       `
       expect(classifyPastedText(text)).toBe('conference')
     })

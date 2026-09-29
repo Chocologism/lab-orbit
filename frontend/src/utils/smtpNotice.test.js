@@ -3,10 +3,10 @@ import { parseExternalEmails, formatSeminarDateTime, buildSeminarNoticeBody, bui
 
 describe('smtpNotice utilities', () => {
   it('parses external emails correctly with various separators and trims duplicates', () => {
-    const raw = 'test1@pmo.ac.cn, test2@163.com; test3@qq.com\ntest1@pmo.ac.cn  invalid-email  guest@nju.edu.cn'
+    const raw = 'test1@example.edu, test2@163.com; test3@qq.com\ntest1@example.edu  invalid-email  guest@nju.edu.cn'
     const result = parseExternalEmails(raw)
     expect(result).toEqual([
-      'test1@pmo.ac.cn',
+      'test1@example.edu',
       'test2@163.com',
       'test3@qq.com',
       'guest@nju.edu.cn'

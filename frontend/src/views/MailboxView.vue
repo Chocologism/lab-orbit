@@ -76,7 +76,7 @@ const smtpConfig = ref({
 })
 
 const smtpForm = ref({
-  host: 'mail.cstnet.cn',
+  host: '',
   port: 465,
   use_ssl: true,
   username: '',
@@ -110,22 +110,6 @@ const deletingConfig = ref(false)
 // 预设配置
 const presets = [
   {
-    name: '紫金山天文台',
-    domain: '@pmo.ac.cn',
-    imapHost: 'mail.cstnet.cn',
-    popHost: 'mail.cstnet.cn',
-    imapPort: 993,
-    popPort: 995,
-  },
-  {
-    name: '中科院科技网',
-    domain: '@cstnet.cn',
-    imapHost: 'mail.cstnet.cn',
-    popHost: 'mail.cstnet.cn',
-    imapPort: 993,
-    popPort: 995,
-  },
-  {
     name: '163 网易',
     domain: '@163.com',
     imapHost: 'imap.163.com',
@@ -154,20 +138,6 @@ const activePreset = ref('自定义')
 
 // SMTP 发信预设
 const smtpPresets = [
-  {
-    name: '紫金山天文台',
-    domain: '@pmo.ac.cn',
-    host: 'mail.cstnet.cn',
-    port: 465,
-    use_ssl: true
-  },
-  {
-    name: '中科院科技网',
-    domain: '@cstnet.cn',
-    host: 'mail.cstnet.cn',
-    port: 465,
-    use_ssl: true
-  },
   {
     name: '163 网易',
     domain: '@163.com',
@@ -235,11 +205,6 @@ function onProtocolChange(newProto) {
 function onEmailBlur() {
   if (configForm.value.email_address) {
     let email = configForm.value.email_address.trim()
-    // 若输入纯用户名未包含 @，失焦时默认自动补全 @pmo.ac.cn
-    if (email && !email.includes('@')) {
-      email = `${email}@pmo.ac.cn`
-      configForm.value.email_address = email
-    }
     if (!configForm.value.username) {
       configForm.value.username = email
     }
@@ -402,7 +367,7 @@ async function loadSmtpConfig() {
     editingSmtpPassword.value = false
     if (res.has_config) {
       smtpForm.value = {
-        host: res.host || 'mail.cstnet.cn',
+        host: res.host || '',
         port: res.port || 465,
         use_ssl: res.use_ssl !== false,
         username: res.username || '',
@@ -416,7 +381,7 @@ async function loadSmtpConfig() {
     } else {
       const defaultEmail = currentUser.value?.email || config.value.email_address || ''
       smtpForm.value = {
-        host: 'mail.cstnet.cn',
+        host: '',
         port: 465,
         use_ssl: true,
         username: defaultEmail,
@@ -425,11 +390,11 @@ async function loadSmtpConfig() {
         from_email: defaultEmail,
         from_name: currentUser.value?.real_name || currentUser.value?.name || ''
       }
-      if (!defaultEmail || defaultEmail.toLowerCase().endsWith('@pmo.ac.cn')) {
-        activeSmtpPreset.value = '紫金山天文台'
-      } else {
+      if (defaultEmail) {
         const matched = smtpPresets.find(p => p.domain && defaultEmail.toLowerCase().endsWith(p.domain))
-        activeSmtpPreset.value = matched ? matched.name : '紫金山天文台'
+        activeSmtpPreset.value = matched ? matched.name : '自定义'
+      } else {
+        activeSmtpPreset.value = '自定义'
       }
     }
   } catch (e) {
@@ -527,7 +492,7 @@ async function openConfig() {
     configForm.value = {
       email_address: config.value.email_address || '',
       protocol: config.value.protocol || 'imap',
-      server_host: config.value.server_host || 'mail.cstnet.cn',
+      server_host: config.value.server_host || '',
       server_port: config.value.server_port || 993,
       use_ssl: config.value.use_ssl !== false,
       username: config.value.username || '',
@@ -541,17 +506,17 @@ async function openConfig() {
     configForm.value = {
       email_address: defaultEmail,
       protocol: 'imap',
-      server_host: 'mail.cstnet.cn',
+      server_host: '',
       server_port: 993,
       use_ssl: true,
       username: defaultEmail,
       password: ''
     }
-    if (!defaultEmail || defaultEmail.toLowerCase().endsWith('@pmo.ac.cn')) {
-      activePreset.value = '紫金山天文台'
-    } else {
+    if (defaultEmail) {
       const matched = presets.find(p => p.domain && defaultEmail.toLowerCase().endsWith(p.domain))
-      activePreset.value = matched ? matched.name : '紫金山天文台'
+      activePreset.value = matched ? matched.name : '自定义'
+    } else {
+      activePreset.value = '自定义'
     }
   }
   showConfigModal.value = true
@@ -747,10 +712,10 @@ function getSenderName(item) {
     }
   }
   const fallbackSenders = {
-    801: '国家天文台学术委员会',
-    802: '中国天文学会秘书处',
+    801: '学术前沿报告委员会',
+    802: '学术年会学术委员会',
     803: '国家自然科学基金委员会',
-    804: 'ApJ Editorial Office'
+    804: 'Editorial Office'
   }
   if (item.id && fallbackSenders[item.id]) return fallbackSenders[item.id]
   if (item.sender_email) return item.sender_email.split('@')[0]
@@ -767,10 +732,10 @@ function getSenderEmail(item) {
     if (raw.includes('@')) return raw
   }
   const fallbackEmails = {
-    801: 'academic@nao.cas.cn',
-    802: 'cas@pmo.ac.cn',
+    801: 'academic@example.edu',
+    802: 'conference@example.edu',
     803: 'report@nsfc.gov.cn',
-    804: 'apj@aas.org'
+    804: 'editorial@example.org'
   }
   if (item.id && fallbackEmails[item.id]) return fallbackEmails[item.id]
   return ''
@@ -788,10 +753,10 @@ function getEmailSnippet(item) {
     }
   }
   const fallbackSnippets = {
-    801: '各位老师同学：兹定于本周五举行关于空间引力波探测的线上线下联合报告会。主讲人：张维民 研究员（中国科学院国家空间科学中心）。时间：本周五 14:30。地点：天文大厦三楼报告厅 / 腾讯会议：882-910-334。重点探讨极端质量比旋进建模与暗物质晕演化。',
-    802: '各位会员、天文学界同仁：中国天文学会 2026 年学术年会拟定于 10 月中旬在南京举行。现启动分会场征文与大会口头报告申请，涵盖星系宇宙学、恒星演化、空间探测技术与 AI for Science 天文智能计算等前沿专题。',
-    803: '尊敬的李华教授：您负责的重点项目《宽视场巡天中弱引力透镜多维系统误差建模与宇宙学限制》（项目号：12233005）2026 年度进展报告填报通道已开放，请组织项目组成员系统梳理本年度代表性成果并在线提交。',
-    804: 'Dear Prof. Hua Li: We have received the referee report for your manuscript #ApJ-108291 "Precision Cosmology with Stage-IV Weak Lensing Surveys". The referee recommends Minor Revision. Please check attached referee comments and submit your revised manuscript within 30 days.'
+    801: '各位老师同学：兹定于本周五举行关于复杂系统与机器学习前沿的线上线下联合学术报告会。主讲人：张教授（前沿交叉科学研究院）。时间：本周五 14:30。地点：理科大楼 302 报告厅 / 腾讯会议：882-910-334。重点探讨多模态表征学习与高维数据建模。',
+    802: '各位同仁：2026 年学术年会拟定于 10 月中旬举行。现启动分会场征文与大会口头报告申请，涵盖复杂网络、智能计算与交叉科学等前沿专题。',
+    803: '尊敬的李华教授：您负责的重点项目《复杂高维系统多模态协同优化与学习》（项目号：12233005）2026 年度进展报告填报通道已开放，请组织项目组成员系统梳理本年度代表性成果并在线提交。',
+    804: 'Dear Prof. Hua Li: We have received the referee report for your manuscript "Precision Optimization in Complex Networks". The referee recommends Minor Revision. Please check attached referee comments and submit your revised manuscript within 30 days.'
   }
   if (item.id && fallbackSnippets[item.id]) return fallbackSnippets[item.id]
   return '本邮件包含学术报告交流与会议通知正文内容。'
@@ -1666,11 +1631,10 @@ onBeforeUnmount(() => {
         <h2>开启个人学术邮箱</h2>
         <p class="welcome-desc">
           随时随地在科研协作工作台中查收学术报告、组会通知、期刊审稿与学术邮件。<br />
-          已深度适配 <strong>中国科学院紫金山天文台邮箱 (@pmo.ac.cn，默认服务器 mail.cstnet.cn / 993 TLS)</strong>、<strong>科技网 (@cstnet.cn)</strong>、网易 163/126、QQ 邮箱及各类高校机构 IMAP / POP3 服务。
+          已深度适配各类高校及学术机构邮箱、网易 163/126、QQ 邮箱及标准 IMAP / POP3 服务。
         </p>
         <div class="preset-badges-show">
-          <span class="badge cyan">紫金山天文台 (@pmo.ac.cn)</span>
-          <span class="badge cyan">中科院科技网 (@cstnet.cn)</span>
+          <span class="badge cyan">高校 / 机构邮箱</span>
           <span class="badge">网易企业/个人邮</span>
           <span class="badge">QQ 邮箱</span>
           <span class="badge">自定义 IMAP / POP3</span>
@@ -2217,12 +2181,12 @@ onBeforeUnmount(() => {
             <input
               v-model="configForm.email_address"
               type="text"
-              placeholder="如：dinghk@pmo.ac.cn"
+              placeholder="如：user@example.edu"
               required
               @blur="onEmailBlur"
             />
             <small class="muted field-hint">
-              PMO 邮箱以 <strong>@pmo.ac.cn</strong> 结尾（直接输入账号失焦将自动补齐）
+              请输入完整的机构或个人邮箱地址
             </small>
           </label>
           <label>
@@ -2234,7 +2198,7 @@ onBeforeUnmount(() => {
               required
             />
             <small class="muted field-hint">
-              科技网与紫金山天文台登录名通常为完整邮箱地址
+              大部分机构邮箱登录名通常为完整邮箱地址
             </small>
           </label>
         </div>
@@ -2281,7 +2245,7 @@ onBeforeUnmount(() => {
           </div>
 
           <small class="muted field-hint">
-            中科院科技网、PMO 邮箱 (@pmo.ac.cn) 及各类学术与个人邮箱均使用客户端专用授权码进行认证。授权码一旦输入即安全加密存储，不支持查看，仅支持重新输入修改。
+            各类学术机构与公共邮箱均使用客户端专用授权码或密码进行认证。授权码一旦输入即安全加密存储，不支持查看，仅支持重新输入修改。
           </small>
         </div>
 
@@ -2292,11 +2256,11 @@ onBeforeUnmount(() => {
             <input
               v-model="configForm.server_host"
               type="text"
-              placeholder="如：mail.cstnet.cn"
+              placeholder="如：imap.example.edu"
               required
             />
             <small class="muted field-hint">
-              PMO 默认 IMAP 服务器地址为 <strong>mail.cstnet.cn</strong>
+              机构邮箱请向管理员咨询 IMAP/POP3 服务器地址及端口
             </small>
           </label>
           <label>
@@ -2384,11 +2348,11 @@ onBeforeUnmount(() => {
             <input
               v-model="smtpForm.host"
               type="text"
-              placeholder="如：mail.cstnet.cn 或 smtp.163.com"
+              placeholder="如：smtp.example.edu 或 smtp.163.com"
               required
             />
             <small class="muted field-hint">
-              科技网与紫金山天文台默认 SMTP 地址为 <strong>mail.cstnet.cn</strong>
+              机构邮箱请向管理员咨询发信 SMTP 地址及端口
             </small>
           </label>
           <label>
@@ -2419,7 +2383,7 @@ onBeforeUnmount(() => {
             <input
               v-model="smtpForm.username"
               type="text"
-              placeholder="如：dinghk@pmo.ac.cn"
+              placeholder="如：user@example.edu"
               required
             />
             <small class="muted field-hint">
@@ -2495,7 +2459,7 @@ onBeforeUnmount(() => {
             <input
               v-model="smtpForm.from_email"
               type="email"
-              placeholder="如：dinghk@pmo.ac.cn"
+              placeholder="如：user@example.edu"
               required
             />
             <small class="muted field-hint">
@@ -2507,7 +2471,7 @@ onBeforeUnmount(() => {
             <input
               v-model="smtpForm.from_name"
               type="text"
-              placeholder="如：郑文雯"
+              placeholder="如：学术助理"
             />
             <small class="muted field-hint">
               通知邮件发送人显示名称（默认管理员真实姓名）
@@ -2667,7 +2631,7 @@ onBeforeUnmount(() => {
               <input
                 v-model="confForm.speaker"
                 type="text"
-                placeholder="如：紫金山天文台 / 中国天文学会"
+                placeholder="如：学术委员会 / 计算机系前沿论坛"
               />
             </label>
             <label>
@@ -2675,7 +2639,7 @@ onBeforeUnmount(() => {
               <input
                 v-model="confForm.location"
                 type="text"
-                placeholder="如：紫台仙林 5-516 会议室 / 腾讯会议号"
+                placeholder="如：理科大楼 302 会议室 / 腾讯会议号"
               />
             </label>
           </div>
@@ -2901,7 +2865,7 @@ onBeforeUnmount(() => {
             <input
               v-model="scheduleForm.title"
               type="text"
-              placeholder="如：紫台学术报告：宇宙加速膨胀射电测量"
+              placeholder="如：学术前沿报告：复杂系统多模态协同优化"
               required
             />
           </label>
@@ -2931,7 +2895,7 @@ onBeforeUnmount(() => {
               <input
                 v-model="scheduleForm.speaker"
                 type="text"
-                placeholder="如：李菂 研究员"
+                placeholder="如：张教授 / 李研究员"
               />
             </label>
             <label>
@@ -2939,7 +2903,7 @@ onBeforeUnmount(() => {
               <input
                 v-model="scheduleForm.location"
                 type="text"
-                placeholder="如：紫台仙林 5-516 会议室 / 腾讯会议号"
+                placeholder="如：理科大楼 302 会议室 / 腾讯会议号"
               />
             </label>
           </div>

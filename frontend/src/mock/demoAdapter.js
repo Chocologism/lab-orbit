@@ -55,23 +55,23 @@ export function initDemoStorage(force = false) {
     localStorage.setItem(STORAGE_KEYS.FEEDBACK, JSON.stringify(DEMO_FEEDBACK_ITEMS))
     localStorage.setItem(STORAGE_KEYS.MAILBOX_CONFIG, JSON.stringify({
       has_config: true,
-      email_address: 'astro_lab@cstnet.cn',
+      email_address: 'lab_demo@example.edu',
       protocol: 'imap',
-      server_host: 'mail.cstnet.cn',
+      server_host: 'mail.example.edu',
       server_port: 993,
       use_ssl: true,
-      username: 'astro_lab',
+      username: 'lab_demo',
       has_password: true,
       updated_at: '2026-09-01T00:00:00Z'
     }))
     localStorage.setItem(STORAGE_KEYS.SMTP_CONFIG, JSON.stringify({
       has_config: true,
-      host: 'mail.cstnet.cn',
+      host: 'mail.example.edu',
       port: 465,
       use_ssl: true,
-      username: 'astro_lab',
-      from_email: 'astro_lab@cstnet.cn',
-      from_name: '天体物理课题组',
+      username: 'lab_demo',
+      from_email: 'lab_demo@example.edu',
+      from_name: '前沿科研课题组',
       has_password: true,
       use_imap_password: true,
       updated_at: '2026-09-01T00:00:00Z'
@@ -675,12 +675,12 @@ export async function demoAxiosAdapter(config) {
     if (cleanUrl === '/api/mailbox/config') {
       let mConfig = getStored(STORAGE_KEYS.MAILBOX_CONFIG, {
         has_config: true,
-        email_address: 'astro_lab@cstnet.cn',
+        email_address: 'lab_demo@example.edu',
         protocol: 'imap',
-        server_host: 'mail.cstnet.cn',
+        server_host: 'mail.example.edu',
         server_port: 993,
         use_ssl: true,
-        username: 'astro_lab',
+        username: 'lab_demo',
         has_password: true,
         updated_at: '2026-09-01T00:00:00Z'
       })
@@ -704,12 +704,12 @@ export async function demoAxiosAdapter(config) {
     if (cleanUrl === '/api/mailbox/smtp-config') {
       let sCon = getStored(STORAGE_KEYS.SMTP_CONFIG, {
         has_config: true,
-        host: 'mail.cstnet.cn',
+        host: 'mail.example.edu',
         port: 465,
         use_ssl: true,
-        username: 'astro_lab',
-        from_email: 'astro_lab@cstnet.cn',
-        from_name: '天体物理课题组',
+        username: 'lab_demo',
+        from_email: 'lab_demo@example.edu',
+        from_name: '前沿科研课题组',
         has_password: true,
         use_imap_password: true,
         updated_at: '2026-09-01T00:00:00Z'
@@ -738,8 +738,8 @@ export async function demoAxiosAdapter(config) {
         sName = e.from_addr.split('<')[0].trim()
       }
       sName = sName || '学术通知'
-      sEmail = sEmail || 'academic@nao.cas.cn'
-      const recipient = e.recipient || e.to_addr || 'astro_lab@cstnet.cn'
+      sEmail = sEmail || 'academic@example.edu'
+      const recipient = e.recipient || e.to_addr || 'lab_demo@example.edu'
       const snippet = e.snippet || (e.body_text ? e.body_text.slice(0, 160) : '') || '（测试内容：本邮件包含学术报告交流与会议通知正文内容）'
       return {
         ...e,

@@ -1,4 +1,4 @@
--- Cloudflare D1 Database Schema for CSSBD-Hub
+-- Cloudflare D1 Database Schema for LabOrbit
 -- Fully compatible with SQLite & Cloudflare D1
 
 CREATE TABLE IF NOT EXISTS users (

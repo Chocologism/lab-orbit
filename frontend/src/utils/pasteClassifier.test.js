@@ -63,7 +63,7 @@ describe('pasteClassifier', () => {
       const facilityText = `
         停水停电通知
         各位老师、同学：
-        因园区配电箱改造与供水水箱清洗维保，仙林园区1号楼将于9月23日8:00至18:00暂停供水供电，电梯暂停运行。
+        因园区配电箱改造与供水水箱清洗维保，科研园区1号楼将于9月23日8:00至18:00暂停供水供电，电梯暂停运行。
         请大家提前做好蓄水和数据备份准备。
       `
       expect(classifyPastedText(facilityText)).toBe('notice')
@@ -85,7 +85,7 @@ describe('pasteClassifier', () => {
         主讲人：李四 研究员
         报告题目：系外行星大气的透射光谱分析
         时间：2026年9月28日 14:30
-        地点：紫金山天文台仙林园区 5-516 会议室
+        地点：理科大楼 516 会议室
         摘要：介绍 James Webb 空间望远镜关于气态巨行星大气的最新探测成果。
       `
       const fields = extractFieldsByRule(talkText, 'talk', { imageUrls: ['https://example.com/poster.png'] })
@@ -93,7 +93,7 @@ describe('pasteClassifier', () => {
       expect(fields.speaker).toContain('李四')
       expect(fields.date).toBe('2026-09-28')
       expect(fields.time).toBe('14:30')
-      expect(fields.location).toContain('紫台')
+      expect(fields.location).toContain('理科大楼 516 会议室')
       expect(fields.poster_url).toBe('https://example.com/poster.png')
     })
 

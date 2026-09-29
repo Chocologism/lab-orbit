@@ -100,7 +100,7 @@ backend/routers/        frontend/functions/api/     frontend/src/mock/
   编辑 `frontend/src/composables/useSiteConfig.js` 与 `backend/database.py` 中的默认站点配置：
   - `lab_name`: 课题组全称（如：`多模态具身智能研究组`）
   - `lab_short_name`: 简称（如：`Embodied-Lab`）
-  - `institution`: 依托单位（如：`清华大学计算机系` / `中科院自动化所`）
+  - `institution`: 依托单位（如：`清华大学计算机系` / `前沿交叉科学研究院`）
 - **系统注册邀请码**：
   在 `deploy/docker-compose.yml`、`backend/main.py` 及 `frontend/functions/api/routes/auth.ts` 中将默认邀请码 `LAB-2026` 修改为您课题组的专属邀请码（如 `AI-LAB-2026`）。
 

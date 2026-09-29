@@ -182,7 +182,7 @@ export async function fetchArxivMetadata(arxivId: string) {
 
   // 2. 回退机制：使用 arXiv 官方 export API
   const url = `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(cleanId)}&max_results=1`;
-  const res = await fetch(url, { headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@pmo.ac.cn)' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@example.org)' } });
   if (!res.ok) {
     if (res.status === 429) {
       throw new Error('arXiv 服务器访问频次受限 (HTTP 429)，请稍候片刻重试');
@@ -224,7 +224,7 @@ export async function fetchDoiMetadata(doi: string) {
   // 若匹配到对应 arXiv 预印本，则能直接获得标准 arXiv 编号、摘要、主分类及免翻墙的 open-access PDF 链接
   try {
     const arxivUrl = `https://export.arxiv.org/api/query?search_query=doi:${encodeURIComponent(cleanDoi)}&max_results=1`;
-    const res = await fetch(arxivUrl, { headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@pmo.ac.cn)' } });
+    const res = await fetch(arxivUrl, { headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@example.org)' } });
     if (res.ok) {
       const text = await res.text();
       const entryMatch = text.match(/<entry>[\s\S]*?<\/entry>/);
@@ -249,7 +249,7 @@ export async function fetchDoiMetadata(doi: string) {
             let journal = '';
             try {
               const crossrefRes = await fetch(`https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}`, {
-                headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@pmo.ac.cn)' }
+                headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@example.org)' }
               });
               if (crossrefRes.ok) {
                 const crData: any = await crossrefRes.json();
@@ -279,7 +279,7 @@ export async function fetchDoiMetadata(doi: string) {
 
   // 2. 回退机制：从 Crossref 抓取基础元数据
   const url = `https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}`;
-  const res = await fetch(url, { headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@pmo.ac.cn)' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@example.org)' } });
   if (!res.ok) throw new Error(`Crossref API 返回 HTTP ${res.status}`);
   const data: any = await res.json();
   const msg = data.message || {};

@@ -11,18 +11,18 @@ import {
 } from './talkEmail'
 
 describe('isTalkEmail', () => {
-  it('identifies the PMO youth forum announcement email', () => {
+  it('identifies the academic youth forum announcement email', () => {
     const email = {
-      subject: '紫台青促会第181期青年论坛 时间2026年9月18日 上午10:30 地点5-516会议室',
-      snippet: '各位老师、同学： 紫台青年论坛第181期将于2026年9月18日（周五）上午 10：30 在紫台 5-516 会议室举办...',
-      body_text: '各位老师、同学： 紫台青年论坛第181期将于2026年9月18日（周五）上午 10：30 在紫台 5-516 会议室举办，本次邀请到中国科学院国家天文台的陈云博士，做题为《Probing Dynamical Dark Energy: Evidence & Tensions》的报告。报告摘要与陈云博士的个人简介详见以下海报，欢迎各位老师和同学的参加！！！ 耿'
+      subject: '学术青年论坛第181期 时间2026年9月18日 上午10:30 地点理科楼516会议室',
+      snippet: '各位老师、同学： 青年论坛第181期将于2026年9月18日（周五）上午 10：30 在理科楼 516 会议室举办...',
+      body_text: '各位老师、同学： 青年论坛第181期将于2026年9月18日（周五）上午 10：30 在理科楼 516 会议室举办，本次邀请到前沿交叉科学研究院的陈云博士，做题为《Probing Dynamical Dark Energy: Evidence & Tensions》的报告。报告摘要与陈云博士的个人简介详见以下海报，欢迎各位老师和同学的参加！！！ 耿'
     }
     expect(isTalkEmail(email)).toBe(true)
   })
 
   it('identifies standard academic seminar emails', () => {
     const email = {
-      subject: '台内学术报告：FAST脉冲星偏振测量',
+      subject: '院系学术报告：FAST脉冲星偏振测量',
       body_text: '时间：2026-09-20 14:00 地点：大楼报告厅'
     }
     expect(isTalkEmail(email)).toBe(true)
@@ -31,7 +31,7 @@ describe('isTalkEmail', () => {
   it('identifies emails with speaker and topic in body', () => {
     const email = {
       subject: '周五下午交流会',
-      body_text: '各位老师，本周五在5-516会议室，邀请到李华教授做题为《黑洞吸积盘》的报告。'
+      body_text: '各位老师，本周五在理科楼302会议室，邀请到李华教授做题为《黑洞吸积盘》的报告。'
     }
     expect(isTalkEmail(email)).toBe(true)
   })
@@ -47,8 +47,8 @@ describe('isTalkEmail', () => {
 
 describe('parseTalkMetadataLocally', () => {
   it('extracts all talk metadata correctly from the forum email', () => {
-    const subject = '紫台青促会第181期青年论坛 时间2026年9月18日 上午10:30 地点5-516会议室'
-    const body = '各位老师、同学： 紫台青年论坛第181期将于2026年9月18日（周五）上午 10：30 在紫台 5-516 会议室举办，本次邀请到中国科学院国家天文台的陈云博士，做题为《Probing Dynamical Dark Energy: Evidence & Tensions》的报告。报告摘要与陈云博士的个人简介详见以下海报，欢迎各位老师和同学的参加！！！ 耿'
+    const subject = '学术青年论坛第181期 时间2026年9月18日 上午10:30 地点理科楼516会议室'
+    const body = '各位老师、同学： 青年论坛第181期将于2026年9月18日（周五）上午 10：30 在理科楼 516 会议室举办，本次邀请到前沿交叉科学研究院的陈云博士，做题为《Probing Dynamical Dark Energy: Evidence & Tensions》的报告。报告摘要与陈云博士的个人简介详见以下海报，欢迎各位老师和同学的参加！！！ 耿'
     const text = `${subject}\n${body}`
 
     const parsed = parseTalkMetadataLocally(text, subject)
@@ -56,17 +56,17 @@ describe('parseTalkMetadataLocally', () => {
     expect(parsed.date).toBe('2026-09-18')
     expect(parsed.time).toBe('10:30')
     expect(parsed.speaker).toBe('陈云 博士')
-    expect(parsed.location).toBe('紫台 5-516 会议室')
+    expect(parsed.location).toBe('理科楼 516 会议室')
     expect(parsed.talks).toHaveLength(1)
     expect(parsed.talks[0].title).toBe('Probing Dynamical Dark Energy: Evidence & Tensions')
   })
 
   it('correctly identifies and extracts multiple talks with 报告一/报告二', () => {
-    const subject = '紫台学术报告通知：两场学术前沿报告'
+    const subject = '学术报告通知：两场学术前沿报告'
     const body = `各位老师同学：
-本周五在紫台仙林园区 5-516 会议室举办两场学术报告。
+本周五在理科楼 516 会议室举办两场学术报告。
 日期：2026年9月25日
-地点：紫台仙林 5-516 会议室
+地点：理科楼 516 会议室
 
 报告一：
 题目：FAST脉冲星偏振与磁层物理
@@ -90,14 +90,14 @@ describe('parseTalkMetadataLocally', () => {
     expect(parsed.talks[0].speaker).toBe('张伟 博士')
     expect(parsed.talks[0].time).toBe('14:00')
     expect(parsed.talks[0].date).toBe('2026-09-25')
-    expect(parsed.talks[0].location).toBe('紫台仙林 5-516 会议室')
+    expect(parsed.talks[0].location).toBe('理科楼 516 会议室')
 
     // Talk 2
     expect(parsed.talks[1].title).toBe('高红移尘埃连续谱与星系演化')
     expect(parsed.talks[1].speaker).toBe('王芳 教授')
     expect(parsed.talks[1].time).toBe('15:15')
     expect(parsed.talks[1].date).toBe('2026-09-25')
-    expect(parsed.talks[1].location).toBe('紫台仙林 5-516 会议室')
+    expect(parsed.talks[1].location).toBe('理科楼 516 会议室')
 
     // Top-level backwards compatibility matches talk 1
     expect(parsed.title).toBe('FAST脉冲星偏振与磁层物理')
@@ -108,7 +108,7 @@ describe('parseTalkMetadataLocally', () => {
     const subject = '天体物理中心学术讲座'
     const text = `学术讲座通知
 时间：2026-10-18
-地点：仙林 3-302
+地点：理科楼 3-302
 
 报告题目：《原初引力波探测最新进展》
 报告人：刘强 研究员
@@ -123,12 +123,12 @@ describe('parseTalkMetadataLocally', () => {
     expect(parsed.talks[0].title).toBe('原初引力波探测最新进展')
     expect(parsed.talks[0].speaker).toBe('刘强 研究员')
     expect(parsed.talks[0].time).toBe('09:30')
-    expect(parsed.talks[0].location).toBe('仙林 3-302')
+    expect(parsed.talks[0].location).toBe('理科楼 3-302')
 
     expect(parsed.talks[1].title).toBe('黑洞自旋测量的X射线方法')
     expect(parsed.talks[1].speaker).toBe('赵丽 博士')
     expect(parsed.talks[1].time).toBe('10:45')
-    expect(parsed.talks[1].location).toBe('仙林 3-302')
+    expect(parsed.talks[1].location).toBe('理科楼 3-302')
   })
 
   it('extracts multiple talks with Talk 1 / Talk 2 English format', () => {
@@ -201,12 +201,10 @@ describe('applyInstitutionLocationPrefix', () => {
     expect(applyInstitutionLocationPrefix('南大天文楼302会议室', context)).toBe('南大 天文楼302会议室')
   })
 
-  it('prefixes "紫台" for PMO talk without duplication', () => {
-    const context = '紫台青促会第181期青年论坛'
-    expect(applyInstitutionLocationPrefix('5-516会议室', context)).toBe('紫台5-516会议室')
-    expect(applyInstitutionLocationPrefix('紫台 5-516 会议室', context)).toBe('紫台 5-516 会议室')
-    expect(applyInstitutionLocationPrefix('紫台仙林 5-516 会议室', context)).toBe('紫台仙林 5-516 会议室')
-    expect(applyInstitutionLocationPrefix('紫金山天文台大平房', context)).toBe('紫台大平房')
+  it('leaves standard locations without institute keyword unchanged', () => {
+    const context = '前沿青年学术论坛'
+    expect(applyInstitutionLocationPrefix('理科楼 516 会议室', context)).toBe('理科楼 516 会议室')
+    expect(applyInstitutionLocationPrefix('腾讯会议：882-910-334', context)).toBe('腾讯会议：882-910-334')
   })
 
   it('handles dual Chinese and English location and applies prefix', () => {
@@ -215,7 +213,7 @@ describe('applyInstitutionLocationPrefix', () => {
     expect(applyInstitutionLocationPrefix(dualLoc, context)).toBe('南大 天文楼302会议室')
   })
 
-  it('leaves non-NJU and non-PMO location unchanged', () => {
+  it('leaves non-NJU location unchanged', () => {
     const context = '清华大学物理系前沿论坛'
     expect(applyInstitutionLocationPrefix('理科楼郑裕彤讲堂', context)).toBe('理科楼郑裕彤讲堂')
   })
@@ -233,8 +231,8 @@ describe('isConferenceEmail and detectScheduleType', () => {
 
   it('identifies summer school announcement', () => {
     const email = {
-      subject: '2026年高能天体物理暑期学校报名通知',
-      body_text: '为培养青年科研学者，紫金山天文台将于2026年7月10日至15日举办暑期学校...'
+      subject: '2026年高能物理与交叉科学暑期学校报名通知',
+      body_text: '为培养青年科研学者，交叉前沿科学中心将于2026年7月10日至15日举办暑期学校...'
     }
     expect(isConferenceEmail(email)).toBe(true)
     expect(detectScheduleType(email)).toBe('conference')
@@ -315,8 +313,8 @@ Website: https://web.gravity.sjtu.edu.cn/event/13/
 describe('isNoticeEmail', () => {
   it('identifies graduate student department notices', () => {
     const email = {
-      from: '紫台研究生部 <yjsb@pmo.ac.cn>',
-      subject: '关于《天文与空间科学学院硕士分流退出机制实施细则》的意见征集',
+      from: '研究生工作部 <yjsb@example.edu>',
+      subject: '关于《硕士分流退出机制实施细则》的意见征集',
       body_text: '各位导师、同学：现将《实施细则》征求意见稿予以公示...'
     }
     expect(isNoticeEmail(email)).toBe(true)

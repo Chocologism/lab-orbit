@@ -42,8 +42,8 @@ describe('User Scope & AI Chat Session Isolation Suite', () => {
 
     it('resolves user object with id, username or email', () => {
       expect(resolveUserScope({ id: 101, username: 'alice' })).toBe('101')
-      expect(resolveUserScope({ username: 'bob', email: 'bob@ustc.edu' })).toBe('bob')
-      expect(resolveUserScope({ email: 'carol@ustc.edu' })).toBe('carol@ustc.edu')
+      expect(resolveUserScope({ username: 'bob', email: 'bob@example.edu' })).toBe('bob')
+      expect(resolveUserScope({ email: 'carol@example.edu' })).toBe('carol@example.edu')
     })
 
     it('falls back to localStorage cssbd_user / labhub_user when argument omitted', () => {

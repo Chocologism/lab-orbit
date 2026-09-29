@@ -170,7 +170,7 @@ const registeredMembersWithEmail = computed(() => {
     if (!m.email || !m.email.includes('@')) return false
     const emailLower = m.email.trim().toLowerCase()
     const nameTrim = (m.real_name || m.name || '').trim()
-    if (emailLower === 'admin@pmo.ac.cn' || nameTrim === '系统管理员') return false
+    if (emailLower === 'admin@example.org' || nameTrim === '系统管理员') return false
     return true
   })
 })
@@ -1872,7 +1872,7 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
               v-model="externalEmailsRaw"
               rows="2"
               class="external-email-input mono"
-              placeholder="如：collaborator@pmo.ac.cn, guest@nju.edu.cn"
+              placeholder="如：collaborator@example.edu, guest@univ.edu"
             ></textarea>
             <div v-if="parsedExternalEmails.length" class="parsed-external-hint">
               <span class="badge cyan-subtle">

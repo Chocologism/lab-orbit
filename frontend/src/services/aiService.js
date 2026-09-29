@@ -1,6 +1,6 @@
 /**
  * AI 大模型前端直连服务 (纯客户端 Direct Fetch 模式)
- * 支持 OpenAI 规范兼容接口（USTC via Vlab, DeepSeek, SiliconFlow, OpenAI, Moonshot, Ollama 等）
+ * 支持 OpenAI 规范兼容接口（DeepSeek, SiliconFlow, OpenAI, Moonshot, Ollama 等）
  */
 
 import { pickChinesePartIfDual, applyInstitutionLocationPrefix, parseTalkMetadataLocally, parseConferenceMetadataLocally } from '../utils/talkEmail'
@@ -82,7 +82,7 @@ export function isAiAssistantReady() {
     if (!raw) return false
     const config = loadAiConfig()
     if (!config || !config.baseUrl || !config.baseUrl.trim()) return false
-    if (config.provider !== 'ollama' && config.provider !== 'ustc_vlab' && (!config.apiKey || !config.apiKey.trim())) {
+    if (config.provider !== 'ollama' && (!config.apiKey || !config.apiKey.trim())) {
       return false
     }
     return isAiConnectivityPassed()
@@ -92,48 +92,6 @@ export function isAiAssistantReady() {
 }
 
 export const PRESET_PROVIDERS = [
-  {
-    id: 'ustc_vlab',
-    name: 'USTC via Vlab (推荐)',
-    baseUrl: 'http://127.0.0.1:4000/v1',
-    noApiKey: true,
-    defaultModel: 'deepseek-flash',
-    models: [
-      {
-        id: 'deepseek-flash',
-        name: 'DeepSeek V4.1 Flash (USTC via VLab)',
-        contextWindow: 1000000,
-        supportsReasoningEffort: true,
-        supportsVision: true,
-        reasoningEffort: 'off'
-      },
-      {
-        id: 'deepseek-v4.1',
-        name: 'DeepSeek V4.1 (USTC via VLab)',
-        contextWindow: 1000000,
-        supportsReasoningEffort: true,
-        supportsVision: true,
-        reasoningEffort: 'off'
-      },
-      {
-        id: 'deepseek-v4-pro',
-        name: 'DeepSeek V4 Pro (USTC via VLab)',
-        contextWindow: 1000000,
-        supportsReasoningEffort: true,
-        supportsVision: true,
-        reasoningEffort: 'off'
-      },
-      {
-        id: 'deepseek-v4-flash-ascend',
-        name: 'DeepSeek V4 Flash Ascend (USTC via VLab)',
-        contextWindow: 1000000,
-        supportsReasoningEffort: true,
-        supportsVision: true,
-        reasoningEffort: 'off'
-      }
-    ],
-    hint: '通过校内 VLab 虚拟机 SSH 隧道 (127.0.0.1:4000) 访问中国科大大模型公共服务平台，支持 deepseek V4.1、deepseek V4.1 flash 等 16 个主流开源顶级模型。代理端已内置认证，选中此服务商无需输入 API Key，支持多模态图像海报识别。'
-  },
   {
     id: 'deepseek',
     name: 'DeepSeek (官方)',
@@ -340,10 +298,10 @@ export function normalizeModelItem(item) {
   const modelName = item.name || modelId || ''
   const autoVision = /(?:deepseek.*(?:-vl|_vl|\bvl\b|flash|v4)|gpt-4o|gpt-4-turbo|gpt-4-vision|vision|\bvl\b|qwen.*vl|glm-4v|internvl|minicpm-v|llava|claude-3|gemini|pixtral|qvq)/i.test(`${modelId} ${modelName}`)
   const isDeepSeekOfficialText = /^(?:deepseek-chat|deepseek-reasoner)$/i.test(modelId)
-  const isVLabDeepSeek = /(?:deepseek.*(?:-vl|_vl|\bvl\b|flash|v4))/i.test(modelId)
+  const isDeepSeekVl = /(?:deepseek.*(?:-vl|_vl|\bvl\b))/i.test(modelId)
   const supportsVision = isDeepSeekOfficialText
     ? false
-    : isVLabDeepSeek
+    : isDeepSeekVl
       ? true
       : (item.supportsVision !== undefined ? Boolean(item.supportsVision) : autoVision)
   return {
@@ -375,38 +333,28 @@ export function sanitizeReasoningEffort(effort) {
 }
 
 export const DEFAULT_AI_CONFIG = {
-  provider: 'ustc_vlab',
+  provider: 'deepseek',
   apiKey: '',
-  baseUrl: 'http://127.0.0.1:4000/v1',
-  model: 'deepseek-flash',
+  baseUrl: 'https://api.deepseek.com/v1',
+  model: 'deepseek-chat',
   models: [
     {
-      id: 'deepseek-flash',
-      name: 'DeepSeek V4.1 Flash (USTC via VLab)',
-      contextWindow: 1000000,
-      supportsReasoningEffort: true,
-      supportsVision: true,
+      id: 'deepseek-chat',
+      name: 'DeepSeek-V3 (通用对话)',
+      contextWindow: 64000,
+      supportsReasoningEffort: false,
       reasoningEffort: 'off'
     },
     {
-      id: 'deepseek-v4-pro',
-      name: 'DeepSeek V4 Pro (USTC via VLab)',
-      contextWindow: 1000000,
+      id: 'deepseek-reasoner',
+      name: 'DeepSeek-R1 (深度推理)',
+      contextWindow: 64000,
       supportsReasoningEffort: true,
-      supportsVision: true,
-      reasoningEffort: 'off'
-    },
-    {
-      id: 'deepseek-v4-flash-ascend',
-      name: 'DeepSeek V4 Flash Ascend (USTC via VLab)',
-      contextWindow: 1000000,
-      supportsReasoningEffort: true,
-      supportsVision: true,
-      reasoningEffort: 'off'
+      reasoningEffort: 'high'
     }
   ],
-  temperature: 0.7,
-  systemPrompt: '你是 CSBD（宇宙结构与巡天大数据研究团组）的科研智能助理。你精通天文学、天体物理、巡天观测与科学计算。请以专业、严谨、详尽的学术风格解答问题，在需要时运用标准的 LaTeX 数学公式和规范的代码示例。',
+  temperature: 0.6,
+  systemPrompt: '你是科研协作平台的科研智能助理。你精通文献调研、数理建模、数据处理与科学计算。请以专业、严谨、详尽的学术风格解答问题，在需要时运用标准的 LaTeX 数学公式和规范的代码示例。',
   arxivSource: 'markdown'
 }
 
@@ -475,7 +423,7 @@ export async function testAiConnection(config) {
     setAiConnectivityPassed(false)
     return { ok: false, message: '请填写接口 Base URL 地址。' }
   }
-  if (config.provider !== 'ollama' && config.provider !== 'ustc_vlab' && !config.apiKey) {
+  if (config.provider !== 'ollama' && !config.apiKey) {
     setAiConnectivityPassed(false)
     return { ok: false, message: '请填写 API Key。' }
   }
@@ -508,7 +456,7 @@ export async function testAiConnection(config) {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        model: config.model || 'deepseek-flash',
+        model: config.model || 'deepseek-chat',
         messages: [{ role: 'user', content: 'hi' }],
         max_tokens: 5,
         stream: false
@@ -563,14 +511,6 @@ export async function testAiConnection(config) {
           }
         }
 
-        // 未捕获到 Mixed Content 违规：通常是本地隧道未开启、端口拒绝连接或虚拟机代理未运行
-        if (config.provider === 'ustc_vlab') {
-          return {
-            ok: false,
-            message: '无法连接到本地隧道端口 (127.0.0.1:4000)。请按顺序排查：\n1. 本地 SSH 隧道是否已运行：请在本地终端执行 `ssh -NT ustc-vpn` 建立隧道；\n2. VLab 虚拟机代理是否启动：请确认虚拟机中 `python3 proxy-server.py` 服务已在运行；\n3. 浏览器权限排查：若上述服务均已正常运行仍报错，请检查浏览器地址栏左侧网站设置中是否已将“不安全内容”设为“允许”并刷新网页。'
-          }
-        }
-
         return {
           ok: false,
           message: '无法连接到本地接口服务。请排查：\n1. 确认本地服务已在后台启动并正常监听对应端口；\n2. 若本地服务运行正常仍连接失败，请检查浏览器地址栏网站设置中是否已允许“不安全内容”并刷新网页。'
@@ -593,14 +533,14 @@ export async function testAiConnection(config) {
 /**
  * 平台全景功能指南与系统导航提示词 (Platform Knowledge Prompt)
  */
-export const PLATFORM_KNOWLEDGE_PROMPT = `【CSBD 平台全景使用指南与功能导航】
-你同时兼任 CSBD 科研协作平台的智能向导。当用户询问平台的使用方法、各模块功能入口、或寻求平台数据检索时，请基于以下平台全景架构解答，并在正文中提供带可点击链接的超文本（格式：[文字说明](/路径)），方便用户在单页应用中直接点击跳转：
+export const PLATFORM_KNOWLEDGE_PROMPT = `【LabOrbit 平台全景使用指南与功能导航】
+你同时兼任科研协作平台的智能向导。当用户询问平台的使用方法、各模块功能入口、或寻求平台数据检索时，请基于以下平台全景架构解答，并在正文中提供带可点击链接的超文本（格式：[文字说明](/路径)），方便用户在单页应用中直接点击跳转：
 
 1. 首页与概览（路径：[进入首页](/)）：
    - 包含课题组介绍、近期动态跑马灯、快捷操作入口。
 2. 文献速递与推荐流（路径：[文献速递流](/arxiv)）：
-   - 实时汇集天文与天体物理（arXiv astro-ph）最新预印本文献；
-   - 支持按 High Energy Physics、Cosmology、Solar and Stellar 等类别筛选；
+   - 实时汇集最新预印本文献；
+   - 支持多学科类别筛选；
    - 支持论文星标收藏、推送到本地 Zotero、一键开启 AI 深度研讨。
    - 链接格式示例：[浏览文献推荐流](/arxiv) 或 [定位指定文献](/arxiv?paper_id={id}&highlight=1)。
 3. 公共文献库（路径：[公共文献库](/library)）：
@@ -614,20 +554,20 @@ export const PLATFORM_KNOWLEDGE_PROMPT = `【CSBD 平台全景使用指南与功
    - “学术报告与会议”栏目（路径：[学术报告](/seminars?tab=talks)），汇集外部前沿学术报告与研讨会信息；
    - 链接格式示例：[查看组会日程](/seminars) 或 [跳转特定组会](/seminars?view=timeline&target_seminar={id}&no_reset=1)。
 5. 学术资料库（路径：[学术资料库](/resources)）：
-   - 收集与共享图书教材、数值模拟代码、天文软件工具、文献精读笔记卡片；
+   - 收集与共享图书教材、科研代码、专业软件工具、文献精读笔记卡片；
    - 支持分类筛选、标题/作者/分析人/描述模糊检索、PDF 上传与在线预览；
    - 链接格式示例：[浏览资料库](/resources) 或 [查看资料卡片](/resources?category={分类}&highlight={卡片ID})。
 6. 通知中心（路径：[重要通知中心](/notices)）：
-   - 集中展示教务处、院系与课题组重要公文与教务通知；
-   - 支持“AI 智能扫描一周邮件”，后台自动从学术邮箱提取教务通告并批量入库；
+   - 集中展示教务处、院系与课题组重要公文与科研通知；
+   - 支持智能邮件扫描，从学术邮箱提取通告并批量入库；
    - 链接格式示例：[查看通知中心](/notices) 或 [阅读通知详情](/notices?id={通知ID})。
 7. 学术邮箱（路径：[学术邮箱](/mailbox)）：
    - 个人/机构学术邮箱（IMAP/SMTP）无缝集成与邮件管理；
    - 支持智能识别与一键提取学术报告、会议与重要日程；
    - 链接格式示例：[前往学术邮箱](/mailbox) 或 [阅读邮件](/mailbox?email_id={邮件ID})。
 8. AI 科研助手（路径：[科研助手](/assistant)）：
-   - 当前对话功能，支持学术研讨、LaTeX 物理公式推导、数值模拟脚本编写与图文多模态分析；
-   - 支持 USTC via Vlab 免密直连科大昇腾算力大模型，以及多模型与历史会话管理；
+   - 当前对话功能，支持学术研讨、LaTeX 数学公式推导、科研代码编写与图文多模态分析；
+   - 支持主流大模型服务商直连与本地大模型（Ollama），以及多模型与历史会话管理；
    - 在文献研讨模式下拥有全文基准与长期记忆，支持分段翻译与答疑。
 
 超链接规范：
@@ -823,11 +763,7 @@ export async function sendChatMessageStream({
         config.baseUrl.startsWith('http://')
       )
       if (isLocalHttp) {
-        if (config.provider === 'ustc_vlab') {
-          errText = '无法连接到本地隧道端口 (127.0.0.1:4000)。请确认本地终端已运行 `ssh -NT ustc-vpn` 且 VLab 虚拟机代理服务正常运行。若隧道与服务已正常，请检查浏览器网站设置是否允许“不安全内容”。'
-        } else {
-          errText = '无法连接到本地接口服务。请检查本地后台服务是否已启动并正常监听对应端口。'
-        }
+        errText = '无法连接到本地接口服务。请检查本地后台服务是否已启动并正常监听对应端口。'
       } else {
         errText = '网络连接失败或浏览器跨域受限 (CORS)，请检查 API 端点与网络环境。'
       }
@@ -1343,8 +1279,8 @@ export function isModelVisionCapable(config) {
     return false
   }
 
-  // 2. USTC VLab 平台或 DeepSeek Flash / V4 / VL 系列支持视觉图片输入
-  if (aiConfig.provider === 'ustc_vlab' || /(?:deepseek.*(?:-vl|_vl|\bvl\b|flash|v4))/i.test(modelId)) {
+  // 2. 多模态视觉模型支持判断 (VL 系列等)
+  if (/(?:deepseek.*(?:-vl|_vl|\bvl\b))/i.test(modelId)) {
     return true
   }
 
@@ -1512,7 +1448,7 @@ export async function callAiCompletion({
   if (!aiConfig.baseUrl) {
     throw new Error('未配置大模型 Base URL 地址。')
   }
-  if (aiConfig.provider !== 'ollama' && aiConfig.provider !== 'ustc_vlab' && !aiConfig.apiKey) {
+  if (aiConfig.provider !== 'ollama' && !aiConfig.apiKey) {
     throw new Error('未配置大模型 API Key。')
   }
 
@@ -1525,7 +1461,7 @@ export async function callAiCompletion({
   }
 
   const payload = {
-    model: aiConfig.model || 'deepseek-flash',
+    model: aiConfig.model || 'deepseek-chat',
     messages,
     temperature,
     stream: false
@@ -1716,12 +1652,12 @@ ${hasSubstantiveText ? truncatedBody : '（正文未提供文字描述，详见�
 提取硬性规范：
 1. 忠实原邮件与海报：不要进行主观总结或润色，提取客观日程信息；
 2. 中文优先原则：若邮件或海报中同时出现标题的中英文、报告人的中英文或地点的中英文，必须优先填入中文；仅当原文只有英文时才填入英文；
-3. 地点机构前缀规则：通常为南大或紫台的报告。若判定为南大报告，地点最前面必须填入“南大 ”（包含空格，如“南大 天文楼302会议室”）；若判定为紫台报告，地点最前面必须填入“紫台”（如“紫台仙林 5-516 会议室”或“紫台 5-516 会议室”）。严禁将正文称谓（如“各位老师、同学：”）误作为地点；
+3. 地点规范：提取真实会议室或线上会议号。严禁将正文称谓（如“各位老师、同学：”）误作为地点；
 4. 标题(title)：纯正报告题目。必须自动剥离“Fw:”、“转发:”、“【学术报告】”、“讲座通知:”等前缀；若同时有中英文标题，优先提取中文标题；
 5. 日期(date)：公历日期，严格格式 "YYYY-MM-DD"。当前基准参考年份为 ${refYear} 年（基准参考日期：${refDate}）。若原文或海报中只有月日（如“9月22日”）或缺少明确公历年份，必须以当前年份 ${refYear} 为基准，严禁幻觉输出过往年份（如 2025/2024 等）！
 6. 时间(time)：24小时制，严格格式 "HH:mm"；
 7. 报告人(speaker)：主讲人姓名与职称单位，优先中文；若仅有英文则保留英文；切勿将称谓误当作报告人；
-8. 地点(location)：真实会议室或会议号，优先中文并按规则在最前面填入“南大 ”或“紫台”；
+8. 地点(location)：真实会议室或会议号，优先中文；
 9. 说明(notes)：邮件关于报告的摘要全文或背景要点。${usedVision ? '【特别强调】：当前已随附海报图片，请务必仔细阅读并 OCR 识别海报上的文字，将海报中记载的报告摘要、研究内容简介与主讲人背景忠实完整地填入 notes 中，严禁只输出空或简略的一两句话！' : '忠实原邮件，无需总结'}；
 10. 必须输出严格 JSON 格式：
 {
@@ -1810,7 +1746,7 @@ ${hasSubstantiveText ? truncatedBody : '（正文未提供文字描述，详见�
   const cleanSpeaker = cleanAiExtractedText(pickChinesePartIfDual(extracted.speaker || ''))
   let cleanLocation = cleanAiExtractedText(pickChinesePartIfDual(extracted.location || ''))
 
-  // 严格执行南大/紫台地点前缀规则保障
+  // 执行地点规范化与前缀规则保障
   const fullContext = `${email.subject || ''} ${email.from || ''} ${rawBody}`
   cleanLocation = applyInstitutionLocationPrefix(cleanLocation, fullContext)
 

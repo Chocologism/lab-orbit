@@ -134,7 +134,7 @@ const currentModelShortName = computed(() => {
   if (!currentModel.value) return '选择模型'
   const name = currentModel.value.name || currentModel.value.id
   // 智能简化长名称供药丸按钮紧凑展示
-  return name.replace(/\s*\(USTC.*?\)/i, '').replace(/DeepSeek\s*/i, 'DeepSeek-').trim()
+  return name.replace(/DeepSeek\s*/i, 'DeepSeek-').trim()
 })
 
 function toggleOpen() {
@@ -153,7 +153,6 @@ function handleSelect(id) {
 
 function getModelProvider(m) {
   const name = (m.name || m.id || '').toLowerCase()
-  if (name.includes('vlab') || name.includes('ustc')) return 'USTC VLab'
   if (name.includes('deepseek')) return 'DeepSeek'
   if (name.includes('gpt') || name.includes('openai')) return 'OpenAI'
   if (name.includes('claude') || name.includes('anthropic')) return 'Anthropic'

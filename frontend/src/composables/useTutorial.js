@@ -410,7 +410,7 @@ const GENERAL_STEPS = [
         requiresClick: false,
         title: '机构邮箱绑定与同步',
         subtitle: 'IMAP/POP3 协议安全中转',
-        description: '支持中科院科技网及各类高校机构邮箱协议，邮件在本地安全中转，集中收取学术研讨会与讲座通知。',
+        description: '支持主流学术邮箱及各类高校机构邮箱协议，邮件在本地安全中转，集中收取学术研讨会与讲座通知。',
         purposeNote: '统一归集机构学术信件，安全保密。',
         actionPrompt: '在此绑定机构学术邮箱，集中接收组会与研讨通知'
       },

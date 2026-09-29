@@ -38,15 +38,11 @@ beforeEach(() => {
 })
 
 describe('aiService - Provider & Model Configuration', () => {
-  it('contains ustc_vlab provider with recommended flags', () => {
-    const vlab = PRESET_PROVIDERS.find(p => p.id === 'ustc_vlab')
-    expect(vlab).toBeDefined()
-    expect(vlab.noApiKey).toBe(true)
-    expect(vlab.baseUrl).toBe('http://127.0.0.1:4000/v1')
-    expect(vlab.models.length).toBeGreaterThan(0)
-    expect(vlab.models[0].reasoningEffort).toBe('off')
-    expect(vlab.hint).toContain('中国科大大模型公共服务平台')
-    expect(vlab.hint).not.toContain('中国科大词元计划')
+  it('contains deepseek provider with recommended models', () => {
+    const deepseek = PRESET_PROVIDERS.find(p => p.id === 'deepseek')
+    expect(deepseek).toBeDefined()
+    expect(deepseek.baseUrl).toBe('https://api.deepseek.com/v1')
+    expect(deepseek.models.length).toBeGreaterThan(0)
   })
 
   it('normalizes string model to model object with reasoning defaults', () => {
@@ -82,8 +78,8 @@ describe('aiService - Provider & Model Configuration', () => {
 describe('aiService - Config Storage', () => {
   it('returns default config when storage is empty', () => {
     const config = loadAiConfig()
-    expect(config.provider).toBe('ustc_vlab')
-    expect(config.model).toBe('deepseek-flash')
+    expect(config.provider).toBe('deepseek')
+    expect(config.model).toBe('deepseek-chat')
     expect(Array.isArray(config.models)).toBe(true)
   })
 
@@ -250,26 +246,23 @@ describe('aiService - testAiConnection & Accurate Error Diagnosis', () => {
     expect(isAiConnectivityPassed()).toBe(false)
   })
 
-  it('fails fast if apiKey is missing for providers other than ustc_vlab and ollama', async () => {
+  it('fails fast if apiKey is missing for providers other than ollama', async () => {
     const res = await testAiConnection({ provider: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', apiKey: '' })
     expect(res.ok).toBe(false)
     expect(res.message).toContain('请填写 API Key')
     expect(isAiConnectivityPassed()).toBe(false)
   })
 
-  it('differentiates unstarted local tunnel from mixed content blocks on ustc_vlab', async () => {
+  it('differentiates unstarted local service from mixed content blocks', async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
 
     const res = await testAiConnection({
-      provider: 'ustc_vlab',
-      baseUrl: 'http://127.0.0.1:4000/v1'
+      provider: 'ollama',
+      baseUrl: 'http://127.0.0.1:11434/v1'
     })
 
     expect(res.ok).toBe(false)
-    // 确保不再直接误报“不安全内容相关设置未开启”
-    expect(res.message).toContain('无法连接到本地隧道端口 (127.0.0.1:4000)')
-    expect(res.message).toContain('ssh -NT ustc-vpn')
-    expect(res.message).toContain('python3 proxy-server.py')
+    expect(res.message).toContain('无法连接到本地接口服务')
     expect(isAiConnectivityPassed()).toBe(false)
 
     globalThis.fetch = originalFetch
@@ -294,15 +287,15 @@ describe('aiService - testAiConnection & Accurate Error Diagnosis', () => {
       if (violationListener) {
         violationListener({
           effectiveDirective: 'connect-src',
-          blockedURI: 'http://127.0.0.1:4000/v1/chat/completions'
+          blockedURI: 'http://127.0.0.1:11434/v1/chat/completions'
         })
       }
       return Promise.reject(new TypeError('Failed to fetch'))
     })
 
     const res = await testAiConnection({
-      provider: 'ustc_vlab',
-      baseUrl: 'http://127.0.0.1:4000/v1'
+      provider: 'ollama',
+      baseUrl: 'http://127.0.0.1:11434/v1'
     })
 
     expect(res.ok).toBe(false)
@@ -321,8 +314,8 @@ describe('aiService - testAiConnection & Accurate Error Diagnosis', () => {
     })
 
     const res = await testAiConnection({
-      provider: 'ustc_vlab',
-      baseUrl: 'http://127.0.0.1:4000/v1'
+      provider: 'ollama',
+      baseUrl: 'http://127.0.0.1:11434/v1'
     })
 
     expect(res.ok).toBe(true)

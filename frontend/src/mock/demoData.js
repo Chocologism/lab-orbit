@@ -78,7 +78,7 @@ export const DEMO_SEMINARS = [
     id: 101,
     date: formatOffsetDate(2),
     time: '14:30',
-    location: '科研实验楼 5-516 会议室 / 腾讯会议：982-334-112',
+    location: '理科实验楼 302 会议室 / 腾讯会议：982-334-112',
     presenter_id: 2,
     presenter_name: '陈晨 (博士生 / 普通成员)',
     topic: '弱引力透镜高阶统计量与暗能量状态方程限制',
@@ -144,7 +144,7 @@ export const DEMO_SEMINARS = [
     id: 103,
     date: formatOffsetDate(16),
     time: '14:30',
-    location: '科研实验楼 5-516 会议室',
+    location: '理科实验楼 302 会议室',
     presenter_id: 1,
     presenter_name: '李华 (导师 / 管理员)',
     topic: '下一代空间巡天大科学装置科学目标与课题组关键攻关任务研讨',
@@ -168,7 +168,7 @@ export const DEMO_SEMINARS = [
     id: 100,
     date: formatOffsetDate(-5),
     time: '14:30',
-    location: '科研实验楼 5-516 会议室',
+    location: '理科实验楼 302 会议室',
     presenter_id: 1,
     presenter_name: '李华 (导师 / 管理员)',
     topic: '空间巡天大科学装置科学目标与课题组年度攻关任务研讨',
@@ -342,7 +342,7 @@ export const DEMO_NOTICES = [
   {
     id: 401,
     title: '【学术讲座】关于举办系外行星大气前沿学术报告的通知',
-    content: '各位老师、同学：\n课题组将于本周五下午 14:30 举行学术交流活动，特别邀请了国家天文台李研究员线上线下同步分享最新 JWST 光谱反演进展。欢迎全体组员准时参加并在会前阅读随附文献。',
+    content: '各位老师、同学：\n课题组将于本周五下午 14:30 举行学术交流活动，特别邀请了前沿交叉学者李研究员线上线下同步分享最新 JWST 光谱反演进展。欢迎全体组员准时参加并在会前阅读随附文献。',
     category: 'academic',
     importance: 'high',
     start_date: formatOffsetDate(-2),
@@ -572,14 +572,14 @@ export const DEMO_LIBRARY_PAPERS = [
 export const DEMO_PENDING_IMPORTS = [
   {
     id: 601,
-    raw_text: '学术报告通知\n主讲人：张明 博士（国家天文台）\n题目：基于机器学习的引力透镜时延宇宙学测量\n时间：2026年10月15日 14:00\n地点：5-516 会议室',
+    raw_text: '学术报告通知\n主讲人：张明 博士（前沿科学中心）\n题目：基于机器学习的引力透镜时延宇宙学测量\n时间：2026年10月15日 14:00\n地点：理科楼 302 会议室',
     inferred_type: 'talk',
     parsed_data: {
       title: '基于机器学习的引力透镜时延宇宙学测量',
       speaker: '张明 博士',
       date: formatOffsetDate(14),
       time: '14:00',
-      location: '科研楼 5-516 会议室',
+      location: '理科楼 302 会议室',
       notes: '邀请校外学者来访交流'
     },
     image_urls: [],
@@ -628,21 +628,21 @@ export const DEMO_EMAILS = [
     id: 801,
     msg_uid: 'uid-801',
     subject: '【学术讲座】空间引力波探测与星系形成演化前沿研讨',
-    sender_name: '国家天文台学术委员会',
-    sender_email: 'academic@nao.cas.cn',
-    from_addr: '国家天文台学术委员会 <academic@nao.cas.cn>',
-    from_name: '国家天文台学术委员会',
-    recipient: 'astro_lab@cstnet.cn',
-    to_addr: 'astro_lab@cstnet.cn',
+    sender_name: '前沿交叉学术委员会',
+    sender_email: 'academic@example.edu',
+    from_addr: '前沿交叉学术委员会 <academic@example.edu>',
+    from_name: '前沿交叉学术委员会',
+    recipient: 'lab_demo@example.edu',
+    to_addr: 'lab_demo@example.edu',
     date_str: formatOffsetDate(-1) + ' 09:30:00',
     created_at: formatOffsetDate(-1) + ' 09:30:00',
-    snippet: '各位老师同学：兹定于本周五举行关于空间引力波探测的线上线下联合报告会。主讲人：张维民 研究员（中国科学院国家空间科学中心）。时间：' + formatOffsetDate(3) + ' 14:30。地点：天文大厦三楼报告厅 / 腾讯会议：882-910-334。重点探讨极端质量比旋进建模与暗物质晕演化。',
-    body_text: '各位老师同学：兹定于本周五举行关于空间引力波探测的线上线下联合报告会。主讲人：张维民 研究员（中国科学院国家空间科学中心）。时间：' + formatOffsetDate(3) + ' 14:30。地点：天文大厦三楼报告厅 / 腾讯会议：882-910-334。',
+    snippet: '各位老师同学：兹定于本周五举行关于空间引力波探测的线上线下联合报告会。主讲人：张维民 研究员（前沿科学与计算中心）。时间：' + formatOffsetDate(3) + ' 14:30。地点：理科大楼三楼报告厅 / 腾讯会议：882-910-334。重点探讨极端质量比旋进建模与暗物质晕演化。',
+    body_text: '各位老师同学：兹定于本周五举行关于空间引力波探测的线上线下联合报告会。主讲人：张维民 研究员（前沿科学与计算中心）。时间：' + formatOffsetDate(3) + ' 14:30。地点：理科大楼三楼报告厅 / 腾讯会议：882-910-334。',
     body_html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1e293b; max-width: 680px;">
       <h2 style="color: #0f172a; border-bottom: 2px solid #38bdf8; padding-bottom: 10px; margin-top: 0;">空间引力波探测与高红移星系演化前沿研讨会通知</h2>
-      <p><strong>主讲人：</strong>张维民 研究员（中国科学院国家空间科学中心）</p>
+      <p><strong>主讲人：</strong>张维民 研究员（前沿科学与计算中心）</p>
       <p><strong>时间：</strong>${formatOffsetDate(3)} 14:30 - 16:30</p>
-      <p><strong>地点：</strong>天文大厦三楼报告厅 / 腾讯会议：882-910-334</p>
+      <p><strong>地点：</strong>理科大楼三楼报告厅 / 腾讯会议：882-910-334</p>
       <p><strong>报告摘要：</strong>随着太极计划与天琴计划的稳步推进，空间低频引力波天文学即将迎来黄金观测时代。本报告将系统阐述极端质量比旋进（EMRI）与双超大质量黑洞并合事件的引力波形建模，并探讨如何通过联合巡天探测限制早期宇宙暗物质晕的质量增长历程。</p>
       <div style="background: #f0fdf4; border-left: 4px solid #22c55e; padding: 12px 16px; margin: 18px 0; border-radius: 6px;">
         <p style="margin: 0; font-size: 13px; color: #166534;">※ 会前建议预读有关空间干涉仪臂长波动抑制与时间延迟干涉（TDI）的相关预印本文献，欢迎全体师生积极参会交流。</p>
@@ -662,25 +662,25 @@ export const DEMO_EMAILS = [
   {
     id: 802,
     msg_uid: 'uid-802',
-    subject: '中国天文学会 2026 年学术年会第一轮通知及征文启事',
-    sender_name: '中国天文学会秘书处',
-    sender_email: 'cas@pmo.ac.cn',
-    from_addr: '中国天文学会秘书处 <cas@pmo.ac.cn>',
-    from_name: '中国天文学会秘书处',
-    recipient: 'astro_lab@cstnet.cn',
-    to_addr: 'astro_lab@cstnet.cn',
+    subject: '前沿交叉科学 2026 年学术年会第一轮通知及征文启事',
+    sender_name: '前沿交叉科学学术年会秘书处',
+    sender_email: 'conference@example.edu',
+    from_addr: '前沿交叉科学学术年会秘书处 <conference@example.edu>',
+    from_name: '前沿交叉科学学术年会秘书处',
+    recipient: 'lab_demo@example.edu',
+    to_addr: 'lab_demo@example.edu',
     date_str: formatOffsetDate(-2) + ' 14:15:00',
     created_at: formatOffsetDate(-2) + ' 14:15:00',
-    snippet: '各位会员、天文学界同仁：中国天文学会 2026 年学术年会拟定于 10 月中旬在南京举行。现启动分会场征文与大会口头报告申请，涵盖星系宇宙学、恒星演化、空间探测技术与 AI for Science 天文智能计算等前沿专题。',
-    body_text: '各位会员、天文学界同仁：中国天文学会 2026 年学术年会拟定于 10 月中旬召开。本届年会涵盖星系宇宙学、恒星与行星系统、大科学装置等多个专题分会场，现启动征文与大会口头报告申请。',
+    snippet: '各位学者、学界同仁：前沿交叉科学 2026 年学术年会拟定于 10 月中旬举行。现启动分会场征文与大会口头报告申请，涵盖星系宇宙学、恒星演化、空间探测技术与 AI for Science 智能计算等前沿专题。',
+    body_text: '各位学者、学界同仁：前沿交叉科学 2026 年学术年会拟定于 10 月中旬召开。本届年会涵盖星系宇宙学、恒星与行星系统、大科学装置等多个专题分会场，现启动征文与大会口头报告申请。',
     body_html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1e293b;">
-      <h2 style="color: #0f172a; border-bottom: 2px solid #818cf8; padding-bottom: 8px;">中国天文学会 2026 年学术年会第一轮通知</h2>
-      <p>各位会员、天文学界同仁：</p>
-      <p>中国天文学会 2026 年学术年会拟定于今年 10 月中旬在南京举行。现就有关事项通知如下：</p>
+      <h2 style="color: #0f172a; border-bottom: 2px solid #818cf8; padding-bottom: 8px;">前沿交叉科学 2026 年学术年会第一轮通知</h2>
+      <p>各位学者、学界同仁：</p>
+      <p>前沿交叉科学 2026 年学术年会拟定于今年 10 月中旬举行。现就有关事项通知如下：</p>
       <ul>
         <li><strong>会议时间：</strong>${formatOffsetDate(25)} 至 ${formatOffsetDate(29)}</li>
         <li><strong>摘要提交截止日期：</strong>${formatOffsetDate(12)}</li>
-        <li><strong>主要专题：</strong>星系形成与演化、引力透镜宇宙学、空间天文观测技术、AI for Science 天文智能计算</li>
+        <li><strong>主要专题：</strong>星系形成与演化、引力透镜宇宙学、空间天文观测技术、AI for Science 智能计算</li>
       </ul>
       <p>请拟参会人员在截止日期前通过会议官网完成注册及摘要提交。</p>
     </div>`,

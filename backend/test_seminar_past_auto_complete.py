@@ -11,7 +11,7 @@ client = TestClient(app)
 
 @pytest.fixture
 def auth_admin():
-    result = client.post("/api/auth/login", json={"email": "admin@pmo.ac.cn", "password": "123456"})
+    result = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "123456"})
     return {"Authorization": "Bearer " + result.json()["access_token"]}
 
 def test_past_seminar_auto_completes(auth_admin):

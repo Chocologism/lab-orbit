@@ -2687,7 +2687,7 @@ async function deleteMember(member) {
     <div class="form-row create-member-grid-row">
       <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
         <span>登录邮箱 <strong style="color: var(--danger)">*</strong></span>
-        <input v-model="createMemberForm.email" type="email" required placeholder="如 name@pmo.ac.cn" maxlength="100" />
+        <input v-model="createMemberForm.email" type="email" required placeholder="如 name@example.edu" maxlength="100" />
       </label>
       <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
         <span>初始登录密码 <strong style="color: var(--danger)">*</strong></span>

@@ -15,8 +15,11 @@ import { isMidAutumnFestival } from '../utils/midAutumn'
 import { LiquidGlass } from '../libs/liquidglass'
 import { useWeekDrag } from '../composables/useWeekDrag'
 import { currentBgType, currentColorScheme, currentGlassStyle } from '../composables/useThemeStyle'
+import { useSiteConfig } from '../composables/useSiteConfig'
 const router = useRouter()
+const { siteConfig } = useSiteConfig()
 const isMidAutumn = computed(() => isMidAutumnFestival())
+const weatherLocation = computed(() => siteConfig.institution ? siteConfig.institution : '学术园区')
 const today = ref(shanghaiToday()), focus = ref(today.value), now = ref(Date.now())
 const forecastDashboardRef = ref(null)
 const forecastRightRef = ref(null)
@@ -210,7 +213,7 @@ onMounted(() => {
       })
     })
     .catch(() => {
-      weather.value = { loading:false, temperature:24, high:28, low:19, feels:25, humidity:62, wind:12, rain:10, label:'晴朗 · 南京仙林' }
+      weather.value = { loading:false, temperature:24, high:28, low:19, feels:25, humidity:62, wind:12, rain:10, label: siteConfig.institution ? `晴朗 · ${siteConfig.institution}` : '晴朗 · 园区' }
     })
     .finally(() => clearTimeout(weatherTimeout))
   clock = setInterval(() => { now.value = Date.now(); today.value = shanghaiToday() }, 60000)
@@ -528,7 +531,7 @@ function onDayClick(e, day) {
       <section class="forecast-main">
         <div class="forecast-intro">
           <h1 class="group-title-heading">
-            <span>宇宙结构与巡天大数据研究团组</span>
+            <span>{{ siteConfig.labName || '科研协作平台' }}</span>
             <img
               v-if="isMidAutumn"
               src="/assets/icons/moon.svg"
@@ -537,7 +540,7 @@ function onDayClick(e, day) {
               title="中秋快乐"
             />
           </h1>
-          <p class="group-name-en">Cosmological Structure and Big Data Research Group</p>
+          <p class="group-name-en">{{ siteConfig.siteSlogan || 'Frontier Interdisciplinary Science & Computing Workspace' }}</p>
           <div class="forecast-actions">
             <router-link :to="calendarLink(today)" class="perfect-goat-btn">
               <span class="goat-text">打开学术日程</span>
@@ -742,7 +745,7 @@ function onDayClick(e, day) {
           data-config='{"button":false}'
           aria-label="天气模块"
         >
-          <div class="next-heading"><span>今日天气</span><span class="weather-place">南京仙林 · {{ weather.label }}</span></div>
+          <div class="next-heading"><span>今日天气</span><span class="weather-place">{{ weatherLocation }} · {{ weather.label }}</span></div>
           <div class="weather-reading"><div><strong>{{ weather.temperature === null ? '—' : `${weather.temperature}°` }}</strong><span>{{ weather.temperature === null ? '无法获取实时数据' : `体感 ${weather.feels}°` }}</span></div><strong class="weather-range">{{ weather.low === null || weather.high === null ? '—' : `${weather.low}°—${weather.high}°` }}</strong></div>
           <div class="weather-meta"><span>湿度 {{ weather.humidity === null ? '—' : `${weather.humidity}%` }}</span><span>风速 {{ weather.wind === null ? '—' : `${weather.wind} km/h` }}</span><span>降水概率 {{ weather.rain === null ? '—' : `${weather.rain}%` }}</span></div>
         </section>

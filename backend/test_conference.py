@@ -6,7 +6,7 @@ client = TestClient(app)
 
 
 def test_talk_and_multi_day_conference_crud():
-    login_res = client.post("/api/auth/login", json={"email": "admin@pmo.ac.cn", "password": "123456"})
+    login_res = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "123456"})
     assert login_res.status_code == 200
     token = login_res.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
@@ -34,7 +34,7 @@ def test_talk_and_multi_day_conference_crud():
         "end_date": "2026-10-18",
         "time": "全天",
         "title": "全国星系宇宙学学术研讨会",
-        "speaker": "国家天文台",
+        "speaker": "学术委员会",
         "location": "北京国际会议中心",
         "abstract_start_date": "2026-09-01",
         "abstract_deadline": "2026-09-20",
@@ -68,7 +68,7 @@ def test_talk_and_multi_day_conference_crud():
         "end_date": "2026-10-19",
         "time": "09:00 - 18:00",
         "title": "全国星系宇宙学学术研讨会（更新会期）",
-        "speaker": "国家天文台 / 某学会",
+        "speaker": "学术委员会 / 某学会",
         "location": "北京国际会议中心主会场",
         "abstract_start_date": "2026-09-05",
         "abstract_deadline": "2026-09-25",
@@ -94,10 +94,10 @@ def test_normal_user_can_update_talk_time_but_cannot_delete():
     from backend.auth import get_password_hash
 
     db = SessionLocal()
-    student = db.query(User).filter(User.email == "student_talk_test@pmo.ac.cn").first()
+    student = db.query(User).filter(User.email == "student_talk_test@example.com").first()
     if not student:
         student = User(
-            email="student_talk_test@pmo.ac.cn",
+            email="student_talk_test@example.com",
             name="普通组员",
             real_name="普通组员",
             hashed_password=get_password_hash("123456"),
@@ -108,17 +108,17 @@ def test_normal_user_can_update_talk_time_but_cannot_delete():
         db.refresh(student)
     db.close()
 
-    admin_login = client.post("/api/auth/login", json={"email": "admin@pmo.ac.cn", "password": "123456"})
+    admin_login = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "123456"})
     admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
 
-    student_login = client.post("/api/auth/login", json={"email": "student_talk_test@pmo.ac.cn", "password": "123456"})
+    student_login = client.post("/api/auth/login", json={"email": "student_talk_test@example.com", "password": "123456"})
     student_headers = {"Authorization": f"Bearer {student_login.json()['access_token']}"}
 
     # 1. Admin creates a talk
     create_res = client.post("/api/talks", json={
         "date": "2026-11-01",
         "time": "10:00",
-        "title": "台站学术报告·原初黑洞探讨",
+        "title": "学术报告·原初黑洞探讨",
         "speaker": "张专家",
         "location": "大会议室",
         "event_type": "talk"

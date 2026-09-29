@@ -229,7 +229,7 @@ export class CloudflareSmtpClient {
     let emailPayload = '';
 
     if (html) {
-      const boundary = `====_CSSBD_MULTIPART_${Date.now()}_====`;
+      const boundary = `====_LABORBIT_MULTIPART_${Date.now()}_====`;
       emailHeaders.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
 
       const textBase64 = Buffer.from(text, 'utf-8').toString('base64').match(/.{1,76}/g)?.join('\r\n') || '';

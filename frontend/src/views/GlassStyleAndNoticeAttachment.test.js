@@ -22,8 +22,8 @@ describe('Glass Style & Notice Email Attachment Suite', () => {
 
   it('correctly classifies notices from graduate departments and administrative keywords', () => {
     const graduateNotice = {
-      from: '紫台研究生部 <yjsb@pmo.ac.cn>',
-      subject: '关于《天文与空间科学学院硕士分流退出机制实施细则》的意见征集',
+      from: '研究生工作部 <yjsb@example.edu>',
+      subject: '关于《硕士分流退出机制实施细则》的意见征集',
       body_text: '请各位导师和研究生认真审阅附件中的实施细则...'
     }
     expect(isNoticeEmail(graduateNotice)).toBe(true)

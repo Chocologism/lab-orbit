@@ -19,7 +19,7 @@ describe('HomeView Mid-Autumn Moon integration', () => {
     expect(content).toContain('mid-autumn-moon-badge')
     expect(content).toContain('/assets/icons/moon.svg')
     expect(content).toContain('alt="中秋明月"')
-    expect(content).toContain('宇宙结构与巡天大数据研究团组')
+    expect(content).toContain('siteConfig.labName')
     expect(content).toContain('@keyframes mid-autumn-moon-glow')
   })
 })

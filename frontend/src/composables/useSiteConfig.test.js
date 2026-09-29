@@ -29,7 +29,7 @@ describe('useSiteConfig Composable', () => {
       lab_short_name: 'QICLab',
       site_slogan: '连接物理与代码的桥梁',
       site_title: 'QICLab-Hub',
-      institution: '中国科学技术大学',
+      institution: '前沿交叉科学研究院',
       default_location: '理化大楼 1801',
     })
 
@@ -41,7 +41,7 @@ describe('useSiteConfig Composable', () => {
     expect(siteConfig.labName).toBe('量子信息与计算实验室')
     expect(siteConfig.labShortName).toBe('QICLab')
     expect(siteConfig.siteSlogan).toBe('连接物理与代码的桥梁')
-    expect(siteConfig.institution).toBe('中国科学技术大学')
+    expect(siteConfig.institution).toBe('前沿交叉科学研究院')
     expect(siteConfig.defaultLocation).toBe('理化大楼 1801')
     expect(siteConfig.loaded).toBe(true)
   })

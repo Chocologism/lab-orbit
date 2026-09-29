@@ -65,11 +65,11 @@ describe('research group calendar', () => {
   it('exports weekly schedule with seminars and talks to multi-event iCalendar', () => {
     const seminarItem = { ...a, type: 'seminar', presentations: [{ presenter_name: '丙', arxiv_id: '2609.12345' }] }
     const talkItem = { id: 10, type: 'talk', date: '2026-12-31', time: '10:00', title: '星系巡天进展', speaker: '李教授', location: '天文楼502' }
-    const ics = weekScheduleIcs([seminarItem, talkItem], 'CSBD 本周日程', new Date('2026-01-01T00:00:00Z'))
+    const ics = weekScheduleIcs([seminarItem, talkItem], '课题组本周日程', new Date('2026-01-01T00:00:00Z'))
     expect(ics).toContain('BEGIN:VCALENDAR')
-    expect(ics).toContain('X-WR-CALNAME:CSBD 本周日程')
-    expect(ics).toContain('UID:seminar-1-2026-12-31@csbd-hub.local')
-    expect(ics).toContain('UID:talk-10-2026-12-31@csbd-hub.local')
+    expect(ics).toContain('X-WR-CALNAME:课题组本周日程')
+    expect(ics).toContain('UID:seminar-1-2026-12-31@lab-orbit.local')
+    expect(ics).toContain('UID:talk-10-2026-12-31@lab-orbit.local')
     expect(ics).toContain('SUMMARY:[组会] 题目 (甲)')
     expect(ics).toContain('SUMMARY:[学术报告] 星系巡天进展 (李教授)')
     expect(ics).toContain('arXiv 分享: 丙 (2609.12345)')
@@ -106,13 +106,13 @@ describe('research group calendar', () => {
       end_date: '2026-10-18',
       time: '全天',
       title: '全国星系宇宙学年会',
-      speaker: '国家天文台',
+      speaker: '学术委员会',
       location: '北京国际会议中心',
       is_interested: true
     }
     const ics = weekScheduleIcs([confItem], '学术日程', new Date('2026-01-01T00:00:00Z'))
-    expect(ics).toContain('SUMMARY:[学术会议] 全国星系宇宙学年会 (国家天文台)')
-    expect(ics).toContain('UID:conference-99-2026-10-15@csbd-hub.local')
+    expect(ics).toContain('SUMMARY:[学术会议] 全国星系宇宙学年会 (学术委员会)')
+    expect(ics).toContain('UID:conference-99-2026-10-15@lab-orbit.local')
     expect(ics.replace(/\r\n /g, '')).toContain('会议会期: 2026-10-15 至 2026-10-18')
     expect(ics.replace(/\r\n /g, '')).toContain('地点/网址: 北京国际会议中心')
 

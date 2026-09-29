@@ -17,7 +17,7 @@ def test_talk_duplicate_detection_and_latest_push_replacement():
         "time": "10:00",
         "title": "黑洞吸积盘与射电喷流观测研讨",
         "speaker": "张学者",
-        "location": "仙林 302",
+        "location": "中心 302",
         "notes": "初次通知：报告暂定于上午举行",
         "poster_url": "/api/files/11111111-1111-1111-1111-111111111111",
         "event_type": "talk"
@@ -37,8 +37,8 @@ def test_talk_duplicate_detection_and_latest_push_replacement():
             "time": "15:30",
             "title": "【学术报告】黑洞吸积盘与射电喷流观测研讨（时间调整）",
             "speaker": "张学者 教授",
-            "location": "科研楼 5-516",
-            "notes": "最新更正通知：时间推迟至下午15:30，地点调整至5-516会议室",
+            "location": "理科楼 302",
+            "notes": "最新更正通知：时间推迟至下午15:30，地点调整至302会议室",
             "poster_url": "/api/files/22222222-2222-2222-2222-222222222222",
             "event_type": "talk"
         }
@@ -52,9 +52,9 @@ def test_talk_duplicate_detection_and_latest_push_replacement():
         assert dup_data["replaced"] is True
         assert "更新替换" in dup_data.get("message", "")
         assert dup_data["time"] == "15:30"
-        assert dup_data["location"] == "科研楼 5-516"
+        assert dup_data["location"] == "理科楼 302"
         assert dup_data["speaker"] == "张学者 教授"
-        assert dup_data["notes"] == "最新更正通知：时间推迟至下午15:30，地点调整至5-516会议室"
+        assert dup_data["notes"] == "最新更正通知：时间推迟至下午15:30，地点调整至302会议室"
         assert dup_data["poster_url"] == "/api/files/22222222-2222-2222-2222-222222222222"
 
         # 3. 再次推送完全相同的内容（无任何变化）
