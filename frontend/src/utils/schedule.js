@@ -1,3 +1,8 @@
+import { isDemoMode } from '../mock/isDemo'
+
+export const DEMO_FROZEN_DATE_STR = '2026-09-10'
+export const DEMO_FROZEN_TIME_MS = Date.parse('2026-09-10T12:00:00+08:00')
+
 // Calendar arithmetic uses UTC only as a timezone-free carrier for YYYY-MM-DD.
 // Actual seminar times always refer to the research group's Asia/Shanghai zone.
 export function parseDate(value) {
@@ -21,7 +26,11 @@ export function monday(value) {
   return addDays(value, -((date.getUTCDay() + 6) % 7))
 }
 export const railDates = focus => Array.from({ length: 14 }, (_, i) => addDays(monday(focus), i))
-export function shanghaiToday(now = new Date()) {
+export function shanghaiToday(now) {
+  if (now === undefined) {
+    if (isDemoMode()) return DEMO_FROZEN_DATE_STR
+    now = new Date()
+  }
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now).map(p => [p.type, p.value]))
   return `${p.year}-${p.month}-${p.day}`
 }
@@ -83,32 +92,35 @@ export function eventTime(item, defaultTime = '14:30') {
   const time = timeString(item.time) || defaultTime
   return parseDate(item.date) ? Date.parse(`${item.date}T${time}:00+08:00`) : NaN
 }
-export function isSeminarCompleted(item, now = Date.now()) {
+export function isSeminarCompleted(item, now) {
   if (!item) return false
   if (item.status === 'completed') return true
   if (item.status === 'cancelled') return false
-  const today = shanghaiToday(new Date(now))
+  const effectiveNow = (now === undefined && isDemoMode()) ? DEMO_FROZEN_TIME_MS : (now ?? Date.now())
+  const today = shanghaiToday(new Date(effectiveNow))
   return Boolean(item.date && item.date < today)
 }
-export function effectiveSeminarStatus(item, now = Date.now()) {
+export function effectiveSeminarStatus(item, now) {
   if (!item) return 'upcoming'
   if (item.status === 'cancelled') return 'cancelled'
   if (isSeminarCompleted(item, now)) return 'completed'
   return 'upcoming'
 }
-export function statusLabel(item, now = Date.now()) {
+export function statusLabel(item, now) {
   if (!item) return ''
   if (item.status === 'cancelled') return '已取消'
   if (isSeminarCompleted(item, now)) return '已完成'
   return '待举行'
 }
 export const sortSeminars = items => [...items].sort((a, b) => `${a.date} ${timeString(a.time) || a.time}`.localeCompare(`${b.date} ${timeString(b.time) || b.time}`) || a.id - b.id)
-export function nextSeminar(items, now = Date.now()) {
-  return sortSeminars(items).find(item => effectiveSeminarStatus(item, now) === 'upcoming' && seminarTime(item) >= now) || null
+export function nextSeminar(items, now) {
+  const effectiveNow = (now === undefined && isDemoMode()) ? DEMO_FROZEN_TIME_MS : (now ?? Date.now())
+  return sortSeminars(items).find(item => effectiveSeminarStatus(item, effectiveNow) === 'upcoming' && seminarTime(item) >= effectiveNow) || null
 }
-export function filterSeminars(items, status, presenter, now = Date.now()) {
+export function filterSeminars(items, status, presenter, now) {
+  const effectiveNow = (now === undefined && isDemoMode()) ? DEMO_FROZEN_TIME_MS : (now ?? Date.now())
   return sortSeminars(items.filter(s => {
-    const effStatus = effectiveSeminarStatus(s, now)
+    const effStatus = effectiveSeminarStatus(s, effectiveNow)
     return (status === 'all' || effStatus === status) && (!presenter || s.presenter_name === presenter)
   }))
 }

@@ -4,6 +4,7 @@
  */
 
 import {
+  DEMO_BASE_DATE_STR,
   DEMO_MEMBERS,
   DEMO_SITE_CONFIG,
   DEMO_SEMINARS,
@@ -18,8 +19,10 @@ import {
   DEMO_FEEDBACK_ITEMS
 } from './demoData'
 
+const DEMO_TODAY = DEMO_BASE_DATE_STR || '2026-09-10'
+
 const STORAGE_KEYS = {
-  VERSION: 'laborbit_demo_version_v4',
+  VERSION: 'laborbit_demo_version_v5',
   SEMINARS: 'laborbit_demo_seminars',
   PAPERS: 'laborbit_demo_papers',
   NOTICES: 'laborbit_demo_notices',
@@ -194,7 +197,7 @@ export async function demoAxiosAdapter(config) {
 
     if (cleanUrl === '/api/seminars/mine/upcoming') {
       const cur = getStored('labhub_user', DEMO_MEMBERS[0])
-      const today = new Date().toISOString().split('T')[0]
+      const today = DEMO_TODAY
       const upcomingSeminars = seminars.filter(s => s.status === 'upcoming' && s.date >= today).sort((a, b) => a.date.localeCompare(b.date))
 
       let main = null
@@ -267,7 +270,7 @@ export async function demoAxiosAdapter(config) {
     }
 
     if (cleanUrl === '/api/seminars/mine/upcoming-presentations') {
-      const today = new Date().toISOString().split('T')[0]
+      const today = DEMO_TODAY
       const cur = getStored('labhub_user', DEMO_MEMBERS[0])
       const mine = seminars.filter(s => s.status === 'upcoming' && s.date >= today).map(s => ({
         id: s.id,
@@ -401,7 +404,7 @@ export async function demoAxiosAdapter(config) {
         authors: body.authors || cur.real_name,
         journal: `arXiv:${body.arxiv_id || '2409.11029'}`,
         primary_category: body.primary_category || 'astro-ph.CO',
-        published_date: new Date().toISOString().split('T')[0],
+        published_date: DEMO_TODAY,
         source_url: `https://arxiv.org/abs/${body.arxiv_id || '2409.11029'}`,
         pdf_url: `https://arxiv.org/pdf/${body.arxiv_id || '2409.11029'}.pdf`,
         abstract: body.abstract || '用户在线推荐文献摘要。',
@@ -413,7 +416,7 @@ export async function demoAxiosAdapter(config) {
           role: cur.role
         },
         recommended_by: cur.name,
-        recommended_at: new Date().toISOString().split('T')[0],
+        recommended_at: DEMO_TODAY,
         notes: body.notes || '',
         likes_count: 1,
         user_liked: false,
@@ -564,7 +567,7 @@ export async function demoAxiosAdapter(config) {
         content: body.content || '',
         category: body.category || 'general',
         importance: body.importance || 'normal',
-        start_date: body.start_date || new Date().toISOString().split('T')[0],
+        start_date: body.start_date || DEMO_TODAY,
         end_date: body.end_date || '',
         created_by_name: cur.name,
         created_at: new Date().toISOString(),
@@ -928,7 +931,7 @@ export async function demoAxiosAdapter(config) {
         id: Date.now(),
         title: body.title || '学术报告',
         speaker: body.speaker || '',
-        date: body.date || new Date().toISOString().split('T')[0],
+        date: body.date || DEMO_TODAY,
         time: body.time || '10:00',
         location: body.location || '研讨室',
         notes: body.notes || '',

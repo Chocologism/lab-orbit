@@ -63,9 +63,11 @@ export const DEMO_SITE_CONFIG = {
   version: '2.5.0-demo'
 }
 
-// 动态计算当前周与未来周的日期，确保任何时候打开 Demo 日期都是最新合理的
+// 在线演示/展示界面的时间基准冻结在 2026-09-10（仅用于展示界面，正式代码设计中不用冻结）
+export const DEMO_BASE_DATE_STR = '2026-09-10'
+
 function formatOffsetDate(daysOffset = 0) {
-  const d = new Date()
+  const d = new Date(`${DEMO_BASE_DATE_STR}T12:00:00+08:00`)
   d.setDate(d.getDate() + daysOffset)
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')

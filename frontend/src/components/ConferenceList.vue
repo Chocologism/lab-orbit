@@ -21,7 +21,7 @@ const emit = defineEmits(['select-conference', 'create-conference', 'toggle-inte
 
 const today = shanghaiToday()
 const statusFilter = ref('upcoming') // 'upcoming' | 'past' | 'all'
-const currentYear = new Date().getFullYear().toString()
+const currentYear = today.slice(0, 4)
 const yearFilter = ref('all')
 const searchQuery = ref('')
 const onlyInterested = ref(false)

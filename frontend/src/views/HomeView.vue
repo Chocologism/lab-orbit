@@ -16,11 +16,14 @@ import { LiquidGlass } from '../libs/liquidglass'
 import { useWeekDrag } from '../composables/useWeekDrag'
 import { currentBgType, currentColorScheme, currentGlassStyle } from '../composables/useThemeStyle'
 import { useSiteConfig } from '../composables/useSiteConfig'
+import { isDemoMode } from '../mock/isDemo'
+import { DEMO_FROZEN_TIME_MS } from '../utils/schedule'
+
 const router = useRouter()
 const { siteConfig } = useSiteConfig()
 const isMidAutumn = computed(() => isMidAutumnFestival())
 const weatherLocation = computed(() => siteConfig.institution ? siteConfig.institution : '学术园区')
-const today = ref(shanghaiToday()), focus = ref(today.value), now = ref(Date.now())
+const today = ref(shanghaiToday()), focus = ref(today.value), now = ref(isDemoMode() ? DEMO_FROZEN_TIME_MS : Date.now())
 const forecastDashboardRef = ref(null)
 const forecastRightRef = ref(null)
 const liquidGlassActive = ref(false)
@@ -216,7 +219,12 @@ onMounted(() => {
       weather.value = { loading:false, temperature:24, high:28, low:19, feels:25, humidity:62, wind:12, rain:10, label: siteConfig.institution ? `晴朗 · ${siteConfig.institution}` : '晴朗 · 园区' }
     })
     .finally(() => clearTimeout(weatherTimeout))
-  clock = setInterval(() => { now.value = Date.now(); today.value = shanghaiToday() }, 60000)
+  clock = setInterval(() => {
+    if (!isDemoMode()) {
+      now.value = Date.now()
+      today.value = shanghaiToday()
+    }
+  }, 60000)
 
   nextTick(() => {
     setupLiquidGlass()
