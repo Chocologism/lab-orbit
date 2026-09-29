@@ -143,15 +143,8 @@ describe('SystemTutorialModal Interactive In-Page Tour & Accessibility', () => {
     expect(modalContent).toContain('cursor: pointer')
   })
 
-  it('supports switching roles in the first step during demo mode', () => {
-    expect(template).toContain('v-if="isDemo && isFirstStep"')
-    expect(template).toContain('demo-role-stage')
-    expect(template).toContain('demo-role-segmented')
-    expect(template).toContain("handleSwitchRole('admin')")
-    expect(template).toContain("handleSwitchRole('member')")
-    expect(script).toContain('switchDemoRole')
-    expect(script).toContain('setUserRole')
-    expect(script).toContain('currentDemoRole')
-    expect(script).toContain('handleSwitchRole')
+  it('keeps tour modal focused without redundant demo role stage (handled by DemoModeBanner)', () => {
+    expect(template).not.toContain('demo-role-stage')
+    expect(template).not.toContain('demo-role-segmented')
   })
 })
