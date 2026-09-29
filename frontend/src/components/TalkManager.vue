@@ -66,7 +66,7 @@ function toggleAllTalks() {
 
 function getUser() {
   try {
-    return JSON.parse(localStorage.getItem('labhub_user') || '{}')
+    return JSON.parse(localStorage.getItem('csbd_user') || localStorage.getItem('cssbd_user') || localStorage.getItem('labhub_user') || '{}')
   } catch {
     return {}
   }
@@ -186,6 +186,7 @@ const empty = (eventType = 'talk') => ({
   city: '',
   organizer: '',
   sub_type: eventType === 'conference' ? '研讨会' : '',
+  abstract_start_date: '',
   abstract_deadline: '',
   early_bird_deadline: '',
   registration_deadline: '',
@@ -263,7 +264,12 @@ function getConferenceDeadlines(conf) {
   const [yToday, mToday, dToday] = todayStr.split('-').map(Number)
 
   const items = [
-    { key: 'abstract', label: '摘要投递截止', date: conf.abstract_deadline },
+    {
+      key: 'abstract',
+      label: conf.abstract_start_date ? `摘要投递 (${conf.abstract_start_date} 至 ${conf.abstract_deadline})` : '摘要投递截止',
+      date: conf.abstract_deadline,
+      startDate: conf.abstract_start_date
+    },
     { key: 'early_bird', label: '早鸟优惠截止', date: conf.early_bird_deadline },
     { key: 'registration', label: '注册报名截止', date: conf.registration_deadline }
   ].filter(item => Boolean(item.date && item.date.trim()))
@@ -372,6 +378,7 @@ function edit() {
     city: selected.value.city || '',
     organizer: selected.value.organizer || '',
     sub_type: selected.value.sub_type || (isConf ? '研讨会' : ''),
+    abstract_start_date: selected.value.abstract_start_date || '',
     abstract_deadline: selected.value.abstract_deadline || '',
     early_bird_deadline: selected.value.early_bird_deadline || '',
     registration_deadline: selected.value.registration_deadline || '',
@@ -699,6 +706,7 @@ defineExpose({ open, select })
         <label>
           会议类型
           <select v-model="form.sub_type">
+            <option value="国际会议">国际会议</option>
             <option value="研讨会">研讨会</option>
             <option value="年会">年会</option>
             <option value="暑期学校">暑期学校</option>
@@ -730,11 +738,17 @@ defineExpose({ open, select })
       <!-- 会议关键时间节点 -->
       <div v-if="form.event_type === 'conference'" class="form-section-card">
         <div class="form-section-title">关键时间节点（选填）</div>
-        <div class="form-row form-row-3">
+        <div class="form-row form-row-2">
+          <label>
+            摘要提交开始
+            <input v-model="form.abstract_start_date" type="date" />
+          </label>
           <label>
             摘要投递截止
             <input v-model="form.abstract_deadline" type="date" />
           </label>
+        </div>
+        <div class="form-row form-row-2">
           <label>
             早鸟优惠截止
             <input v-model="form.early_bird_deadline" type="date" />
@@ -1165,12 +1179,12 @@ defineExpose({ open, select })
 
 .multi-talk-tab:hover {
   border-color: var(--accent);
-  background: rgba(184, 155, 248, 0.08);
+  background: var(--raised);
 }
 
 .multi-talk-tab.active {
   border-color: var(--accent);
-  background: rgba(184, 155, 248, 0.14);
+  background: var(--raised);
   box-shadow: 0 0 0 1px var(--accent);
 }
 

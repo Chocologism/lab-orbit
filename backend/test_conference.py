@@ -6,7 +6,7 @@ client = TestClient(app)
 
 
 def test_talk_and_multi_day_conference_crud():
-    login_res = client.post("/api/auth/login", json={"email": "admin@lab.edu", "password": "lab123456"})
+    login_res = client.post("/api/auth/login", json={"email": "admin@pmo.ac.cn", "password": "123456"})
     assert login_res.status_code == 200
     token = login_res.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
@@ -15,7 +15,7 @@ def test_talk_and_multi_day_conference_crud():
     talk_payload = {
         "date": "2026-10-12",
         "time": "14:30",
-        "title": "高能天体物理前沿专题报告",
+        "title": "引力波透镜效应专题报告",
         "speaker": "王学者",
         "location": "天文楼 502",
         "notes": "专题讲座",
@@ -24,7 +24,7 @@ def test_talk_and_multi_day_conference_crud():
     t_res = client.post("/api/talks", json=talk_payload, headers=headers)
     assert t_res.status_code == 200
     talk_data = t_res.json()
-    assert talk_data["title"] == "高能天体物理前沿专题报告"
+    assert talk_data["title"] == "引力波透镜效应专题报告"
     assert talk_data["event_type"] == "talk"
     talk_id = talk_data["id"]
 
@@ -36,6 +36,8 @@ def test_talk_and_multi_day_conference_crud():
         "title": "全国星系宇宙学学术研讨会",
         "speaker": "国家天文台",
         "location": "北京国际会议中心",
+        "abstract_start_date": "2026-09-01",
+        "abstract_deadline": "2026-09-20",
         "notes": "多日学术交流",
         "event_type": "conference"
     }
@@ -45,6 +47,8 @@ def test_talk_and_multi_day_conference_crud():
     assert conf_data["title"] == "全国星系宇宙学学术研讨会"
     assert conf_data["event_type"] == "conference"
     assert conf_data["end_date"] == "2026-10-18"
+    assert conf_data["abstract_start_date"] == "2026-09-01"
+    assert conf_data["abstract_deadline"] == "2026-09-20"
     assert conf_data["time"] == "全天"
     conf_id = conf_data["id"]
 
@@ -56,6 +60,7 @@ def test_talk_and_multi_day_conference_crud():
     assert found_conf is not None
     assert found_conf["event_type"] == "conference"
     assert found_conf["end_date"] == "2026-10-18"
+    assert found_conf["abstract_start_date"] == "2026-09-01"
 
     # 4. Update conference
     update_res = client.put(f"/api/talks/{conf_id}", json={
@@ -65,11 +70,15 @@ def test_talk_and_multi_day_conference_crud():
         "title": "全国星系宇宙学学术研讨会（更新会期）",
         "speaker": "国家天文台 / 某学会",
         "location": "北京国际会议中心主会场",
+        "abstract_start_date": "2026-09-05",
+        "abstract_deadline": "2026-09-25",
         "event_type": "conference"
     }, headers=headers)
     assert update_res.status_code == 200
     updated_conf = update_res.json()
     assert updated_conf["end_date"] == "2026-10-19"
+    assert updated_conf["abstract_start_date"] == "2026-09-05"
+    assert updated_conf["abstract_deadline"] == "2026-09-25"
     assert updated_conf["time"] == "09:00 - 18:00"
 
     # 5. Clean up
@@ -85,10 +94,10 @@ def test_normal_user_can_update_talk_time_but_cannot_delete():
     from backend.auth import get_password_hash
 
     db = SessionLocal()
-    student = db.query(User).filter(User.email == "student_talk_test@lab.edu").first()
+    student = db.query(User).filter(User.email == "student_talk_test@pmo.ac.cn").first()
     if not student:
         student = User(
-            email="student_talk_test@lab.edu",
+            email="student_talk_test@pmo.ac.cn",
             name="普通组员",
             real_name="普通组员",
             hashed_password=get_password_hash("123456"),
@@ -99,10 +108,10 @@ def test_normal_user_can_update_talk_time_but_cannot_delete():
         db.refresh(student)
     db.close()
 
-    admin_login = client.post("/api/auth/login", json={"email": "admin@lab.edu", "password": "lab123456"})
+    admin_login = client.post("/api/auth/login", json={"email": "admin@pmo.ac.cn", "password": "123456"})
     admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
 
-    student_login = client.post("/api/auth/login", json={"email": "student_talk_test@lab.edu", "password": "123456"})
+    student_login = client.post("/api/auth/login", json={"email": "student_talk_test@pmo.ac.cn", "password": "123456"})
     student_headers = {"Authorization": f"Bearer {student_login.json()['access_token']}"}
 
     # 1. Admin creates a talk

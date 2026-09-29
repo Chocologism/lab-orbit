@@ -1,13 +1,14 @@
 <script setup>
-import { paperLabel, paperSource, paperRead, paperReadLabel } from '../utils/papers'
+import { paperLabel, paperSource, paperRead, paperReadLabel, getPresentationArxivList, extractAllArxivIds } from '../utils/papers'
 import { renderLatex, hasLatex } from '../utils/latex'
+import { refreshArxivUnread } from '../utils/arxivUnread'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { gsap } from 'gsap'
 import { Flip } from 'gsap/Flip'
 import { Draggable } from 'gsap/Draggable'
 import { seminarApi, arxivApi, talkApi, authApi, mailboxApi, scheduleImportApi } from '../api/client'
-import { buildSeminarNoticeBody, parseExternalEmails, formatSeminarDateTime } from '../utils/smtpNotice'
+import { buildSeminarNoticeBody, parseExternalEmails, formatSeminarDateTime, formatNoticeBodyToHtml } from '../utils/smtpNotice'
 import ScheduleOverview from '../components/ScheduleOverview.vue'
 import ConferenceList from '../components/ConferenceList.vue'
 import TalkManager from '../components/TalkManager.vue'
@@ -21,8 +22,10 @@ import PendingImportsModal from '../components/PendingImportsModal.vue'
 import SeminarReminders from '../components/SeminarReminders.vue'
 import AppIcon from '../components/AppIcon.vue'
 import LoadingState from '../components/LoadingState.vue'
+import SlidingSegmented from '../components/SlidingSegmented.vue'
+import ThinHoundCheckbox from '../components/ThinHoundCheckbox.vue'
 import { confirmAction, notify } from '../composables/feedback'
-import { addDays, dateString, filterSeminars, findConflicts, monday, moveDraft, nextSeminar, parseDate, previewSeminars, railDates, reconcileChanges, seminarIcs, shanghaiToday, sortSeminars, statusLabel } from '../utils/schedule'
+import { addDays, dateString, effectiveSeminarStatus, filterSeminars, findConflicts, isSeminarCompleted, monday, moveDraft, nextSeminar, parseDate, previewSeminars, railDates, reconcileChanges, seminarIcs, shanghaiToday, sortSeminars, statusLabel } from '../utils/schedule'
 
 gsap.registerPlugin(Flip, Draggable)
 
@@ -46,21 +49,40 @@ async function refreshPendingImportsCount() {
   }
 }
 
-function handleSmartPasteSaved() {
-  load()
+async function handleSmartPasteSaved(savedItem) {
+  await load()
   scheduleChanged()
   refreshPendingImportsCount()
+  if (savedItem?.date) {
+    focusDate.value = savedItem.date
+    if (savedItem.type === 'conference') {
+      switchView('conferences')
+    } else {
+      switchView('week')
+    }
+    notify(`已导入并自动定位到【${savedItem.date}】所在周日程`)
+  }
 }
 
 function handleSmartPastePending() {
   refreshPendingImportsCount()
 }
 
-function handlePendingResolved() {
-  load()
+async function handlePendingResolved(res) {
+  await load()
   scheduleChanged()
   refreshPendingImportsCount()
+  if (res?.date) {
+    focusDate.value = res.date
+    if (res.target_type === 'conference') {
+      switchView('conferences')
+    } else {
+      switchView('week')
+    }
+    notify(`已发布并自动定位到【${res.date}】所在周日程`)
+  }
 }
+
 
 const canManageSeminars = computed(() => {
   if (!currentUser.value) return false
@@ -148,7 +170,7 @@ const registeredMembersWithEmail = computed(() => {
     if (!m.email || !m.email.includes('@')) return false
     const emailLower = m.email.trim().toLowerCase()
     const nameTrim = (m.real_name || m.name || '').trim()
-    if (m.role === 'admin' && nameTrim === '系统管理员') return false
+    if (emailLower === 'admin@pmo.ac.cn' || nameTrim === '系统管理员') return false
     return true
   })
 })
@@ -163,7 +185,7 @@ const allNoticeRecipients = computed(() => {
 })
 
 const selectableSeminars = computed(() => {
-  return seminars.value.filter(s => s.status === 'upcoming')
+  return seminars.value.filter(s => effectiveSeminarStatus(s) === 'upcoming')
 })
 
 function populateNoticeTemplate(targetSeminar) {
@@ -171,7 +193,7 @@ function populateNoticeTemplate(targetSeminar) {
   const sharers = (targetSeminar.presentations || [])
     .map(p => p.presenter_name)
     .filter(Boolean)
-    .join('、')
+    .join('，')
   const adminName = currentUser.value?.real_name || currentUser.value?.name || '管理员'
   const dateFormatted = formatSeminarDateTime(targetSeminar.date, targetSeminar.time)
 
@@ -183,6 +205,7 @@ function populateNoticeTemplate(targetSeminar) {
     presenterName: targetSeminar.presenter_name,
     presentationsText: sharers,
     topic: targetSeminar.topic,
+    abstract: targetSeminar.abstract,
     adminName: adminName
   })
 }
@@ -238,10 +261,13 @@ async function handleSendSeminarNotice() {
 
   sendingSeminarNotice.value = true
   try {
+    const rawBody = noticeBody.value.trim()
+    const emailHtml = formatNoticeBodyToHtml(rawBody)
     const res = await mailboxApi.sendSeminarNotice({
       subject: noticeSubject.value.trim(),
-      body: noticeBody.value.trim(),
-      body_text: noticeBody.value.trim(),
+      body: rawBody,
+      body_text: rawBody,
+      body_html: emailHtml,
       recipients: allNoticeRecipients.value,
       external_emails: allNoticeRecipients.value,
       seminar_id: selectedNoticeSeminarId.value || null
@@ -266,7 +292,7 @@ const affectedPostponeSeminars = computed(() => {
   const targetDate = postponeTarget.value.date
   const days = Number(postponeDays.value) || 0
   return seminars.value
-    .filter(s => s.status === 'upcoming' && s.date >= targetDate)
+    .filter(s => effectiveSeminarStatus(s) === 'upcoming' && s.date >= targetDate)
     .sort((a, b) => a.date.localeCompare(b.date))
     .map(s => {
       const origDate = s.date
@@ -323,6 +349,56 @@ const savingPresentation = ref(false)
 const presentationError = ref('')
 const checkingDuplicateArxiv = ref(false)
 const duplicateArxivWarning = ref('')
+const showFeedPaperPicker = ref(false)
+const feedPaperSearchQuery = ref('')
+
+const parsedPresentationArxivIds = computed(() => {
+  return extractAllArxivIds(presentationForm.value.arxiv_id || '')
+})
+
+function isPaperAddedToPresentation(arxivId) {
+  if (!arxivId) return false
+  const clean = String(arxivId).replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase()
+  return parsedPresentationArxivIds.value.some(id => id.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase() === clean)
+}
+
+function addPaperFromFeedToPresentation(p) {
+  if (!p?.arxiv_id) return
+  const clean = String(p.arxiv_id).replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim()
+  const current = extractAllArxivIds(presentationForm.value.arxiv_id || '')
+  if (!isPaperAddedToPresentation(clean)) {
+    current.push(clean)
+    presentationForm.value.arxiv_id = current.join(', ')
+    checkSharerDuplicateArxiv()
+  }
+}
+
+function removePresentationArxiv(targetId) {
+  const clean = String(targetId).replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase()
+  const current = extractAllArxivIds(presentationForm.value.arxiv_id || '')
+  const filtered = current.filter(id => id.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase() !== clean)
+  presentationForm.value.arxiv_id = filtered.join(', ')
+  checkSharerDuplicateArxiv()
+}
+
+async function toggleFeedPaperPicker() {
+  showFeedPaperPicker.value = !showFeedPaperPicker.value
+  if (showFeedPaperPicker.value && papers.value.length === 0) {
+    await loadPaperOptions()
+  }
+}
+
+const filteredFeedPapers = computed(() => {
+  const list = papers.value || []
+  const q = feedPaperSearchQuery.value.trim().toLowerCase()
+  if (!q) return list.slice(0, 20)
+  return list.filter(p => {
+    const aid = (p.arxiv_id || '').toLowerCase()
+    const title = (p.title || '').toLowerCase()
+    const rec = (p.recommender?.real_name || p.recommender?.name || '').toLowerCase()
+    return aid.includes(q) || title.includes(q) || rec.includes(q)
+  }).slice(0, 30)
+})
 
 async function checkSharerDuplicateArxiv() {
   const aid = (presentationForm.value.arxiv_id || '').trim()
@@ -333,8 +409,9 @@ async function checkSharerDuplicateArxiv() {
   try {
     checkingDuplicateArxiv.value = true
     const res = await seminarApi.checkArxivPresented(aid, editingPresentationSeminar.value?.id)
-    if (res?.presented) {
-      duplicateArxivWarning.value = '该文章在曾经的组会中以arxiv分享的形式讲过'
+    const data = res?.data !== undefined ? res.data : res
+    if (data?.presented) {
+      duplicateArxivWarning.value = data.paper?.arxiv_id ? `文献 ${data.paper.arxiv_id} 在曾经的组会中以arxiv分享的形式讲过` : '该文章在曾经的组会中以arxiv分享的形式讲过'
     } else {
       duplicateArxivWarning.value = ''
     }
@@ -366,6 +443,8 @@ function canEditAbstract(item) {
 function openPresentationEdit(seminar, presentation) {
   editingPresentationSeminar.value = seminar
   editingPresentation.value = presentation
+  showFeedPaperPicker.value = false
+  feedPaperSearchQuery.value = ''
   presentationForm.value = {
     arxiv_id: presentation.arxiv_id || '',
     slides_url: presentation.slides_url || '',
@@ -384,7 +463,10 @@ async function savePresentationShare() {
     try {
       const checkRes = await seminarApi.checkArxivPresented(aid, editingPresentationSeminar.value?.id)
       if (checkRes?.presented) {
-        const proceed = await confirmAction('该文章在曾经的组会中以arxiv分享的形式讲过，是否继续保存？', {
+        const warnMsg = checkRes?.paper?.arxiv_id
+          ? `文献 ${checkRes.paper.arxiv_id} 在曾经的组会中以arxiv分享的形式讲过，是否继续保存？`
+          : '该文章在曾经的组会中以arxiv分享的形式讲过，是否继续保存？'
+        const proceed = await confirmAction(warnMsg, {
           title: 'arXiv 分享查重提醒',
           confirmLabel: '继续保存',
           cancelLabel: '取消'
@@ -409,6 +491,8 @@ async function savePresentationShare() {
       selected.value = seminars.value.find(s => s.id === selected.value.id) || null
     }
     scheduleChanged()
+    window.dispatchEvent(new CustomEvent('arxiv-feed-updated'))
+    refreshArxivUnread()
   } catch (err) {
     presentationError.value = err.message || '更新失败'
   } finally {
@@ -693,7 +777,7 @@ async function loadPaperOptions() {
 function shiftRail(days) { focusDate.value = addDays(focusDate.value, days) }
 function today() { focusDate.value = shanghaiToday() }
 function stage(item, date) {
-  if (!canManageSeminars.value || !adjustmentMode.value || item.status !== 'upcoming') return
+  if (!canManageSeminars.value || !adjustmentMode.value || effectiveSeminarStatus(item) !== 'upcoming') return
   drafts.value = moveDraft(drafts.value, item, date)
 }
 function resetOne(change) { drafts.value = Object.fromEntries(Object.entries(drafts.value).filter(([id]) => +id !== change.id)) }
@@ -784,7 +868,10 @@ async function saveSeminar() {
       try {
         const check = await seminarApi.checkArxivPresented(pres.arxiv_id, editId.value)
         if (check?.presented) {
-          const proceed = await confirmAction('该文章在曾经的组会中以arxiv分享的形式讲过，是否继续保存？', {
+          const warnMsg = check?.paper?.arxiv_id
+            ? `文献 ${check.paper.arxiv_id} 在曾经的组会中以arxiv分享的形式讲过，是否继续保存？`
+            : '该文章在曾经的组会中以arxiv分享的形式讲过，是否继续保存？'
+          const proceed = await confirmAction(warnMsg, {
             title: 'arXiv 分享查重提醒',
             confirmLabel: '继续保存',
             cancelLabel: '取消'
@@ -812,6 +899,8 @@ async function saveSeminar() {
     if (editId.value) await seminarApi.updateSeminar(editId.value, payload)
     else await seminarApi.createSeminar(payload)
     showEdit.value = false; selected.value = null; scheduleChanged(); await load(); notify(editId.value ? '日程已更新。' : '新组会已加入时间轨道。')
+    window.dispatchEvent(new CustomEvent('arxiv-feed-updated'))
+    refreshArxivUnread()
   } catch (error) { notify(error.message, 'error') } finally { saving.value = false }
 }
 async function complete(item) {
@@ -824,7 +913,14 @@ async function remove(item) {
   if (!canManageSeminars.value) return
   if (ensureNoDraft()) return
   if (!(await confirmAction(`删除“${item.topic}”？此操作不可恢复。`, { title: '删除组会', confirmLabel: '删除', danger: true }))) return
-  try { await seminarApi.deleteSeminar(item.id); selected.value = null; await load(); notify('组会记录已删除。') } catch (error) { notify(error.message, 'error') }
+  try {
+    await seminarApi.deleteSeminar(item.id);
+    selected.value = null;
+    await load();
+    notify('组会记录已删除。');
+    window.dispatchEvent(new CustomEvent('arxiv-feed-updated'));
+    refreshArxivUnread();
+  } catch (error) { notify(error.message, 'error') }
 }
 function downloadIcs(item) {
   if (isDrafted(item)) return notify('该日程仍在改期草稿中，请先保存后再导出日历。', 'error')
@@ -1038,12 +1134,12 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
         <div class="eyebrow">学术日程</div>
         <h1>学术排期与研讨日程</h1>
       </div>
-      <div id="tour-seminars-header-actions" class="header-actions">
+      <div class="header-actions">
         <SeminarReminders />
-        <button id="tour-smart-paste-btn" class="button secondary smart-paste-btn" @click="showSmartPasteModal = true">
+        <button class="button secondary smart-paste-btn" @click="showSmartPasteModal = true">
           <AppIcon name="sparkle" />文本智能导入
         </button>
-        <button v-if="pendingImportsCount > 0" id="tour-pending-queue-btn" class="button secondary pending-queue-btn" @click="showPendingImportsModal = true">
+        <button v-if="pendingImportsCount > 0" class="button secondary pending-queue-btn" @click="showPendingImportsModal = true">
           <AppIcon name="clock" />待处理导入
           <span class="badge amber count-pill">{{ pendingImportsCount }}</span>
         </button>
@@ -1080,7 +1176,7 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
     <LoadingState v-if="loading" message="正在读取组会时间轨道" />
     <div v-else-if="loadError" class="error-banner"><span>{{ loadError }}</span><button class="button small secondary" @click="load">重试</button></div>
     <template v-else>
-      <div v-if="!adjustmentMode" id="tour-seminars-view-switch" class="segmented view-switch" role="tablist" aria-label="学术日程展示方式">
+      <SlidingSegmented v-if="!adjustmentMode" class="segmented view-switch" role="tablist" aria-label="学术日程展示方式">
         <button
           id="tab-timeline"
           role="tab"
@@ -1117,24 +1213,22 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
         >
           学术会议
         </button>
-      </div>
-      <div class="tour-seminars-card-wrapper">
-        <ScheduleOverview
-          v-if="!adjustmentMode && (viewMode === 'timeline' || viewMode === 'week')"
-          :mode="viewMode"
-          :seminars="seminars"
-          :talks="talks"
-          :focus-date="focusDate"
-          :can-manage="canManageSeminars"
-          :target-seminar-id="targetSeminarId"
-          :disable-auto-reset="disableAutoReset"
-          @update:focus-date="focusDate = $event"
-          @select-seminar="selected = $event"
-          @select-talk="talkManager.select($event)"
-          @swap-seminars="handleSwapSeminars"
-          @update-interest="handleScheduleInterestUpdated"
-        />
-      </div>
+      </SlidingSegmented>
+      <ScheduleOverview
+        v-if="!adjustmentMode && (viewMode === 'timeline' || viewMode === 'week')"
+        :mode="viewMode"
+        :seminars="seminars"
+        :talks="talks"
+        :focus-date="focusDate"
+        :can-manage="canManageSeminars"
+        :target-seminar-id="targetSeminarId"
+        :disable-auto-reset="disableAutoReset"
+        @update:focus-date="focusDate = $event"
+        @select-seminar="selected = $event"
+        @select-talk="talkManager.select($event)"
+        @swap-seminars="handleSwapSeminars"
+        @update-interest="handleScheduleInterestUpdated"
+      />
       <ConferenceList
         v-if="!adjustmentMode && viewMode === 'conferences'"
         :conferences="academicConferences"
@@ -1144,10 +1238,10 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
         @toggle-interest="handleConferenceInterestToggle"
       />
 
-      <section v-if="adjustmentMode" class="control-bar"><div class="segmented"><button :class="{ active: statusFilter === 'all' }" @click="statusFilter = 'all'">全部 {{ seminars.length }}</button><button :class="{ active: statusFilter === 'upcoming' }" @click="statusFilter = 'upcoming'">待举行</button><button :class="{ active: statusFilter === 'completed' }" @click="statusFilter = 'completed'">已完成</button></div><div class="adjustment-guide"><span class="badge cyan"><AppIcon name="drag" :size="14" />调整排期中</span><span class="muted">按住卡片拖动到目标日期框，松开自动吸附。修改完成后点击底栏统一保存。</span></div><label class="presenter-select">主讲人<select v-model="presenterFilter"><option value="">全部成员</option><option v-for="presenter in presenters" :key="presenter" :value="presenter">{{ presenter }}</option></select></label></section>
+      <section v-if="adjustmentMode" class="control-bar"><SlidingSegmented class="segmented"><button :class="{ active: statusFilter === 'all' }" @click="statusFilter = 'all'">全部 {{ seminars.length }}</button><button :class="{ active: statusFilter === 'upcoming' }" @click="statusFilter = 'upcoming'">待举行</button><button :class="{ active: statusFilter === 'completed' }" @click="statusFilter = 'completed'">已完成</button></SlidingSegmented><div class="adjustment-guide"><span class="badge cyan"><AppIcon name="drag" :size="14" />调整排期中</span><span class="muted">按住卡片拖动到目标日期框，松开自动吸附。修改完成后点击底栏统一保存。</span></div><label class="presenter-select">主讲人<select v-model="presenterFilter"><option value="">全部成员</option><option v-for="presenter in presenters" :key="presenter" :value="presenter">{{ presenter }}</option></select></label></section>
 
       <section v-if="adjustmentMode" class="rail-shell" :class="{ adjusting: adjustmentMode }"><header class="rail-header"><div><span class="mono">{{ monday(focusDate) }} — {{ addDays(monday(focusDate), 13) }}</span><p v-if="adjustmentMode">拖动卡片到日期列，先在草稿中预览，再统一保存。</p><p v-else>点击日程查看详细议程、文献与归档材料。</p></div><div class="rail-navigation"><button class="icon-button" aria-label="上一周" @click="shiftRail(-7)"><AppIcon name="left" /></button><button class="button small ghost" @click="today">今天</button><button class="icon-button" aria-label="下一周" @click="shiftRail(7)"><AppIcon name="right" /></button><label class="sr-only" for="jump-date">跳转日期</label><input id="jump-date" class="jump-date" :value="focusDate" type="date" @change="focusDate = $event.target.value" /></div></header>
-        <div ref="rail" class="date-rail" aria-label="组会日期时间轨道"><section v-for="date in dates" :key="date" class="day-lane" :class="{ today: date === shanghaiToday(), focused: date === focusDate }" :data-drop-date="date" tabindex="0" @keydown.enter.prevent="focusDate = date"><header><time :datetime="date">{{ dayFormatter.format(new Date(`${date}T12:00:00+08:00`)) }}</time><span v-if="date === shanghaiToday()">今天</span></header><div class="lane-content"><article v-for="item in byDate[date]" :key="item.id" class="seminar-card" :class="{ drafted: isDrafted(item) }" :data-seminar-id="item.id" :data-movable="adjustmentMode && item.status === 'upcoming'" @click="!adjustmentMode && (selected = item)"><div v-if="adjustmentMode && item.status === 'upcoming'" class="card-drag-cue"><AppIcon name="drag" :size="15" /><span>拖动改期</span></div><div class="card-meta"><span class="mono card-date-text">{{ item.date }} · {{ item.time }}</span><span :class="['badge', item.status === 'completed' ? 'success' : statusLabel(item) === '待补纪要' ? 'amber' : 'cyan']">{{ statusLabel(item) }}</span></div><div v-if="isDrafted(item)" class="draft-indicator"><span class="badge amber">新排期：{{ item.date }}</span><button class="undo-draft-button" type="button" title="恢复原日期" @click.stop="resetOne({ id: item.id })"><AppIcon name="undo" :size="12" />撤销</button></div><h3 class="academic" v-html="renderLatex(item.topic)"></h3><p>主讲：{{ item.presenter_name || '无' }}</p><p v-if="item.presentations?.length">arXiv：{{ item.presentations.map(p => p.presenter_name).join("、") }}</p><span v-if="item.paper" class="paper-ref mono">{{ paperLabel(item.paper) }}</span><label v-if="adjustmentMode && item.status === 'upcoming'" class="mobile-move">改到<input :value="item.date" type="date" @click.stop @change="stage(item, $event.target.value)" /></label></article><div v-if="!byDate[date].length" class="empty-lane"><span class="empty-lane-text">{{ adjustmentMode ? '可拖到这里' : '暂无组会' }}</span></div></div></section></div>
+        <div ref="rail" class="date-rail" aria-label="组会日期时间轨道"><section v-for="date in dates" :key="date" class="day-lane" :class="{ today: date === shanghaiToday(), focused: date === focusDate }" :data-drop-date="date" tabindex="0" @keydown.enter.prevent="focusDate = date"><header><time :datetime="date">{{ dayFormatter.format(new Date(`${date}T12:00:00+08:00`)) }}</time><span v-if="date === shanghaiToday()">今天</span></header><div class="lane-content"><article v-for="item in byDate[date]" :key="item.id" class="seminar-card" :class="{ drafted: isDrafted(item) }" :data-seminar-id="item.id" :data-movable="adjustmentMode && effectiveSeminarStatus(item) === 'upcoming'" @click="!adjustmentMode && (selected = item)"><div v-if="adjustmentMode && effectiveSeminarStatus(item) === 'upcoming'" class="card-drag-cue"><AppIcon name="drag" :size="15" /><span>拖动改期</span></div><div class="card-meta"><span class="mono card-date-text">{{ item.date }} · {{ item.time }}</span><span :class="['badge', isSeminarCompleted(item) ? 'success' : 'cyan']">{{ statusLabel(item) }}</span></div><div v-if="isDrafted(item)" class="draft-indicator"><span class="badge amber">新排期：{{ item.date }}</span><button class="undo-draft-button" type="button" title="恢复原日期" @click.stop="resetOne({ id: item.id })"><AppIcon name="undo" :size="12" />撤销</button></div><h3 class="academic" v-html="renderLatex(item.topic)"></h3><p>主讲：{{ item.presenter_name || '无' }}</p><p v-if="item.presentations?.length">arXiv：{{ item.presentations.map(p => p.presenter_name).join("、") }}</p><span v-if="item.paper" class="paper-ref mono">{{ paperLabel(item.paper) }}</span><label v-if="adjustmentMode && effectiveSeminarStatus(item) === 'upcoming'" class="mobile-move">改到<input :value="item.date" type="date" @click.stop @change="stage(item, $event.target.value)" /></label></article><div v-if="!byDate[date].length" class="empty-lane"><span class="empty-lane-text">{{ adjustmentMode ? '可拖到这里' : '暂无组会' }}</span></div></div></section></div>
       </section>
 
       <aside v-if="draftList.length" class="draft-bar"><div><span class="badge cyan"><AppIcon name="drag" :size="14" />{{ draftList.length }} 项待保存</span><span class="muted">改期不会生效，直到你统一保存。</span></div><div><button class="button small ghost" @click="showChanges = true">查看改动</button><button class="button small secondary" @click="cancelChanges">放弃草稿</button><button class="button small primary" :disabled="saving" @click="persistChanges"><AppIcon name="save" />{{ saving ? '保存中' : '保存全部' }}</button></div></aside>
@@ -1158,7 +1252,7 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
         <div class="detail-meta">
           <span class="badge cyan"><AppIcon name="calendar" :size="14" />{{ selectedItem.date }}</span>
           <span class="badge"><AppIcon name="clock" :size="14" />{{ selectedItem.time }}</span>
-          <span :class="['badge', selectedItem.status === 'completed' ? 'success' : 'cyan']">{{ statusLabel(selectedItem) }}</span>
+          <span :class="['badge', isSeminarCompleted(selectedItem) ? 'success' : 'cyan']">{{ statusLabel(selectedItem) }}</span>
         </div>
         <div class="detail-block topic-detail-block">
           <div class="topic-header-row">
@@ -1210,7 +1304,16 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
               </button>
             </div>
             <div class="presentation-links">
-              <a v-if="presentation.arxiv_id" :href="`https://arxiv.org/abs/${presentation.arxiv_id}`" target="_blank" rel="noreferrer" class="arxiv-link">arXiv:{{ presentation.arxiv_id }} ↗</a>
+              <template v-if="getPresentationArxivList(presentation.arxiv_id).length > 0">
+                <a
+                  v-for="aid in getPresentationArxivList(presentation.arxiv_id)"
+                  :key="aid"
+                  :href="`https://arxiv.org/abs/${aid}`"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="arxiv-link"
+                >arXiv:{{ aid }} ↗</a>
+              </template>
               <span v-else class="badge amber">待补充 arXiv 链接</span>
               <AttachmentLink v-if="presentation.slides_url" :url="presentation.slides_url" />
               <span v-else class="muted">未提供 Slides</span>
@@ -1241,9 +1344,9 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
         </div>
         <div class="form-actions">
           <button class="button ghost add-calendar-btn" @click="downloadIcs(selectedItem)"><AppIcon name="calendar" />加入日历</button>
-          <button v-if="canManageSeminars && selectedItem.status === 'upcoming'" class="button secondary" @click="openPostponeModal(selectedItem)"><AppIcon name="clock" />顺延此后组会</button>
+          <button v-if="canManageSeminars && effectiveSeminarStatus(selectedItem) === 'upcoming'" class="button secondary" @click="openPostponeModal(selectedItem)"><AppIcon name="clock" />顺延此后组会</button>
           <button v-if="canEditSeminar(selectedItem)" class="button secondary" @click="openEdit(selectedItem)">编辑</button>
-          <button v-if="canManageSeminars && selectedItem.status === 'upcoming'" class="button primary" @click="complete(selectedItem)"><AppIcon name="check" />标记完成</button>
+          <button v-if="canManageSeminars && effectiveSeminarStatus(selectedItem) === 'upcoming'" class="button primary" @click="complete(selectedItem)"><AppIcon name="check" />标记完成</button>
           <button v-if="canManageSeminars" class="button danger delete-seminar-btn" aria-label="删除组会" title="删除组会" @click="remove(selectedItem)"><AppIcon name="close" /></button>
         </div>
       </template>
@@ -1383,8 +1486,8 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
             <p class="muted">选择注册账号后，该成员将在组会临近时收到填写 arXiv 链接的待办提醒。</p>
             <WaveInput
               v-model="presentation.arxiv_id"
-              label="arXiv 编号或链接"
-              placeholder="例如 2302.13971 或 https://arxiv.org/abs/2302.13971"
+              label="arXiv 编号或链接（支持多篇）"
+              placeholder="例如 2302.13971, 2401.00123"
               clearable
             />
             <FileField v-model="presentation.slides_url" label="分享 Slides（可选）" @busy="uploadCount += $event ? 1 : -1" />
@@ -1503,16 +1606,94 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
         </p>
         <WaveInput
           v-model="presentationForm.arxiv_id"
-          label="arXiv 编号或链接"
-          placeholder="例如 2302.13971 或 https://arxiv.org/abs/2302.13971"
+          label="arXiv 编号或链接（支持多篇）"
+          placeholder="例如 2302.13971, 2401.00123"
           clearable
           @blur="checkSharerDuplicateArxiv"
           @change="checkSharerDuplicateArxiv"
         />
+
+        <!-- 当前已包含的文献列表标签 -->
+        <div v-if="parsedPresentationArxivIds.length > 0" class="presentation-papers-chips">
+          <span class="chips-label muted">本次分享包含 {{ parsedPresentationArxivIds.length }} 篇文献：</span>
+          <div class="chips-list">
+            <span
+              v-for="aid in parsedPresentationArxivIds"
+              :key="aid"
+              class="paper-chip"
+            >
+              <span>arXiv:{{ aid }}</span>
+              <button
+                type="button"
+                class="chip-remove-btn"
+                title="从本次组会中移除此篇"
+                @click="removePresentationArxiv(aid)"
+              >
+                &times;
+              </button>
+            </span>
+          </div>
+        </div>
+
         <div v-if="duplicateArxivWarning" class="duplicate-warning-box">
           <span class="badge amber">已讲过</span>
           <span>{{ duplicateArxivWarning }}</span>
         </div>
+
+        <!-- 从文献推荐流添加文献面板 -->
+        <div class="feed-picker-toggle-row">
+          <button
+            type="button"
+            class="button small secondary"
+            @click="toggleFeedPaperPicker"
+          >
+            <AppIcon name="file-text" :size="12" />
+            <span>{{ showFeedPaperPicker ? '收起文献流点选' : '从文献推荐流添加文献' }}</span>
+          </button>
+          <span class="muted feed-picker-tip">支持直接输入 arXiv 编号，也可从文献推荐流快捷选用</span>
+        </div>
+
+        <div v-if="showFeedPaperPicker" class="feed-papers-picker-container">
+          <div class="picker-search-bar">
+            <input
+              v-model="feedPaperSearchQuery"
+              type="text"
+              class="picker-search-input"
+              placeholder="搜索文献流标题、arXiv 编号或推荐人…"
+            />
+          </div>
+          <div class="picker-paper-list">
+            <div
+              v-for="p in filteredFeedPapers"
+              :key="p.id || p.arxiv_id"
+              class="picker-paper-item"
+              :class="{ 'is-added': isPaperAddedToPresentation(p.arxiv_id) }"
+            >
+              <div class="picker-paper-info">
+                <div class="picker-paper-meta">
+                  <span class="badge blue">arXiv:{{ p.arxiv_id }}</span>
+                  <span v-if="p.recommender?.real_name || p.recommender?.name" class="picker-recommender muted">
+                    由 {{ p.recommender.real_name || p.recommender.name }} 推荐
+                  </span>
+                </div>
+                <div class="picker-paper-title" v-html="renderLatex(p.title)"></div>
+              </div>
+              <button
+                type="button"
+                class="button small"
+                :class="isPaperAddedToPresentation(p.arxiv_id) ? 'secondary' : 'primary'"
+                :disabled="isPaperAddedToPresentation(p.arxiv_id)"
+                @click="addPaperFromFeedToPresentation(p)"
+              >
+                {{ isPaperAddedToPresentation(p.arxiv_id) ? '已添加' : '+ 添加' }}
+              </button>
+            </div>
+            <div v-if="filteredFeedPapers.length === 0" class="picker-empty muted">
+              未找到匹配的推荐流文献
+            </div>
+          </div>
+        </div>
+
         <FileField
           v-model="presentationForm.slides_url"
           label="分享 Slides（可选，支持 PDF）"
@@ -1574,12 +1755,12 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
 
         <div class="postpone-controls">
           <span class="field-label">推迟周期</span>
-          <div class="segmented">
+          <SlidingSegmented class="segmented">
             <button type="button" :class="{ active: postponeDays === 7 }" @click="postponeDays = 7">+1 周 (7天)</button>
             <button type="button" :class="{ active: postponeDays === 14 }" @click="postponeDays = 14">+2 周 (14天)</button>
             <button type="button" :class="{ active: postponeDays === 21 }" @click="postponeDays = 21">+3 周 (21天)</button>
             <button type="button" :class="{ active: ![7, 14, 21].includes(postponeDays) }" @click="postponeDays = 28">+4 周</button>
-          </div>
+          </SlidingSegmented>
           <label class="custom-days-input">
             <span>或自定义天数：</span>
             <input type="number" v-model.number="postponeDays" min="1" max="365" class="postpone-days-num" />
@@ -1669,10 +1850,10 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
                 class="member-checkbox-card"
                 :class="{ checked: selectedMemberEmails.includes(m.email.toLowerCase()) }"
               >
-                <input
+                <ThinHoundCheckbox
                   v-model="selectedMemberEmails"
-                  type="checkbox"
                   :value="m.email.toLowerCase()"
+                  :size="18"
                 />
                 <div class="member-card-info">
                   <span class="member-name">{{ m.real_name || m.name }}</span>
@@ -1691,7 +1872,7 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
               v-model="externalEmailsRaw"
               rows="2"
               class="external-email-input mono"
-              placeholder="如：collaborator@univ.edu.cn, guest@lab.org"
+              placeholder="如：collaborator@pmo.ac.cn, guest@nju.edu.cn"
             ></textarea>
             <div v-if="parsedExternalEmails.length" class="parsed-external-hint">
               <span class="badge cyan-subtle">
@@ -1813,7 +1994,7 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
 .heading-title-group { flex-shrink:0; min-width:280px; }
 .heading-title-group h1 { white-space:nowrap; }
 .seminar-page .header-actions { flex:1; justify-content:flex-end; min-width:min(100%, 540px); }
-.header-actions,.control-bar,.rail-header,.rail-navigation,.next-card-inner,.detail-meta,.detail-block>p,.draft-bar,.draft-bar>div:last-child { display:flex; align-items:center; gap:10px; }.header-actions { flex-wrap:wrap; }.next-card { border-color:var(--line)!important; padding:0!important; background:linear-gradient(135deg,var(--surface),var(--surface))!important; }.next-card-inner { justify-content:space-between; gap:24px; padding:26px; }.next-card h2 { font-size:21px; margin-bottom:8px; color:var(--text); }.next-card p { color:var(--muted); font-size:13px; }.control-bar { justify-content:space-between; flex-wrap:wrap; gap:12px; }.adjustment-guide { display:flex; align-items:center; gap:10px; font-size:12px; }.presenter-select { display:flex; align-items:center; gap:8px; white-space:nowrap; color:var(--muted); }.presenter-select select { width:170px; padding:8px 30px 8px 10px; font-size:12px; }.rail-shell { overflow:hidden; border:1px solid var(--line); border-radius:14px; background:var(--panel); }.rail-header { padding:18px 20px; border-bottom:1px solid var(--line); justify-content:space-between; gap:18px; }.rail-header>div:first-child { min-width:0; }.rail-header .mono { color:var(--text); font-size:13px; }.rail-header p { margin-top:3px; color:var(--muted); font-size:12px; }.jump-date { width:140px; padding:7px 9px; font-size:12px; }.date-rail { display:grid; grid-auto-flow:column; grid-auto-columns:230px; overflow-x:auto; min-height:410px; background:var(--surface); }.day-lane { width:230px; min-width:230px; max-width:230px; min-height:100%; border-right:1px solid var(--line); padding:14px 11px; box-sizing:border-box; position:relative; transition:background .15s,box-shadow .15s,border-color .15s; }.day-lane.drop-active { background:rgba(46,125,243,.08)!important; box-shadow:inset 0 0 0 2px var(--accent),0 0 20px rgba(46,125,243,.15)!important; border-right-color:var(--accent)!important; }.day-lane.drop-active .empty-lane { border-color:var(--accent)!important; color:var(--accent)!important; background:rgba(46,125,243,.08)!important; }.day-lane>header { display:flex; align-items:center; justify-content:space-between; padding:0 3px 10px; color:var(--muted); font-size:12px; }.day-lane.today>header time { color:var(--accent); font-weight:600; }.day-lane>header span { font-size:10px; color:var(--panel); background:var(--accent); padding:2px 6px; border-radius:9999px; font-weight:600; }.lane-content { width:100%; min-width:0; box-sizing:border-box; display:grid; align-content:start; gap:10px; min-height:330px; position:relative; }.empty-lane { width:100%; box-sizing:border-box; border:1px dashed var(--line); border-radius:9px; padding:16px 10px; color:var(--muted); font-size:12px; text-align:center; transition:border-color .15s,background .15s,color .15s; }.adjusting .day-lane { background:rgba(197,230,223,.04); }.adjusting .empty-lane { color:var(--accent); border-color:var(--accent); background:rgba(197,230,223,.1); }.seminar-card { width:100%; min-width:0; margin:0; position:relative; padding:14px; border:1px solid var(--line); background:var(--panel); border-radius:11px; cursor:pointer; box-sizing:border-box; box-shadow:0 1px 3px rgba(0,0,0,0.04); transition:border-color .18s,background .18s,box-shadow .18s; will-change:transform; }.seminar-card:hover { border-color:var(--accent); background:var(--panel); box-shadow:0 6px 16px rgba(46,125,243,.12); }.seminar-card.drafted { border-color:var(--accent); box-shadow:inset 0 0 0 1px rgba(197,230,223,.3),0 6px 20px rgba(46,125,243,.18); }.adjusting .seminar-card[data-movable="true"] { cursor:grab; user-select:none; }.adjusting .seminar-card[data-movable="true"]:active { cursor:grabbing; }.seminar-card.dragging { cursor:grabbing!important; z-index:100!important; box-shadow:0 16px 36px rgba(15,23,42,.18),0 0 0 2px var(--accent)!important; border-color:var(--accent)!important; opacity:.96; }.card-drag-cue { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--accent); margin-bottom:8px; font-weight:600; }.card-meta { display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:8px; }.card-date-text { font-size:11px; color:var(--accent); font-weight:600; }.draft-indicator { display:flex; align-items:center; justify-content:space-between; gap:6px; margin:8px 0 10px; padding:4px 8px; background:rgba(245,158,11,.1); border:1px solid rgba(245,158,11,.3); border-radius:6px; }.undo-draft-button { background:transparent; border:0; color:var(--warning); font-size:11px; cursor:pointer; display:flex; align-items:center; gap:3px; padding:2px 4px; font-weight:600; }.undo-draft-button:hover { text-decoration:underline; }.seminar-card h3 { font-size:14px; line-height:1.55; color:var(--text); font-weight:600; overflow-wrap:anywhere; word-break:break-word; }.seminar-card>p { margin-top:7px; color:var(--muted); font-size:12px; overflow-wrap:anywhere; word-break:break-word; }.paper-ref { display:block; margin-top:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:10px; }.mobile-move { display:none; margin-top:11px; font-size:11px; color:var(--muted); }.mobile-move input { padding:5px; margin-top:4px; font-size:11px; }.draft-bar { position:sticky; z-index:10; bottom:16px; justify-content:space-between; flex-wrap:wrap; border:1px solid var(--line); background:rgba(255,255,255,.94); backdrop-filter:blur(16px); padding:12px 14px; border-radius:12px; box-shadow:0 12px 32px rgba(15,23,42,.1); color:var(--text); }.draft-bar>div:first-child { display:flex; align-items:center; gap:10px; font-size:12px; }.draft-bar>div:last-child { flex-wrap:wrap; }.detail-meta { flex-wrap:wrap; margin-bottom:25px; }.detail-block { padding:17px 0; border-top:1px solid var(--line); }.detail-block h3 { font-size:12px; color:var(--muted); font-weight:500; margin-bottom:10px; }.detail-block>p { color:var(--soft); font-size:13px; margin-top:7px; }.paper-block h3 { color:var(--text); font-size:17px; margin-top:10px; }.paper-block>p { display:block; line-height:1.8; }.detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:25px; }.change-list { display:grid; gap:10px; }.change-list article { display:flex; justify-content:space-between; gap:16px; align-items:center; padding:14px; background:var(--surface); border:1px solid var(--line); border-radius:10px; }.change-list strong { font-size:13px; }.change-list p { margin-top:3px; font-size:12px; }.conflict-note { color:var(--danger)!important; }
+.header-actions,.control-bar,.rail-header,.rail-navigation,.next-card-inner,.detail-meta,.detail-block>p,.draft-bar,.draft-bar>div:last-child { display:flex; align-items:center; gap:10px; }.header-actions { flex-wrap:wrap; }.next-card { border-color:var(--line)!important; padding:0!important; background:linear-gradient(135deg,var(--surface),var(--surface))!important; }.next-card-inner { justify-content:space-between; gap:24px; padding:26px; }.next-card h2 { font-size:21px; margin-bottom:8px; color:var(--text); }.next-card p { color:var(--muted); font-size:13px; }.control-bar { justify-content:space-between; flex-wrap:wrap; gap:12px; }.adjustment-guide { display:flex; align-items:center; gap:10px; font-size:12px; }.presenter-select { display:flex; align-items:center; gap:8px; white-space:nowrap; color:var(--muted); }.presenter-select select { width:170px; padding:8px 30px 8px 10px; font-size:12px; }.rail-shell { overflow:hidden; border:1px solid var(--line); border-radius:14px; background:var(--panel); }.rail-header { padding:18px 20px; border-bottom:1px solid var(--line); justify-content:space-between; gap:18px; }.rail-header>div:first-child { min-width:0; }.rail-header .mono { color:var(--text); font-size:13px; }.rail-header p { margin-top:3px; color:var(--muted); font-size:12px; }.jump-date { width:140px; padding:7px 9px; font-size:12px; }.date-rail { display:grid; grid-auto-flow:column; grid-auto-columns:230px; overflow-x:auto; min-height:410px; background:var(--surface); }.day-lane { width:230px; min-width:230px; max-width:230px; min-height:100%; border-right:1px solid var(--line); padding:14px 11px; box-sizing:border-box; position:relative; transition:background .15s,box-shadow .15s,border-color .15s; }.day-lane.drop-active { background:rgba(46,125,243,.08)!important; box-shadow:inset 0 0 0 2px var(--accent),0 0 20px rgba(46,125,243,.15)!important; border-right-color:var(--accent)!important; }.day-lane.drop-active .empty-lane { border-color:var(--accent)!important; color:var(--accent)!important; background:rgba(46,125,243,.08)!important; }.day-lane>header { display:flex; align-items:center; justify-content:space-between; padding:0 3px 10px; color:var(--muted); font-size:12px; }.day-lane.today>header time { color:var(--accent); font-weight:600; }.day-lane>header span { font-size:10px; color:var(--panel); background:var(--accent); padding:2px 6px; border-radius:9999px; font-weight:600; }.lane-content { width:100%; min-width:0; box-sizing:border-box; display:grid; align-content:start; gap:10px; min-height:330px; position:relative; }.empty-lane { width:100%; box-sizing:border-box; border:1px dashed var(--line); border-radius:9px; padding:16px 10px; color:var(--muted); font-size:12px; text-align:center; transition:border-color .15s,background .15s,color .15s; }.adjusting .day-lane { background:rgba(197,230,223,.04); }.adjusting .empty-lane { color:var(--accent); border-color:var(--accent); background:rgba(197,230,223,.1); }.seminar-card { width:100%; min-width:0; margin:0; position:relative; padding:14px; border:1px solid var(--line); background:var(--panel); border-radius:11px; cursor:pointer; box-sizing:border-box; box-shadow:0 1px 3px rgba(0,0,0,0.04); transition:border-color .18s,background .18s,box-shadow .18s; will-change:transform; }.seminar-card:hover { border-color:var(--accent); background:var(--panel); box-shadow:0 6px 16px rgba(46,125,243,.12); }.seminar-card.drafted { border-color:var(--accent); box-shadow:inset 0 0 0 1px rgba(197,230,223,.3),0 6px 20px rgba(46,125,243,.18); }.adjusting .seminar-card[data-movable="true"] { cursor:grab; user-select:none; }.adjusting .seminar-card[data-movable="true"]:active { cursor:grabbing; }.seminar-card.dragging { cursor:grabbing!important; z-index:100!important; box-shadow:0 16px 36px rgba(15,23,42,.18),0 0 0 2px var(--accent)!important; border-color:var(--accent)!important; opacity:.96; }.card-drag-cue { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--accent); margin-bottom:8px; font-weight:600; }.card-meta { display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:8px; }.card-date-text { font-size:11px; color:var(--accent); font-weight:600; }.draft-indicator { display:flex; align-items:center; justify-content:space-between; gap:6px; margin:8px 0 10px; padding:4px 8px; background:rgba(245,158,11,.1); border:1px solid rgba(245,158,11,.3); border-radius:6px; }.undo-draft-button { background:transparent; border:0; color:var(--warning); font-size:11px; cursor:pointer; display:flex; align-items:center; gap:3px; padding:2px 4px; font-weight:600; }.undo-draft-button:hover { text-decoration:underline; }.seminar-card h3 { font-size:14px; line-height:1.55; color:var(--text); font-weight:600; overflow-wrap:anywhere; word-break:break-word; }.seminar-card>p { margin-top:7px; color:var(--muted); font-size:12px; overflow-wrap:anywhere; word-break:break-word; }.paper-ref { display:block; margin-top:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:10px; }.mobile-move { display:none; margin-top:11px; font-size:11px; color:var(--muted); }.mobile-move input { padding:5px; margin-top:4px; font-size:11px; }.draft-bar { position:sticky; z-index:10; bottom:16px; justify-content:space-between; flex-wrap:wrap; border:1px solid var(--line); background:rgba(255,255,255,.94); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); padding:12px 14px; border-radius:12px; box-shadow:0 12px 32px rgba(15,23,42,.1); color:var(--text); }.draft-bar>div:first-child { display:flex; align-items:center; gap:10px; font-size:12px; }.draft-bar>div:last-child { flex-wrap:wrap; }.detail-meta { flex-wrap:wrap; margin-bottom:25px; }.detail-block { padding:17px 0; border-top:1px solid var(--line); }.detail-block h3 { font-size:12px; color:var(--muted); font-weight:500; margin-bottom:10px; }.detail-block>p { color:var(--soft); font-size:13px; margin-top:7px; }.paper-block h3 { color:var(--text); font-size:17px; margin-top:10px; }.paper-block>p { display:block; line-height:1.8; }.detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:25px; }.change-list { display:grid; gap:10px; }.change-list article { display:flex; justify-content:space-between; gap:16px; align-items:center; padding:14px; background:var(--surface); border:1px solid var(--line); border-radius:10px; }.change-list strong { font-size:13px; }.change-list p { margin-top:3px; font-size:12px; }.conflict-note { color:var(--danger)!important; }
 @media(max-width:768px) {
   .header-actions { display: none !important; }
   .next-card-inner,.rail-header { align-items:flex-start; flex-direction:column; }
@@ -2103,5 +2284,171 @@ onBeforeRouteLeave(async () => !draftList.value.length || await confirmAction('�
 
 [data-theme-style="vanta-fog"] .member-checkbox-card.checked {
   background: rgba(174, 222, 211, 0.12) !important;
+}
+
+.presentation-papers-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--bg-hover, rgba(0, 0, 0, 0.03));
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
+  border-radius: 8px;
+}
+
+.presentation-papers-chips .chips-label {
+  font-size: 11.5px;
+}
+
+.presentation-papers-chips .chips-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.paper-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--primary, #2563eb);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-mono, monospace);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+}
+
+.chip-remove-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.chip-remove-btn:hover {
+  opacity: 1;
+  color: #dc2626;
+}
+
+.feed-picker-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.feed-picker-tip {
+  font-size: 11.5px;
+}
+
+.feed-papers-picker-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface, rgba(8, 6, 20, 0.85));
+  border: 1px solid var(--line, rgba(184, 155, 248, 0.18));
+  border-radius: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.picker-search-bar {
+  width: 100%;
+}
+
+.picker-search-input {
+  width: 100%;
+  padding: 7px 11px;
+  border-radius: 6px;
+  border: 1px solid var(--line, rgba(184, 155, 248, 0.25));
+  background: var(--bg, #03020a);
+  color: var(--text, #f8fafc);
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.picker-search-input:focus {
+  outline: none;
+  border-color: var(--accent, #b89bf8);
+  box-shadow: 0 0 0 2px rgba(184, 155, 248, 0.2);
+}
+
+.picker-search-input::placeholder {
+  color: var(--muted, #94a3b8);
+  opacity: 0.8;
+}
+
+.picker-paper-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.picker-paper-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.picker-paper-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.picker-paper-item.is-added {
+  opacity: 0.55;
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.04);
+}
+
+.picker-paper-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.picker-paper-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.picker-paper-title {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text, #f8fafc);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.picker-recommender {
+  color: var(--muted, #94a3b8);
+  font-size: 11px;
+}
+
+.picker-empty {
+  font-size: 12px;
+  color: var(--muted, #94a3b8);
+  text-align: center;
+  padding: 12px 0;
 }
 </style>

@@ -23,6 +23,85 @@ async function computeSha256(buffer: ArrayBuffer | Uint8Array): Promise<string> 
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Automatically repairs truncated or damaged PDFs (e.g. from scanner software crashes
+ * that stopped before writing xref / trailer / %%EOF).
+ */
+export function repairPdfIfTruncated(bytes: Uint8Array): Uint8Array {
+  if (bytes.length < 50) return bytes;
+  const header = String.fromCharCode(...bytes.subarray(0, 5));
+  if (header !== '%PDF-') return bytes;
+
+  // Check if it already has %%EOF within the last 1024 bytes
+  const tailSlice = bytes.subarray(Math.max(0, bytes.length - 1024));
+  let tailStr = '';
+  for (let i = 0; i < tailSlice.length; i++) tailStr += String.fromCharCode(tailSlice[i]);
+  if (tailStr.includes('%%EOF')) {
+    return bytes;
+  }
+
+  // Convert bytes to string for object scanning
+  let fullStr = '';
+  const chunkSize = 32768;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const end = Math.min(i + chunkSize, bytes.length);
+    fullStr += String.fromCharCode(...bytes.subarray(i, end));
+  }
+
+  const objRegex = /(\d+)\s+(\d+)\s+obj/g;
+  let match: RegExpExecArray | null;
+  const objOffsets: Array<{ id: number; offset: number }> = [];
+  let rootId = 1;
+  let maxObjId = 0;
+
+  while ((match = objRegex.exec(fullStr)) !== null) {
+    const id = parseInt(match[1], 10);
+    const offset = match.index;
+    objOffsets.push({ id, offset });
+    if (id > maxObjId) maxObjId = id;
+
+    const objSnippet = fullStr.substring(offset, offset + 300);
+    if (objSnippet.includes('/Type /Catalog') || objSnippet.includes('/Type/Catalog')) {
+      rootId = id;
+    }
+  }
+
+  if (objOffsets.length === 0) return bytes;
+
+  const endObjIdx = fullStr.lastIndexOf('endobj');
+  let lastEndObjOffset = endObjIdx !== -1 ? endObjIdx + 6 : bytes.length;
+  while (lastEndObjOffset < bytes.length && (bytes[lastEndObjOffset] === 10 || bytes[lastEndObjOffset] === 13 || bytes[lastEndObjOffset] === 32)) {
+    lastEndObjOffset++;
+  }
+
+  const cleanBody = bytes.subarray(0, lastEndObjOffset);
+  const xrefOffset = cleanBody.length;
+
+  const offsetMap = new Map<number, number>();
+  for (const item of objOffsets) {
+    offsetMap.set(item.id, item.offset);
+  }
+
+  const totalCount = maxObjId + 1;
+  let xrefStr = `\nxref\n0 ${totalCount}\n0000000000 65535 f \n`;
+  for (let i = 1; i <= maxObjId; i++) {
+    const off = offsetMap.get(i);
+    if (off !== undefined && off < xrefOffset) {
+      xrefStr += `${off.toString().padStart(10, '0')} 00000 n \n`;
+    } else {
+      xrefStr += '0000000000 00000 f \n';
+    }
+  }
+
+  const trailerStr = `trailer\n<<\n  /Size ${totalCount}\n  /Root ${rootId} 0 R\n>>\nstartxref\n${xrefOffset + 1}\n%%EOF\n`;
+  const tailBytes = new TextEncoder().encode(xrefStr + trailerStr);
+
+  const repaired = new Uint8Array(cleanBody.length + tailBytes.length);
+  repaired.set(cleanBody, 0);
+  repaired.set(tailBytes, cleanBody.length);
+  return repaired;
+}
+
 app.post('', authMiddleware, async (c) => {
   const formData = await c.req.formData().catch(() => null);
   if (!formData) {
@@ -57,8 +136,8 @@ app.post('', authMiddleware, async (c) => {
     contentType = mimeMap[ext] || 'application/octet-stream';
   }
 
-  if (!ALLOWED_TYPES.has(contentType)) {
-    return c.json({ detail: '附件仅支持 PDF、PPT、PPTX、Word (DOC/DOCX)、PNG、JPEG 或 WebP 格式' }, 400);
+  if (!contentType) {
+    contentType = 'application/octet-stream';
   }
 
   const buffer = await file.arrayBuffer();
@@ -171,17 +250,29 @@ app.get('/:id', async (c) => {
 
   const contentType = meta.content_type || 'application/octet-stream';
   const isImage = contentType.startsWith('image/');
+  const isPdf = contentType === 'application/pdf';
+
+  if (isPdf && responseBody instanceof Uint8Array) {
+    responseBody = repairPdfIfTruncated(responseBody);
+  }
+
+  const forceDownload = c.req.query('download') === '1' || c.req.query('download') === 'true';
+  const disposition = (forceDownload || (!isImage && !isPdf)) ? 'attachment' : 'inline';
 
   const headers = new Headers();
   headers.set('Content-Type', contentType);
-  headers.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(meta.filename)}`);
+  headers.set('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(meta.filename)}`);
   headers.set('X-Content-Type-Options', 'nosniff');
 
   if (isImage) {
     headers.set('Cache-Control', 'public, max-age=86400');
+  } else if (isPdf) {
+    headers.set('Cache-Control', 'private, max-age=3600');
   } else {
     headers.set('Cache-Control', 'private, max-age=3600');
-    headers.set('Content-Security-Policy', "default-src 'none'; sandbox");
+    if (contentType === 'text/html' || contentType === 'image/svg+xml') {
+      headers.set('Content-Security-Policy', "default-src 'none'; sandbox");
+    }
   }
 
   return new Response(responseBody, {

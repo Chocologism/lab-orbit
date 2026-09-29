@@ -170,4 +170,21 @@ describe('latex utils', () => {
     expect(rendered).toContain('class="katex"')
     expect(rendered).not.toContain('katex-error')
   })
+
+  it('should decode HTML decimal and hex entities like &#34; in titles and abstracts', () => {
+    // arXiv 2609.17852 case:
+    const title = 'Resolving 3 Exotic Hyperbolic-Umbilic Lensing Configurations in the &#34;Cosmic Mantis&#34;: An Exploration of RXJ0437.1+0043 with JWST'
+    const rendered = renderLatex(title)
+    expect(rendered).not.toContain('&#34;')
+    expect(rendered).not.toContain('&amp;#34;')
+    expect(rendered).toContain('&quot;Cosmic Mantis&quot;')
+
+    // Mixed with math and quotes
+    const mixed = 'Mass $M_\\star$ in &#34;Cluster&#34; with &#39;Galaxy&#39; &amp; &lt;Test&gt;'
+    const renderedMixed = renderLatex(mixed)
+    expect(renderedMixed).not.toContain('&#34;')
+    expect(renderedMixed).toContain('&quot;Cluster&quot;')
+    expect(renderedMixed).toContain('&#039;Galaxy&#039;')
+    expect(renderedMixed).toContain('class="katex"')
+  })
 })

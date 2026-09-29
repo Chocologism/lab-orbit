@@ -56,7 +56,7 @@ describe("noticeValidity utility", () => {
       }, baseToday)).toBe(false)
     })
 
-    it("handles permanent notices (without end_date) within 2 weeks", () => {
+    it("handles permanent notices (without end_date) within 7 days", () => {
       // Notice from 6 days ago (2026-09-13) -> active
       expect(isNoticeActiveForMarquee({
         title: "学分认定要求落实通知",
@@ -64,19 +64,26 @@ describe("noticeValidity utility", () => {
         end_date: ""
       }, baseToday)).toBe(true)
 
-      // Notice from exactly 14 days ago (2026-09-05) -> active (still within 2 weeks)
+      // Notice from exactly 7 days ago (2026-09-12) -> active (still within 7 days)
       expect(isNoticeActiveForMarquee({
         title: "实验室规程",
-        start_date: "2026-09-05",
+        start_date: "2026-09-12",
         end_date: ""
       }, baseToday)).toBe(true)
     })
 
-    it("filters out permanent notices exceeding 2 weeks", () => {
-      // Notice from 15 days ago (2026-09-04) -> inactive (exceeded 2 weeks)
+    it("filters out permanent notices exceeding 7 days", () => {
+      // Notice from 8 days ago (2026-09-11) -> inactive (exceeded 7 days)
       expect(isNoticeActiveForMarquee({
-        title: "东区老旧办公须知",
-        start_date: "2026-09-04",
+        title: "8天前的办公须知",
+        start_date: "2026-09-11",
+        end_date: ""
+      }, baseToday)).toBe(false)
+
+      // Notice from 14 days ago (2026-09-05) -> inactive
+      expect(isNoticeActiveForMarquee({
+        title: "两周前的安全规范",
+        start_date: "2026-09-05",
         end_date: ""
       }, baseToday)).toBe(false)
 
@@ -97,22 +104,23 @@ describe("noticeValidity utility", () => {
       }, baseToday)).toBe(true)
 
       expect(isNoticeActiveForMarquee({
-        title: "三周前新建长期通知",
+        title: "8天前新建长期通知",
         start_date: "",
-        created_at: "2026-08-25 09:00:00",
+        created_at: "2026-09-11 09:00:00",
         end_date: ""
       }, baseToday)).toBe(false)
     })
   })
 
   describe("filterMarqueeNotices", () => {
-    it("filters candidate list accurately according to the 2-week rule", () => {
+    it("filters candidate list accurately according to the 7-day rule", () => {
       const candidates = [
         { id: 1, title: "奖学金通知", end_date: "2026-09-23", start_date: "2026-09-13" }, // active (deadline in future)
         { id: 2, title: "已过期的调休", end_date: "2026-09-15", start_date: "2026-09-10" }, // expired
-        { id: 3, title: "长期学分要求", end_date: "", start_date: "2026-09-16" }, // active (3 days ago <= 14)
-        { id: 4, title: "14天前的长期安全提醒", end_date: "", start_date: "2026-09-05" }, // active (14 days ago <= 14)
-        { id: 5, title: "三周前的长期规章", end_date: "", start_date: "2026-08-28" }, // inactive (> 14 days)
+        { id: 3, title: "长期学分要求", end_date: "", start_date: "2026-09-16" }, // active (3 days ago <= 7)
+        { id: 4, title: "7天前的长期安全提醒", end_date: "", start_date: "2026-09-12" }, // active (7 days ago <= 7)
+        { id: 5, title: "8天前的长期规章", end_date: "", start_date: "2026-09-11" }, // inactive (> 7 days)
+        { id: 6, title: "两周前的长期规章", end_date: "", start_date: "2026-09-05" }, // inactive (> 7 days)
       ]
 
       const filtered = filterMarqueeNotices(candidates, baseToday)

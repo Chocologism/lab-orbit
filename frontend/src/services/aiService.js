@@ -1,17 +1,37 @@
 /**
  * AI 大模型前端直连服务 (纯客户端 Direct Fetch 模式)
- * 支持 OpenAI 规范兼容接口（DeepSeek, SiliconFlow, OpenAI, Moonshot, Ollama 等）
+ * 支持 OpenAI 规范兼容接口（USTC via Vlab, DeepSeek, SiliconFlow, OpenAI, Moonshot, Ollama 等）
  */
 
-import { pickChinesePartIfDual, applyInstitutionLocationPrefix } from '../utils/talkEmail'
-import { shanghaiToday } from '../utils/schedule'
+import { pickChinesePartIfDual, applyInstitutionLocationPrefix, parseTalkMetadataLocally, parseConferenceMetadataLocally } from '../utils/talkEmail'
+import { shanghaiToday, normalizeScheduleDate } from '../utils/schedule'
+import { resolveUserScope } from '../utils/userScope'
+import { hasPlatformSearchIntent, searchAllPlatformData } from './siteSearchService'
 
-export const AI_STORAGE_KEY = 'labhub_ai_config'
-export const AI_CHAT_HISTORY_KEY = 'labhub_ai_chat_history'
-export const AI_SESSIONS_STORAGE_KEY = 'labhub_ai_chat_sessions'
-export const AI_ACTIVE_SESSION_ID_KEY = 'labhub_ai_active_session_id'
-export const AI_CONNECTIVITY_KEY = 'labhub_ai_connectivity_passed'
-export const PAPER_TRANSLATIONS_STORAGE_KEY = 'labhub_paper_translations'
+export { normalizeScheduleDate, resolveUserScope }
+
+export const AI_STORAGE_KEY = 'csbd_ai_config'
+export const AI_CHAT_HISTORY_KEY = 'csbd_ai_chat_history'
+export const AI_SESSIONS_STORAGE_KEY = 'csbd_ai_chat_sessions'
+export const AI_ACTIVE_SESSION_ID_KEY = 'csbd_ai_active_session_id'
+export const AI_CONNECTIVITY_KEY = 'csbd_ai_connectivity_passed'
+export const PAPER_TRANSLATIONS_STORAGE_KEY = 'csbd_paper_translations'
+
+/**
+ * 获取特定用户的会话列表本地存储键
+ */
+export function getAiSessionsStorageKey(userOrScope) {
+  const scope = resolveUserScope(userOrScope)
+  return scope ? `csbd_ai_chat_sessions_${scope}` : AI_SESSIONS_STORAGE_KEY
+}
+
+/**
+ * 获取特定用户的当前激活会话 ID 本地存储键
+ */
+export function getAiActiveSessionIdKey(userOrScope) {
+  const scope = resolveUserScope(userOrScope)
+  return scope ? `csbd_ai_active_session_id_${scope}` : AI_ACTIVE_SESSION_ID_KEY
+}
 
 /**
  * 获取连通性测试是否已通过
@@ -27,10 +47,9 @@ export function isAiConnectivityPassed() {
 function dispatchAiConfigChanged() {
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     try {
-      const event = typeof CustomEvent === 'function'
-        ? new CustomEvent('labhub-ai-config-changed')
-        : { type: 'labhub-ai-config-changed' }
-      window.dispatchEvent(event)
+      const createEvt = (name) => typeof CustomEvent === 'function' ? new CustomEvent(name) : { type: name }
+      window.dispatchEvent(createEvt('labhub-ai-config-changed'))
+      window.dispatchEvent(createEvt('csbd-ai-config-changed'))
     } catch (_) {}
   }
 }
@@ -63,7 +82,7 @@ export function isAiAssistantReady() {
     if (!raw) return false
     const config = loadAiConfig()
     if (!config || !config.baseUrl || !config.baseUrl.trim()) return false
-    if (config.provider !== 'ollama' && (!config.apiKey || !config.apiKey.trim())) {
+    if (config.provider !== 'ollama' && config.provider !== 'ustc_vlab' && (!config.apiKey || !config.apiKey.trim())) {
       return false
     }
     return isAiConnectivityPassed()
@@ -73,6 +92,48 @@ export function isAiAssistantReady() {
 }
 
 export const PRESET_PROVIDERS = [
+  {
+    id: 'ustc_vlab',
+    name: 'USTC via Vlab (推荐)',
+    baseUrl: 'http://127.0.0.1:4000/v1',
+    noApiKey: true,
+    defaultModel: 'deepseek-flash',
+    models: [
+      {
+        id: 'deepseek-flash',
+        name: 'DeepSeek V4.1 Flash (USTC via VLab)',
+        contextWindow: 1000000,
+        supportsReasoningEffort: true,
+        supportsVision: true,
+        reasoningEffort: 'off'
+      },
+      {
+        id: 'deepseek-v4.1',
+        name: 'DeepSeek V4.1 (USTC via VLab)',
+        contextWindow: 1000000,
+        supportsReasoningEffort: true,
+        supportsVision: true,
+        reasoningEffort: 'off'
+      },
+      {
+        id: 'deepseek-v4-pro',
+        name: 'DeepSeek V4 Pro (USTC via VLab)',
+        contextWindow: 1000000,
+        supportsReasoningEffort: true,
+        supportsVision: true,
+        reasoningEffort: 'off'
+      },
+      {
+        id: 'deepseek-v4-flash-ascend',
+        name: 'DeepSeek V4 Flash Ascend (USTC via VLab)',
+        contextWindow: 1000000,
+        supportsReasoningEffort: true,
+        supportsVision: true,
+        reasoningEffort: 'off'
+      }
+    ],
+    hint: '通过校内 VLab 虚拟机 SSH 隧道 (127.0.0.1:4000) 访问中国科大大模型公共服务平台，支持 deepseek V4.1、deepseek V4.1 flash 等 16 个主流开源顶级模型。代理端已内置认证，选中此服务商无需输入 API Key，支持多模态图像海报识别。'
+  },
   {
     id: 'deepseek',
     name: 'DeepSeek (官方)',
@@ -314,28 +375,39 @@ export function sanitizeReasoningEffort(effort) {
 }
 
 export const DEFAULT_AI_CONFIG = {
-  provider: 'deepseek',
+  provider: 'ustc_vlab',
   apiKey: '',
-  baseUrl: 'https://api.deepseek.com/v1',
-  model: 'deepseek-chat',
+  baseUrl: 'http://127.0.0.1:4000/v1',
+  model: 'deepseek-flash',
   models: [
     {
-      id: 'deepseek-chat',
-      name: 'DeepSeek-V3 (通用对话)',
-      contextWindow: 64000,
-      supportsReasoningEffort: false,
+      id: 'deepseek-flash',
+      name: 'DeepSeek V4.1 Flash (USTC via VLab)',
+      contextWindow: 1000000,
+      supportsReasoningEffort: true,
+      supportsVision: true,
       reasoningEffort: 'off'
     },
     {
-      id: 'deepseek-reasoner',
-      name: 'DeepSeek-R1 (深度推理)',
-      contextWindow: 64000,
+      id: 'deepseek-v4-pro',
+      name: 'DeepSeek V4 Pro (USTC via VLab)',
+      contextWindow: 1000000,
       supportsReasoningEffort: true,
-      reasoningEffort: 'high'
+      supportsVision: true,
+      reasoningEffort: 'off'
+    },
+    {
+      id: 'deepseek-v4-flash-ascend',
+      name: 'DeepSeek V4 Flash Ascend (USTC via VLab)',
+      contextWindow: 1000000,
+      supportsReasoningEffort: true,
+      supportsVision: true,
+      reasoningEffort: 'off'
     }
   ],
   temperature: 0.7,
-  systemPrompt: '你是课题组科研智能助理。你精通学术文献研读、前沿方法分析与科学计算。请以专业、严谨、详尽的学术风格解答问题，在需要时运用标准的 LaTeX 数学公式和规范的代码示例。'
+  systemPrompt: '你是 CSBD（宇宙结构与巡天大数据研究团组）的科研智能助理。你精通天文学、天体物理、巡天观测与科学计算。请以专业、严谨、详尽的学术风格解答问题，在需要时运用标准的 LaTeX 数学公式和规范的代码示例。',
+  arxivSource: 'markdown'
 }
 
 /**
@@ -403,7 +475,7 @@ export async function testAiConnection(config) {
     setAiConnectivityPassed(false)
     return { ok: false, message: '请填写接口 Base URL 地址。' }
   }
-  if (config.provider !== 'ollama' && !config.apiKey) {
+  if (config.provider !== 'ollama' && config.provider !== 'ustc_vlab' && !config.apiKey) {
     setAiConnectivityPassed(false)
     return { ok: false, message: '请填写 API Key。' }
   }
@@ -436,7 +508,7 @@ export async function testAiConnection(config) {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        model: config.model || 'deepseek-chat',
+        model: config.model || 'deepseek-flash',
         messages: [{ role: 'user', content: 'hi' }],
         max_tokens: 5,
         stream: false
@@ -491,6 +563,14 @@ export async function testAiConnection(config) {
           }
         }
 
+        // 未捕获到 Mixed Content 违规：通常是本地隧道未开启、端口拒绝连接或虚拟机代理未运行
+        if (config.provider === 'ustc_vlab') {
+          return {
+            ok: false,
+            message: '无法连接到本地隧道端口 (127.0.0.1:4000)。请按顺序排查：\n1. 本地 SSH 隧道是否已运行：请在本地终端执行 `ssh -NT ustc-vpn` 建立隧道；\n2. VLab 虚拟机代理是否启动：请确认虚拟机中 `python3 proxy-server.py` 服务已在运行；\n3. 浏览器权限排查：若上述服务均已正常运行仍报错，请检查浏览器地址栏左侧网站设置中是否已将“不安全内容”设为“允许”并刷新网页。'
+          }
+        }
+
         return {
           ok: false,
           message: '无法连接到本地接口服务。请排查：\n1. 确认本地服务已在后台启动并正常监听对应端口；\n2. 若本地服务运行正常仍连接失败，请检查浏览器地址栏网站设置中是否已允许“不安全内容”并刷新网页。'
@@ -508,6 +588,86 @@ export async function testAiConnection(config) {
       document.removeEventListener('securitypolicyviolation', violationHandler)
     }
   }
+}
+
+/**
+ * 平台全景功能指南与系统导航提示词 (Platform Knowledge Prompt)
+ */
+export const PLATFORM_KNOWLEDGE_PROMPT = `【CSBD 平台全景使用指南与功能导航】
+你同时兼任 CSBD 科研协作平台的智能向导。当用户询问平台的使用方法、各模块功能入口、或寻求平台数据检索时，请基于以下平台全景架构解答，并在正文中提供带可点击链接的超文本（格式：[文字说明](/路径)），方便用户在单页应用中直接点击跳转：
+
+1. 首页与概览（路径：[进入首页](/)）：
+   - 包含课题组介绍、近期动态跑马灯、快捷操作入口。
+2. 文献速递与推荐流（路径：[文献速递流](/arxiv)）：
+   - 实时汇集天文与天体物理（arXiv astro-ph）最新预印本文献；
+   - 支持按 High Energy Physics、Cosmology、Solar and Stellar 等类别筛选；
+   - 支持论文星标收藏、推送到本地 Zotero、一键开启 AI 深度研讨。
+   - 链接格式示例：[浏览文献推荐流](/arxiv) 或 [定位指定文献](/arxiv?paper_id={id}&highlight=1)。
+3. 公共文献库（路径：[公共文献库](/library)）：
+   - 汇总并集中管理课题组推荐或收录的高价值文献，自动合并同一 arXiv 文献的不同版本；
+   - 支持按全部、来自推荐、定向收录、来自组会等分类；
+   - 支持通过搜索框检索标题、作者、摘要或 arXiv 编号。
+   - 链接格式示例：[访问文献库](/library) 或 [在文献库中检索](/library?q={关键词})。
+4. 组会与日程（路径：[组会与日程](/seminars)）：
+   - 记录课题组学术周会排期、轮值报告人、重要研讨主题与时间节点；
+   - 支持时间线视图（Timeline）与日历视图（Calendar）；
+   - “学术报告与会议”栏目（路径：[学术报告](/seminars?tab=talks)），汇集外部前沿学术报告与研讨会信息；
+   - 链接格式示例：[查看组会日程](/seminars) 或 [跳转特定组会](/seminars?view=timeline&target_seminar={id}&no_reset=1)。
+5. 学术资料库（路径：[学术资料库](/resources)）：
+   - 收集与共享图书教材、数值模拟代码、天文软件工具、文献精读笔记卡片；
+   - 支持分类筛选、标题/作者/分析人/描述模糊检索、PDF 上传与在线预览；
+   - 链接格式示例：[浏览资料库](/resources) 或 [查看资料卡片](/resources?category={分类}&highlight={卡片ID})。
+6. 通知中心（路径：[重要通知中心](/notices)）：
+   - 集中展示教务处、院系与课题组重要公文与教务通知；
+   - 支持“AI 智能扫描一周邮件”，后台自动从学术邮箱提取教务通告并批量入库；
+   - 链接格式示例：[查看通知中心](/notices) 或 [阅读通知详情](/notices?id={通知ID})。
+7. 学术邮箱（路径：[学术邮箱](/mailbox)）：
+   - 个人/机构学术邮箱（IMAP/SMTP）无缝集成与邮件管理；
+   - 支持智能识别与一键提取学术报告、会议与重要日程；
+   - 链接格式示例：[前往学术邮箱](/mailbox) 或 [阅读邮件](/mailbox?email_id={邮件ID})。
+8. AI 科研助手（路径：[科研助手](/assistant)）：
+   - 当前对话功能，支持学术研讨、LaTeX 物理公式推导、数值模拟脚本编写与图文多模态分析；
+   - 支持 USTC via Vlab 免密直连科大昇腾算力大模型，以及多模型与历史会话管理；
+   - 在文献研讨模式下拥有全文基准与长期记忆，支持分段翻译与答疑。
+
+超链接规范：
+- 推荐使用类似超链接的标准 Markdown 文本链接 [说明文字](/路径)，前端已配置清晰醒目的超链接样式与无刷新 SPA 跳转定位支持。`
+
+/**
+ * 将多源检索结果转化为结构化上下文，注入系统提示词
+ */
+export function formatSearchResultsForPrompt(results) {
+  if (!results || results.length === 0) return ''
+  const lines = [
+    '【平台多源数据实时模糊检索命中结果】',
+    '系统根据用户当前提问，已在平台各业务模块与本地研读记录中检索到以下最相关条目（已按相关度综合排序）：'
+  ]
+
+  results.forEach((item, idx) => {
+    let typeName = '条目'
+    if (item.type === 'literature_feed') typeName = '推荐流文献'
+    else if (item.type === 'literature_library') typeName = '公共文献库文献'
+    else if (item.type === 'notice') typeName = '重要通知'
+    else if (item.type === 'email') typeName = '学术邮件'
+    else if (item.type === 'seminar') typeName = '组会排期'
+    else if (item.type === 'talk') typeName = '学术报告'
+    else if (item.type === 'resource') typeName = '资料卡片'
+
+    const cleanTitle = (item.title || '').replace(/[\[\]]/g, '')
+    lines.push(`\n[${idx + 1}] 【${typeName}】 ${item.title}`)
+    if (item.meta) lines.push(`   元数据: ${item.meta}`)
+    if (item.recommender) lines.push(`   ${item.recommender}`)
+    if (item.authors) lines.push(`   作者: ${item.authors}`)
+    if (item.arxiv_id) lines.push(`   arXiv: ${item.arxiv_id}`)
+    if (item.comment) lines.push(`   ${item.comment}`)
+    if (item.detail) lines.push(`   详情/摘要: ${item.detail}`)
+    lines.push(`   可点击超链接: [${cleanTitle}](${item.link})`)
+  })
+
+  lines.push('\n【使用指引】')
+  lines.push('1. 请结合上述真实检索条目回答用户的查询，给出关键信息摘要（如主题、人员、时间、关键节点或核心结论）。')
+  lines.push('2. 当提及具体的文献、通知、邮件、组会或资料卡片时，请在正文中直接使用上方提供的 Markdown 超链接（如 [条目标题](/路径)），以便用户在聊天中能一眼看出并可直接点击跳转。')
+  return lines.join('\n')
 }
 
 /**
@@ -562,6 +722,33 @@ export async function sendChatMessageStream({
     ].filter(Boolean).join('\n')
 
     systemPromptContent = systemPromptContent ? `${systemPromptContent}\n\n${paperPrompt}` : paperPrompt
+  } else {
+    // 普通科研对话模式下，注入平台全景使用指南与功能导航
+    systemPromptContent = systemPromptContent
+      ? `${systemPromptContent}\n\n${PLATFORM_KNOWLEDGE_PROMPT}`
+      : PLATFORM_KNOWLEDGE_PROMPT
+  }
+
+  // 意图识别与平台多源语义模糊检索增强 (RAG)
+  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
+  const userQuery = typeof lastUserMsg?.content === 'string'
+    ? lastUserMsg.content
+    : (Array.isArray(lastUserMsg?.content)
+      ? lastUserMsg.content.filter(p => p.type === 'text').map(p => p.text).join(' ')
+      : '')
+
+  if (userQuery && hasPlatformSearchIntent(userQuery)) {
+    try {
+      const searchResults = await searchAllPlatformData(userQuery)
+      if (searchResults && searchResults.length > 0) {
+        const searchPrompt = formatSearchResultsForPrompt(searchResults)
+        systemPromptContent = systemPromptContent
+          ? `${systemPromptContent}\n\n${searchPrompt}`
+          : searchPrompt
+      }
+    } catch (e) {
+      console.warn('[aiService] 全站检索增强执行失败，跳过注入:', e)
+    }
   }
 
   const fullMessages = []
@@ -636,7 +823,11 @@ export async function sendChatMessageStream({
         config.baseUrl.startsWith('http://')
       )
       if (isLocalHttp) {
-        errText = '无法连接到本地接口服务。请检查本地后台服务是否已启动并正常监听对应端口。'
+        if (config.provider === 'ustc_vlab') {
+          errText = '无法连接到本地隧道端口 (127.0.0.1:4000)。请确认本地终端已运行 `ssh -NT ustc-vpn` 且 VLab 虚拟机代理服务正常运行。若隧道与服务已正常，请检查浏览器网站设置是否允许“不安全内容”。'
+        } else {
+          errText = '无法连接到本地接口服务。请检查本地后台服务是否已启动并正常监听对应端口。'
+        }
       } else {
         errText = '网络连接失败或浏览器跨域受限 (CORS)，请检查 API 端点与网络环境。'
       }
@@ -762,15 +953,33 @@ export function createDefaultSession(title = '新对话', options = {}) {
 }
 
 /**
- * 加载所有会话列表（内置针对旧版单一历史记录的无损兼容迁移）
+ * 加载所有会话列表（支持按当前用户隔离，内置针对旧版全局历史记录的无损平滑迁移）
+ * @param {string|number|object} [userOrScope] 用户作用域（未指定时自动通过 resolveUserScope 读取当前登录用户）
  */
-export function loadAiSessions() {
+export function loadAiSessions(userOrScope) {
   try {
-    const rawSessions = localStorage.getItem(AI_SESSIONS_STORAGE_KEY)
+    const targetKey = getAiSessionsStorageKey(userOrScope)
+    const rawSessions = localStorage.getItem(targetKey)
     if (rawSessions) {
       const parsed = JSON.parse(rawSessions)
       if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed
+      }
+    }
+
+    // 若当前为特定用户（targetKey !== AI_SESSIONS_STORAGE_KEY），检查旧版未隔离的全局会话并平滑迁移
+    if (targetKey !== AI_SESSIONS_STORAGE_KEY) {
+      const legacyGlobalRaw = localStorage.getItem(AI_SESSIONS_STORAGE_KEY)
+      if (legacyGlobalRaw) {
+        try {
+          const parsedLegacy = JSON.parse(legacyGlobalRaw)
+          if (Array.isArray(parsedLegacy) && parsedLegacy.length > 0) {
+            localStorage.setItem(targetKey, JSON.stringify(parsedLegacy))
+            // 迁移后移除旧全局键，避免后续登录的其他账号串扰读取
+            localStorage.removeItem(AI_SESSIONS_STORAGE_KEY)
+            return parsedLegacy
+          }
+        } catch (_) {}
       }
     }
 
@@ -792,14 +1001,15 @@ export function loadAiSessions() {
           messages: legacyMsgs
         }
         const initialList = [migratedSession]
-        localStorage.setItem(AI_SESSIONS_STORAGE_KEY, JSON.stringify(initialList))
+        localStorage.setItem(targetKey, JSON.stringify(initialList))
+        localStorage.removeItem(AI_CHAT_HISTORY_KEY)
         return initialList
       }
     }
 
     // 没有任何记录，生成初始空会话
     const defaultSession = createDefaultSession()
-    localStorage.setItem(AI_SESSIONS_STORAGE_KEY, JSON.stringify([defaultSession]))
+    localStorage.setItem(targetKey, JSON.stringify([defaultSession]))
     return [defaultSession]
   } catch (e) {
     console.error('加载会话失败:', e)
@@ -808,45 +1018,65 @@ export function loadAiSessions() {
 }
 
 /**
- * 持久化保存所有会话
+ * 持久化保存所有会话（按用户作用域隔离）
  */
-export function saveAiSessions(sessions) {
+export function saveAiSessions(sessions, userOrScope) {
   try {
-    localStorage.setItem(AI_SESSIONS_STORAGE_KEY, JSON.stringify(sessions))
+    const targetKey = getAiSessionsStorageKey(userOrScope)
+    localStorage.setItem(targetKey, JSON.stringify(sessions))
   } catch (e) {
     console.error('保存会话列表失败:', e)
   }
 }
 
 /**
- * 加载当前激活会话 ID
+ * 加载当前激活会话 ID（按用户作用域隔离）
  */
-export function loadActiveSessionId() {
+export function loadActiveSessionId(userOrScope) {
   try {
-    return localStorage.getItem(AI_ACTIVE_SESSION_ID_KEY) || ''
+    const targetKey = getAiActiveSessionIdKey(userOrScope)
+    const val = localStorage.getItem(targetKey)
+    if (val) return val
+
+    // 平滑迁移旧版全局 active session id
+    if (targetKey !== AI_ACTIVE_SESSION_ID_KEY) {
+      const legacyVal = localStorage.getItem(AI_ACTIVE_SESSION_ID_KEY)
+      if (legacyVal) {
+        localStorage.setItem(targetKey, legacyVal)
+        localStorage.removeItem(AI_ACTIVE_SESSION_ID_KEY)
+        return legacyVal
+      }
+    }
+    return ''
   } catch (e) {
     return ''
   }
 }
 
 /**
- * 保存当前激活会话 ID
+ * 保存当前激活会话 ID（按用户作用域隔离）
  */
-export function saveActiveSessionId(id) {
+export function saveActiveSessionId(id, userOrScope) {
   try {
+    const targetKey = getAiActiveSessionIdKey(userOrScope)
     if (id) {
-      localStorage.setItem(AI_ACTIVE_SESSION_ID_KEY, id)
+      localStorage.setItem(targetKey, id)
     } else {
-      localStorage.removeItem(AI_ACTIVE_SESSION_ID_KEY)
+      localStorage.removeItem(targetKey)
     }
   } catch (e) {}
 }
 
 /**
- * 清空所有会话数据
+ * 清空所有会话数据（支持按用户隔离清理）
  */
-export function clearAllAiSessions() {
+export function clearAllAiSessions(userOrScope) {
   try {
+    const targetKey = getAiSessionsStorageKey(userOrScope)
+    const activeKey = getAiActiveSessionIdKey(userOrScope)
+    localStorage.removeItem(targetKey)
+    localStorage.removeItem(activeKey)
+    // 连带清理可能遗留的旧全局键
     localStorage.removeItem(AI_SESSIONS_STORAGE_KEY)
     localStorage.removeItem(AI_ACTIVE_SESSION_ID_KEY)
     localStorage.removeItem(AI_CHAT_HISTORY_KEY)
@@ -856,28 +1086,28 @@ export function clearAllAiSessions() {
 /**
  * 兼容旧版：加载历史对话记录
  */
-export function loadAiChatHistory() {
-  const sessions = loadAiSessions()
+export function loadAiChatHistory(userOrScope) {
+  const sessions = loadAiSessions(userOrScope)
   return sessions[0]?.messages || []
 }
 
 /**
  * 兼容旧版：保存历史对话记录
  */
-export function saveAiChatHistory(history) {
-  const sessions = loadAiSessions()
+export function saveAiChatHistory(history, userOrScope) {
+  const sessions = loadAiSessions(userOrScope)
   if (sessions.length > 0) {
     sessions[0].messages = history
     sessions[0].updatedAt = Date.now()
-    saveAiSessions(sessions)
+    saveAiSessions(sessions, userOrScope)
   }
 }
 
 /**
  * 兼容旧版：清空历史对话记录
  */
-export function clearAiChatHistory() {
-  clearAllAiSessions()
+export function clearAiChatHistory(userOrScope) {
+  clearAllAiSessions(userOrScope)
 }
 
 /**
@@ -913,35 +1143,188 @@ export function savePaperTranslation(paperKey, translation) {
 }
 
 /**
+ * 尝试修复因截断、未闭合大括号/引号或尾随逗号导致的残缺 JSON 文本
+ */
+export function repairIncompleteJson(str) {
+  if (!str || typeof str !== 'string') return null
+  let trimmed = str.trim()
+  const firstBrace = trimmed.indexOf('{')
+  if (firstBrace === -1) return null
+  let candidate = trimmed.slice(firstBrace)
+
+  // 统计未闭合的双引号与括号
+  let inString = false
+  let escaped = false
+  let openBraces = 0
+  let openBrackets = 0
+
+  for (let i = 0; i < candidate.length; i++) {
+    const ch = candidate[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (ch === '\\') {
+      escaped = true
+      continue
+    }
+    if (ch === '"') {
+      inString = !inString
+      continue
+    }
+    if (!inString) {
+      if (ch === '{') openBraces++
+      else if (ch === '}') openBraces = Math.max(0, openBraces - 1)
+      else if (ch === '[') openBrackets++
+      else if (ch === ']') openBrackets = Math.max(0, openBrackets - 1)
+    }
+  }
+
+  // 若截断在字符串内部，先闭合双引号
+  if (inString) {
+    candidate += '"'
+  }
+
+  // 移除尾随的不完整键或尾随逗号、冒号
+  candidate = candidate.replace(/,\s*"[^"]*"\s*:\s*"?$/, '')
+  candidate = candidate.replace(/,\s*$/, '')
+  candidate = candidate.replace(/:\s*$/, '')
+
+  // 补齐未闭合的括号
+  while (openBrackets > 0) {
+    candidate += ']'
+    openBrackets--
+  }
+  while (openBraces > 0) {
+    candidate += '}'
+    openBraces--
+  }
+
+  try {
+    const cleaned = candidate
+      .replace(/\/\/[^\n\r]*/g, '')
+      .replace(/,\s*([}\]])/g, '$1')
+    const parsed = JSON.parse(cleaned)
+    if (typeof parsed === 'object' && parsed !== null) return parsed
+  } catch (_) {}
+
+  return null
+}
+
+/**
+ * 从非结构化文本中模糊提取学术报告基础字段
+ */
+export function extractFieldsFromLooseText(text) {
+  if (!text || typeof text !== 'string') return null
+  const fields = {}
+
+  const patterns = [
+    { key: 'title', regex: /(?:["'“]title["'”]|(?:报告)?(?:题目|标题))[:：]\s*["'“]?([^"'”\n\r]+)["'”]?/i },
+    { key: 'date', regex: /(?:["'“]date["'”]|(?:报告)?日期)[:：]\s*["'“]?(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?)["'”]?/i },
+    { key: 'time', regex: /(?:["'“]time["'”]|(?:报告)?时间)[:：]\s*["'“]?(\d{1,2}[:：]\d{2})["'”]?/i },
+    { key: 'speaker', regex: /(?:["'“]speaker["'”]|(?:报告人|主讲人|演讲者))[:：]\s*["'“]?([^"'”\n\r]+)["'”]?/i },
+    { key: 'location', regex: /(?:["'“]location["'”]|(?:报告)?地点|会场|会议室)[:：]\s*["'“]?([^"'”\n\r]+)["'”]?/i },
+    { key: 'notes', regex: /(?:["'“]notes["'”]|(?:报告)?(?:说明|摘要|简介))[:：]\s*["'“]?([\s\S]+?)(?:["'”]\s*[,}]|$)/i }
+  ]
+
+  for (const { key, regex } of patterns) {
+    const m = text.match(regex)
+    if (m && m[1]) {
+      fields[key] = m[1].trim()
+    }
+  }
+
+  if (fields.title || fields.date || fields.speaker) {
+    return fields
+  }
+  return null
+}
+
+/**
+ * 从非结构化文本中模糊提取学术会议基础字段
+ */
+export function extractConferenceFieldsFromLooseText(text) {
+  if (!text || typeof text !== 'string') return null
+  const fields = {}
+
+  const patterns = [
+    { key: 'title', regex: /(?:["'“]title["'”]|(?:会议)?(?:全称|名称|题目))[:：]\s*["'“]?([^"'”\n\r]+)["'”]?/i },
+    { key: 'sub_type', regex: /(?:["'“]sub_type["'”]|(?:会议)?类别)[:：]\s*["'“]?([^"'”\n\r]+)["'”]?/i },
+    { key: 'date', regex: /(?:["'“]date["'”]|(?:会议)?(?:起始日期|开始日期|日期))[:：]\s*["'“]?(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?)["'”]?/i },
+    { key: 'end_date', regex: /(?:["'“]end_date["'”]|(?:会议)?(?:结束日期))[:：]\s*["'“]?(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?)["'”]?/i },
+    { key: 'city', regex: /(?:["'“]city["'”]|(?:举办)?城市)[:：]\s*["'“]?([^"'”\n\r]+)["'”]?/i },
+    { key: 'location', regex: /(?:["'“]location["'”]|(?:具体)?会场|地点)[:：]\s*["'“]?([^"'”\n\r]+)["'”]?/i },
+    { key: 'organizer', regex: /(?:["'“]organizer["'”]|主办(?:单位)?|承办(?:单位)?)[:：]\s*["'“]?([^"'”\n\r]+)["'”]?/i },
+    { key: 'abstract_start_date', regex: /(?:["'“]abstract_start_date["'”]|(?:摘要)?(?:提交开始|征集开始|开始开放|开放时间))[:：]\s*["'“]?(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?)["'”]?/i },
+    { key: 'abstract_deadline', regex: /(?:["'“]abstract_deadline["'”]|(?:摘要)?(?:提交截止|截止时间|截稿时间))[:：]\s*["'“]?(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?)["'”]?/i },
+    { key: 'early_bird_deadline', regex: /(?:["'“]early_bird_deadline["'”]|早鸟(?:优惠|注册)?(?:截止))[:：]\s*["'“]?(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?)["'”]?/i },
+    { key: 'registration_deadline', regex: /(?:["'“]registration_deadline["'”]|(?:注册|报名)(?:截止))[:：]\s*["'“]?(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?)["'”]?/i },
+    { key: 'notes', regex: /(?:["'“]notes["'”]|(?:会议)?(?:说明|议程|简介))[:：]\s*["'“]?([\s\S]+?)(?:["'”]\s*[,}]|$)/i }
+  ]
+
+  for (const { key, regex } of patterns) {
+    const m = text.match(regex)
+    if (m && m[1]) {
+      fields[key] = m[1].trim()
+    }
+  }
+
+  if (fields.title || fields.date || fields.city) {
+    return fields
+  }
+  return null
+}
+
+/**
  * 健壮地从大模型输出中提取并解析 JSON 对象
  */
 export function extractJsonFromText(text) {
   if (!text || typeof text !== 'string') return null
-  const trimmed = text.trim()
+  let trimmed = text.trim()
+
+  // 0. 剥离推理模型可能输出的 <think>...</think> 标签
+  trimmed = trimmed.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+
+  function safeParse(str) {
+    if (!str || typeof str !== 'string') return null
+    try {
+      const parsed = JSON.parse(str)
+      if (typeof parsed === 'object' && parsed !== null) return parsed
+    } catch (_) {
+      try {
+        const cleaned = str
+          .replace(/\/\/[^\n\r]*/g, '')
+          .replace(/,\s*([}\]])/g, '$1')
+        const parsed = JSON.parse(cleaned)
+        if (typeof parsed === 'object' && parsed !== null) return parsed
+      } catch (_) {}
+    }
+    return null
+  }
 
   // 1. 直接 JSON 解析
-  try {
-    const parsed = JSON.parse(trimmed)
-    if (typeof parsed === 'object' && parsed !== null) return parsed
-  } catch (_) {}
+  const direct = safeParse(trimmed)
+  if (direct) return direct
 
   // 2. 匹配 Markdown 代码块 ```json ... ``` 或 ``` ... ```
-  const codeBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
-  if (codeBlockMatch) {
-    try {
-      const parsed = JSON.parse(codeBlockMatch[1].trim())
-      if (typeof parsed === 'object' && parsed !== null) return parsed
-    } catch (_) {}
+  const codeBlockMatches = [...trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi)]
+  for (const match of codeBlockMatches) {
+    const parsed = safeParse(match[1].trim()) || repairIncompleteJson(match[1].trim())
+    if (parsed) return parsed
   }
 
   // 3. 截取最外层大括号 {...}
   const firstBrace = trimmed.indexOf('{')
   const lastBrace = trimmed.lastIndexOf('}')
   if (firstBrace !== -1 && lastBrace > firstBrace) {
-    try {
-      const parsed = JSON.parse(trimmed.slice(firstBrace, lastBrace + 1))
-      if (typeof parsed === 'object' && parsed !== null) return parsed
-    } catch (_) {}
+    const parsed = safeParse(trimmed.slice(firstBrace, lastBrace + 1))
+    if (parsed) return parsed
+  }
+
+  // 4. 残缺或截断 JSON 容错修复
+  if (firstBrace !== -1) {
+    const repaired = repairIncompleteJson(trimmed.slice(firstBrace))
+    if (repaired) return repaired
   }
 
   return null
@@ -1025,14 +1408,16 @@ export function isEmailContentBrief(email) {
 }
 
 /**
- * 将图片 URL 转换为 Base64 Data URL (用于多模态视觉请求，客户端自动 Canvas 缩放与高质量压缩)
+ * 将图片 URL 转换为 Base64 Data URL (用于多模态视觉请求)
+ * 浏览器环境下自动使用 Canvas 进行等比缩放与 JPEG 高效压缩（最长边 1600px，质量 0.82）
+ * 将几兆的原始海报图片瘦身至 200~400KB，大幅缩减上传网络开销并杜绝网关 413 超限与超时
  */
 export async function convertImageUrlToDataUrl(url, signal, { maxWidth = 1600, maxHeight = 1600, quality = 0.82 } = {}) {
   if (!url || typeof url !== 'string') return null
   if (url.startsWith('data:')) return url
   try {
     const token = (typeof localStorage !== 'undefined')
-      ? (localStorage.getItem('labhub_token') || localStorage.getItem('laborbit_token') || '')
+      ? (localStorage.getItem('cssbd_token') || localStorage.getItem('labhub_token'))
       : ''
     const headers = {}
     if (token && (url.startsWith('/') || url.includes('/api/files/'))) {
@@ -1080,7 +1465,6 @@ export async function convertImageUrlToDataUrl(url, signal, { maxWidth = 1600, m
       } catch (_) {}
     }
 
-    const mimeType = blob.type || 'image/jpeg'
     if (typeof FileReader !== 'undefined') {
       return await new Promise((resolve, reject) => {
         const reader = new FileReader()
@@ -1091,10 +1475,11 @@ export async function convertImageUrlToDataUrl(url, signal, { maxWidth = 1600, m
     } else {
       const arrayBuffer = await blob.arrayBuffer()
       const base64 = Buffer.from(arrayBuffer).toString('base64')
+      const mimeType = blob.type || 'image/jpeg'
       return `data:${mimeType};base64,${base64}`
     }
   } catch (err) {
-    console.warn('转换为 Base64 失败:', err)
+    console.warn('读取海报图片 Base64 失败:', err)
     return null
   }
 }
@@ -1127,7 +1512,7 @@ export async function callAiCompletion({
   if (!aiConfig.baseUrl) {
     throw new Error('未配置大模型 Base URL 地址。')
   }
-  if (aiConfig.provider !== 'ollama' && !aiConfig.apiKey) {
+  if (aiConfig.provider !== 'ollama' && aiConfig.provider !== 'ustc_vlab' && !aiConfig.apiKey) {
     throw new Error('未配置大模型 API Key。')
   }
 
@@ -1140,7 +1525,7 @@ export async function callAiCompletion({
   }
 
   const payload = {
-    model: aiConfig.model || 'deepseek-chat',
+    model: aiConfig.model || 'deepseek-flash',
     messages,
     temperature,
     stream: false
@@ -1210,11 +1595,11 @@ export async function callAiCompletion({
  * 严格保留 LaTeX 公式，精准转换学术术语
  */
 export async function translatePaperWithAi({ title = '', abstract = '', config, signal } = {}) {
-  const systemPrompt = `你是一个资深学术文献翻译专家。请将给出的英文学术论文标题和摘要翻译为规范、严谨、专业的学术中文。
+  const systemPrompt = `你是一个资深天文学与天体物理学学术文献翻译专家。请将给出的英文学术论文标题和摘要翻译为规范、严谨、专业的学术中文。
 
 翻译规范与硬性要求：
 1. 必须原样严格保留所有 LaTeX 数学物理公式（如 $...$、$$...$$、\\( ... \\)、\\[ ... \\] 及所有专业数学符号），切勿篡改或翻译公式内的数学变量；
-2. 准确翻译天文学术专用术语（例如：redshift -> 红移，gravitational waves -> 引力波，accretion disk -> 吸积盘，dark matter halo -> 暗物质晕，supernova -> 超新星，spectroscopy -> 光谱学，cosmic microwave background -> 宇宙微波背景 等）；
+2. 准确翻译天文学术专用术语（例如：redshift -> 红移，gravitational lensing -> 引力透镜，accretion disk -> 吸积盘，dark matter halo -> 暗物质晕，supernova -> 超新星，spectroscopy -> 光谱学，cosmic microwave background -> 宇宙微波背景 等）；
 3. 语调忠实学术原文，用词精炼严谨，避免口语化；
 4. 必须输出严格的 JSON 格式，不要输出任何多余的开头或结尾寒暄：
 {
@@ -1254,12 +1639,13 @@ ${abstract}`
  * 使用大模型从学术通知邮件中智能提取日程信息
  * 严格忠实原邮件与海报，若邮件正文简短且有海报则结合海报 OCR 充实摘要说明
  */
-export async function extractScheduleFromEmailWithAi(email, { config, signal, posterImageUrl } = {}) {
+export async function extractScheduleFromEmailWithAi(email, { config, signal, posterImageUrl, maxTokens } = {}) {
   if (!email) throw new Error('邮件数据为空')
 
   const aiConfig = config || loadAiConfig()
   const rawBody = (email.body_text || email.snippet || '').trim()
   const truncatedBody = rawBody.length > 2500 ? rawBody.slice(0, 2500) : rawBody
+
   const isPromptOnly = /请根据随附.*(?:海报|图片|文件).*提取/i.test(rawBody) ||
     /^[【\[]?(?:随附海报图片|随附海报|随附图片|海报图片|仅随附海报)[】\]]?$/i.test(rawBody)
   const hasSubstantiveText = rawBody.length > 20 && !isPromptOnly
@@ -1268,22 +1654,27 @@ export async function extractScheduleFromEmailWithAi(email, { config, signal, po
   const imageCandidate = posterImageUrl || email.poster_url || (Array.isArray(email.attachments) && email.attachments[0]?.url) || ''
 
   if (!isVision && !hasSubstantiveText && Boolean(imageCandidate)) {
-    throw new Error(`您当前配置的模型（${aiConfig.model || '纯文本模型'}）不支持图像视觉识别。对于仅提供海报的学术日程条目，请在「AI 科研助手」->「模型配置」中切换为支持视觉的多模态模型（如 通义千问 Qwen2.5-VL / GPT-4o 等），或先输入/勾选文本内容。`)
+    throw new Error(`您当前配置的模型（${aiConfig.model || '纯文本模型'}）不支持图像视觉识别。对于仅提供海报的报告条目，请在「AI 科研助手」->「模型配置」中切换为支持视觉的多模态模型（如 Qwen2.5-VL / GPT-4o 等），或先输入/勾选文本内容。`)
   }
+
+  const refDate = shanghaiToday()
+  const refYear = parseInt(refDate.slice(0, 4), 10) || 2026
 
   const mailContent = `邮件主题: ${email.subject || ''}
 发件人: ${email.from || ''}
-邮件时间: ${email.date || ''}
+邮件时间: ${email.date || refDate}
+基准参考日期: ${refDate}（${refYear}年）
 邮件正文:
 ${hasSubstantiveText ? truncatedBody : '（正文未提供文字描述，详见随附学术报告海报）'}`
 
   const isBrief = isEmailContentBrief(email)
   let usedVision = false
   let userContent = mailContent
-  let maxTokensToUse = 600
+  const hasLongAbstract = /摘要|abstract/i.test(rawBody) || rawBody.length > 300
+  let maxTokensToUse = maxTokens || (hasLongAbstract ? 2000 : 600)
 
   // 只要大模型具备多模态视觉能力且存在海报图片，并且正文简略或正文未提供详尽长篇预印本文本，激活多模态海报深度 OCR 与摘要提取
-  const shouldTryVision = isVision && (isBrief || !hasSubstantiveText || email.body_text?.length < 800) && Boolean(imageCandidate)
+  const shouldTryVision = isVision && (isBrief || !hasSubstantiveText || email.body_text.length < 800) && Boolean(imageCandidate)
 
   if (shouldTryVision) {
     try {
@@ -1296,7 +1687,7 @@ ${hasSubstantiveText ? truncatedBody : '（正文未提供文字描述，详见�
 该学术日程已随附报告海报图片。
 请你仔细阅读并 OCR 识别海报图片中的所有文字，重点提取：
 1. 报告题目 (title)；
-2. 报告日期 (date, YYYY-MM-DD) 与开始时间 (time, HH:mm)；
+2. 报告日期 (date, YYYY-MM-DD，基准参考年份为 ${refYear} 年) 与开始时间 (time, HH:mm)；
 3. 报告人姓名与职称单位 (speaker)；
 4. 地点或会议号 (location)；
 5. 报告摘要 / 研究内容简介 (Abstract / Overview)；
@@ -1310,7 +1701,7 @@ ${hasSubstantiveText ? truncatedBody : '（正文未提供文字描述，详见�
           }
         ]
         usedVision = true
-        maxTokensToUse = 1800
+        maxTokensToUse = maxTokens || 1800
       }
     } catch (e) {
       console.warn('获取海报图片进行视觉识别失败:', e)
@@ -1320,18 +1711,18 @@ ${hasSubstantiveText ? truncatedBody : '（正文未提供文字描述，详见�
     }
   }
 
-  const systemPrompt = `你是一个科研学术日程结构化提取助手。请从给定的学术讲座/报告通知${usedVision ? '以及随附的海报图片' : ''}中精准提取日程字段。
+  const systemPrompt = `你是一个科研学术邮件日程结构化提取助手。请从给定的学术讲座/报告通知邮件${usedVision ? '以及随附的海报图片' : ''}中精准提取日程字段。
 
 提取硬性规范：
-1. 忠实原信息与海报：不要进行主观总结或润色，提取客观日程信息；
-2. 中文优先原则：若原文或海报中同时出现标题的中英文、报告人的中英文或地点的中英文，必须优先填入中文；仅当原文只有英文时才填入英文；
-3. 地点规范：提取真实的会议室、报告厅或会议号。严禁将正文称谓误作为地点；
+1. 忠实原邮件与海报：不要进行主观总结或润色，提取客观日程信息；
+2. 中文优先原则：若邮件或海报中同时出现标题的中英文、报告人的中英文或地点的中英文，必须优先填入中文；仅当原文只有英文时才填入英文；
+3. 地点机构前缀规则：通常为南大或紫台的报告。若判定为南大报告，地点最前面必须填入“南大 ”（包含空格，如“南大 天文楼302会议室”）；若判定为紫台报告，地点最前面必须填入“紫台”（如“紫台仙林 5-516 会议室”或“紫台 5-516 会议室”）。严禁将正文称谓（如“各位老师、同学：”）误作为地点；
 4. 标题(title)：纯正报告题目。必须自动剥离“Fw:”、“转发:”、“【学术报告】”、“讲座通知:”等前缀；若同时有中英文标题，优先提取中文标题；
-5. 日期(date)：公历日期，严格格式 "YYYY-MM-DD"；
+5. 日期(date)：公历日期，严格格式 "YYYY-MM-DD"。当前基准参考年份为 ${refYear} 年（基准参考日期：${refDate}）。若原文或海报中只有月日（如“9月22日”）或缺少明确公历年份，必须以当前年份 ${refYear} 为基准，严禁幻觉输出过往年份（如 2025/2024 等）！
 6. 时间(time)：24小时制，严格格式 "HH:mm"；
 7. 报告人(speaker)：主讲人姓名与职称单位，优先中文；若仅有英文则保留英文；切勿将称谓误当作报告人；
-8. 地点(location)：真实会议室或会议号，优先中文；
-9. 说明(notes)：报告摘要全文或背景要点。${usedVision ? '【特别强调】：当前已随附海报图片，请务必仔细阅读并 OCR 识别海报上的文字，将海报中记载的报告摘要、研究内容简介与主讲人背景忠实完整地填入 notes 中，严禁只输出空或简略的一两句话！' : '忠实原内容，无需主观发挥'}；
+8. 地点(location)：真实会议室或会议号，优先中文并按规则在最前面填入“南大 ”或“紫台”；
+9. 说明(notes)：邮件关于报告的摘要全文或背景要点。${usedVision ? '【特别强调】：当前已随附海报图片，请务必仔细阅读并 OCR 识别海报上的文字，将海报中记载的报告摘要、研究内容简介与主讲人背景忠实完整地填入 notes 中，严禁只输出空或简略的一两句话！' : '忠实原邮件，无需总结'}；
 10. 必须输出严格 JSON 格式：
 {
   "title": "报告标题",
@@ -1339,8 +1730,9 @@ ${hasSubstantiveText ? truncatedBody : '（正文未提供文字描述，详见�
   "time": "HH:mm",
   "speaker": "报告人",
   "location": "地点或会议号",
-  "notes": "说明/正文摘要"
+  "notes": "说明/邮件正文摘要"
 }幻觉防范：不要把指令提示字符串或空占位符输出到 title 或 notes 中。`
+
 
   let content = ''
   try {
@@ -1366,33 +1758,43 @@ ${hasSubstantiveText ? truncatedBody : '（正文未提供文字描述，详见�
           { role: 'user', content: mailContent }
         ],
         temperature: 0.1,
-        maxTokens: 600,
+        maxTokens: maxTokens || (hasLongAbstract ? 2000 : 600),
         jsonMode: true,
         signal
       })
     } else {
       if (usedVision && !hasSubstantiveText) {
-        throw new Error(`海报多模态视觉识别失败（${err.message || '模型调用异常'}）。当前大模型可能不支持图片输入或网络超时。请切换为支持视觉的多模态模型（如 Qwen2.5-VL / GPT-4o 等），或在左侧输入具体文字描述。`)
+        throw new Error(`海报图片多模态视觉识别失败（${err.message || '模型调用异常'}）。当前配置的大模型可能不支持图片输入或网络超时。若需从海报直接识别，请在模型配置中切换为多模态模型（如 Qwen2.5-VL / GPT-4o 等），或补充文字描述。`)
       }
       throw err
     }
   }
 
-  const extracted = extractJsonFromText(content)
+  let extracted = extractJsonFromText(content)
   if (!extracted || typeof extracted !== 'object') {
-    throw new Error('模型未能正确输出学术报告 JSON 结构。')
+    extracted = extractFieldsFromLooseText(content)
   }
 
-  // 日期容错处理
-  let finalDate = extracted.date || ''
-  if (finalDate) {
-    finalDate = finalDate.replace(/\//g, '-').trim()
-    const dateMatch = finalDate.match(/\d{4}-\d{1,2}-\d{1,2}/)
-    if (dateMatch) {
-      const parts = dateMatch[0].split('-')
-      finalDate = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`
+  if (!extracted || (!extracted.title && !extracted.date && !extracted.speaker)) {
+    const textContent = `${email.subject || ''}\n${email.body_text || email.snippet || ''}`
+    const local = parseTalkMetadataLocally(textContent, email.subject || '')
+    if (local && (local.title || local.date || local.speaker)) {
+      return {
+        title: cleanAiExtractedText(pickChinesePartIfDual(local.title || email.subject || '学术报告')),
+        date: normalizeScheduleDate(local.date || '', refDate),
+        time: local.time || '10:00',
+        speaker: cleanAiExtractedText(pickChinesePartIfDual(local.speaker || '')),
+        location: applyInstitutionLocationPrefix(cleanAiExtractedText(pickChinesePartIfDual(local.location || '')), textContent),
+        notes: email.body_text || email.snippet || '',
+        usedVision: false,
+        fallbackToLocal: true
+      }
     }
+    throw new Error('未能从邮件中解析出有效的学术报告信息，请直接在表单中手动填写或修改。')
   }
+
+  // 日期容错与过往年份幻觉纠偏处理
+  const finalDate = normalizeScheduleDate(extracted.date || '', refDate)
 
   // 时间容错处理
   let finalTime = extracted.time || ''
@@ -1408,7 +1810,7 @@ ${hasSubstantiveText ? truncatedBody : '（正文未提供文字描述，详见�
   const cleanSpeaker = cleanAiExtractedText(pickChinesePartIfDual(extracted.speaker || ''))
   let cleanLocation = cleanAiExtractedText(pickChinesePartIfDual(extracted.location || ''))
 
-  // 执行地点规范化保障
+  // 严格执行南大/紫台地点前缀规则保障
   const fullContext = `${email.subject || ''} ${email.from || ''} ${rawBody}`
   cleanLocation = applyInstitutionLocationPrefix(cleanLocation, fullContext)
 
@@ -1432,7 +1834,7 @@ ${hasSubstantiveText ? truncatedBody : '（正文未提供文字描述，详见�
  * @param {Object} options - 可选参数 { config, posterImageUrl, pdfAttachmentUrl, signal }
  * @returns {Promise<Object>} 结构化的学术会议元数据对象
  */
-export async function extractConferenceFromEmailWithAi(email, { config, posterImageUrl, pdfAttachmentUrl, signal } = {}) {
+export async function extractConferenceFromEmailWithAi(email, { config, posterImageUrl, pdfAttachmentUrl, maxTokens, signal } = {}) {
   const aiConfig = config || loadAiConfig()
   if (!aiConfig.baseUrl) {
     throw new Error('未配置大模型 Base URL 地址，请在个人中心或设置中配置。')
@@ -1450,15 +1852,19 @@ export async function extractConferenceFromEmailWithAi(email, { config, posterIm
     throw new Error(`您当前配置的模型（${aiConfig.model || '纯文本模型'}）不支持图像视觉识别。对于仅提供海报的会议条目，请在「AI 科研助手」->「模型配置」中切换为支持视觉的多模态模型（如 通义千问 Qwen2.5-VL / GPT-4o 等），或先输入/勾选文本内容。`)
   }
 
+  const refDate = shanghaiToday()
+  const refYear = parseInt(refDate.slice(0, 4), 10) || 2026
+
   const mailContent = `邮件主题: ${email.subject || '无'}
 发件人: ${email.from || email.sender || '无'}
-发信日期: ${email.date || '无'}
+发信日期: ${email.date || refDate}
+基准参考日期: ${refDate}（${refYear}年）
 邮件正文:
-${hasSubstantiveText ? rawBody.slice(0, 3000) : '（正文未提供文字描述，详见随附学术会议海报）'}`
+${hasSubstantiveText ? rawBody.slice(0, 16000) : '（正文未提供文字描述，详见随附学术会议海报）'}`
 
   let usedVision = false
   let userContent = mailContent
-  let maxTokensToUse = 1000
+  let maxTokensToUse = 2500
 
   const shouldTryVision = isVision && (!hasSubstantiveText || rawBody.length < 800) && Boolean(imageCandidate)
   if (shouldTryVision) {
@@ -1471,10 +1877,10 @@ ${hasSubstantiveText ? rawBody.slice(0, 3000) : '（正文未提供文字描述�
             text: `${hasSubstantiveText ? mailContent : '【提示：本学术会议日程信息主要记录在随附的会议海报中】'}\n\n【多模态会议海报 OCR 识别核心指令】：
 该条目已随附会议海报图片。请你仔细阅读并 OCR 识别海报图片中的全部文字，重点提取：
 1. 会议完整正式名称 (title)；
-2. 会议起始日期 (date) 与结束日期 (end_date)（格式 YYYY-MM-DD）；
+2. 会议起始日期 (date) 与结束日期 (end_date)（格式 YYYY-MM-DD，基准参考年份为 ${refYear} 年）；
 3. 举办城市 (city) 与具体会场地点 (location)；
 4. 主办或承办单位 (organizer)；
-5. 各关键截止时间（abstract_deadline / early_bird_deadline / registration_deadline）；
+5. 各关键截止时间（abstract_start_date / abstract_deadline / early_bird_deadline / registration_deadline）；
 6. 官方网址与报名网址；
 7. 会议主要日程议程与主题说明 (notes)。
 请务必完整、准确地填充到对应字段中！`
@@ -1485,7 +1891,7 @@ ${hasSubstantiveText ? rawBody.slice(0, 3000) : '（正文未提供文字描述�
           }
         ]
         usedVision = true
-        maxTokensToUse = 1800
+        maxTokensToUse = maxTokens || 1800
       }
     } catch (e) {
       console.warn('获取会议海报图片进行视觉识别失败:', e)
@@ -1495,21 +1901,23 @@ ${hasSubstantiveText ? rawBody.slice(0, 3000) : '（正文未提供文字描述�
     }
   }
 
-  const systemPrompt = `你是一位专业的高校与科研院所课题组学术助手。
-你的任务是从给定的邮件内容（${usedVision ? '以及随附的会议海报图片' : '及可能附加的会议通知图片'}）中，准确提取学术会议（如学术年会、研讨会、Colloquium、Symposium、高峰论坛等）的关键结构化信息。
+  const systemPrompt = `你是一位专业的高校与科研院所天文课题组学术助手。
+你的任务是从给定的邮件内容（${usedVision ? '以及随附的会议海报图片' : '及可能附加的会议通知图片'}）中，准确提取学术会议（如国际会议、学术年会、研讨会、Colloquium、Symposium、高峰论坛等）的关键结构化信息。
 
 请按以下要求提取并输出 JSON：
-1. 完整会议名称 (title)：如“2026年天体物理与宇宙学前沿研讨会”；
-2. 会议类别 (sub_type)：必须是以下之一：年会、研讨会、学术交流、其他学术会议；
-3. 会议起始日期 (date)：格式 "YYYY-MM-DD"；
+1. 完整会议名称 (title)：如“2026年引力透镜与宇宙学前沿研讨会”；
+2. 会议类别 (sub_type)：必须是以下之一：国际会议、年会、研讨会、专题研讨、暑期学校、学术论坛；
+3. 会议起始日期 (date)：格式 "YYYY-MM-DD"。当前基准参考年份为 ${refYear} 年（基准日期：${refDate}）。若原文或海报中缺少公历年份，必须以当前年份 ${refYear} 为基准，严禁输出过往年份！；
 4. 会议结束日期 (end_date)：格式 "YYYY-MM-DD"（若为单日会议可与 date 相同或为空）；
 5. 举办城市 (city)：如“开封”、“南京”、“北京”等；
 6. 具体地点/会场 (location)：如酒店、报告厅、大学校区或园区会议中心；
-7. 主办/承办单位 (organizer)：如“中国天文学会学术交流专业委员会”；
-8. 关键重要截止时间：
-   - abstract_deadline: 摘要提交/报告申请截止日期（格式 "YYYY-MM-DD"，无则空 ""）
+7. 主办/承办单位 (organizer)：如“中国天文学会引力透镜专业委员会”；
+8. 关键重要截止时间（必须以当前年份 ${refYear} 为基准，格式 "YYYY-MM-DD"，无则空 ""）：
+   - abstract_start_date: 摘要提交/征文开始开放日期（Call for abstracts / 摘要提交开始时间，格式 "YYYY-MM-DD"，无则空 ""）
+   - abstract_deadline: 摘要提交/报告申请截止日期（Abstract submission deadline / 截稿时间，格式 "YYYY-MM-DD"，无则空 ""）
    - early_bird_deadline: 早鸟注册/优惠截止日期（格式 "YYYY-MM-DD"，无则空 ""）
    - registration_deadline: 正式注册/报名截止日期（格式 "YYYY-MM-DD"，无则空 ""）
+
 9. 网址与链接：
    - website_url: 会议官方网站（有效 http/https 网址，无则空 ""）
    - registration_url: 在线报名注册入口（有效 http/https 网址，无则空 ""）
@@ -1517,12 +1925,13 @@ ${hasSubstantiveText ? rawBody.slice(0, 3000) : '（正文未提供文字描述�
 11. 必须输出严格 JSON 格式：
 {
   "title": "会议全称",
-  "sub_type": "年会",
+  "sub_type": "国际会议",
   "date": "YYYY-MM-DD",
   "end_date": "YYYY-MM-DD",
   "city": "城市名",
   "location": "会场或酒店",
   "organizer": "主办单位",
+  "abstract_start_date": "YYYY-MM-DD",
   "abstract_deadline": "YYYY-MM-DD",
   "early_bird_deadline": "YYYY-MM-DD",
   "registration_deadline": "YYYY-MM-DD",
@@ -1555,7 +1964,7 @@ ${hasSubstantiveText ? rawBody.slice(0, 3000) : '（正文未提供文字描述�
           { role: 'user', content: mailContent }
         ],
         temperature: 0.1,
-        maxTokens: 1000,
+        maxTokens: maxTokens || 1000,
         jsonMode: true,
         signal
       })
@@ -1567,40 +1976,92 @@ ${hasSubstantiveText ? rawBody.slice(0, 3000) : '（正文未提供文字描述�
     }
   }
 
-  const extracted = extractJsonFromText(content)
+  let extracted = extractJsonFromText(content)
   if (!extracted || typeof extracted !== 'object') {
-    throw new Error('模型未能正确输出学术会议 JSON 结构。')
+    extracted = extractConferenceFieldsFromLooseText(content)
   }
 
-  function cleanDate(d) {
+  function cleanDeadline(d) {
     if (!d || typeof d !== 'string') return ''
-    const m = d.replace(/\//g, '-').match(/\d{4}-\d{1,2}-\d{1,2}/)
-    if (m) {
-      const [y, mon, day] = m[0].split('-')
-      return `${y}-${mon.padStart(2, '0')}-${day.padStart(2, '0')}`
-    }
-    return ''
+    return normalizeScheduleDate(d, refDate)
   }
 
-  const finalTitle = cleanAiExtractedText(extracted.title) || cleanAiExtractedText(email.subject) || (imageCandidate ? '学术会议（海报）' : '学术会议')
+  const textContent = `${email.subject || ''}\n${rawBody}`
+  const local = parseConferenceMetadataLocally(textContent, email.subject || '')
+
+  if (!extracted || (!extracted.title && !extracted.date && !extracted.city)) {
+    if (local && (local.title || local.date)) {
+      return {
+        title: pickChinesePartIfDual(local.title || email.subject || '学术会议'),
+        sub_type: local.sub_type || '研讨会',
+        date: cleanDeadline(local.date),
+        end_date: cleanDeadline(local.end_date || local.date),
+        city: local.city || '',
+        location: local.location || '',
+        organizer: local.organizer || '',
+        abstract_start_date: cleanDeadline(local.abstract_start_date),
+        abstract_deadline: cleanDeadline(local.abstract_deadline),
+        early_bird_deadline: cleanDeadline(local.early_bird_deadline),
+        registration_deadline: cleanDeadline(local.registration_deadline),
+        website_url: local.website_url || '',
+        registration_url: local.registration_url || '',
+        notes: local.notes || rawBody || '',
+        usedVision: false,
+        usedPdf: false,
+        fallbackToLocal: true
+      }
+    }
+    throw new Error('未能从邮件中解析出有效的学术会议信息，请直接在表单中手动填写或修改。')
+  }
+
+  const startDate = normalizeScheduleDate(extracted.date || '', refDate) || cleanDeadline(local?.date)
+  let endDate = extracted.end_date ? normalizeScheduleDate(extracted.end_date, refDate) : (startDate || cleanDeadline(local?.end_date || local?.date))
+  if (endDate && startDate && endDate < startDate) {
+    const startM = parseInt(startDate.slice(5, 7), 10)
+    const endM = parseInt(endDate.slice(5, 7), 10)
+    if (endM < startM) {
+      const endParts = endDate.split('-')
+      endDate = `${parseInt(startDate.slice(0, 4), 10) + 1}-${endParts[1]}-${endParts[2]}`
+    } else {
+      endDate = startDate
+    }
+  }
+
+  const finalTitle = cleanAiExtractedText(extracted.title) || cleanAiExtractedText(email.subject) || local?.title || (imageCandidate ? '学术会议（海报）' : '学术会议')
   const finalNotes = cleanAiExtractedText(extracted.notes) || (hasSubstantiveText ? rawBody.slice(0, 500) : (imageCandidate ? '详见随附学术会议海报' : ''))
+
+  const validSubTypes = ['国际会议', '年会', '研讨会', '专题研讨', '暑期学校', '学术论坛']
+  let finalSubType = extracted.sub_type || ''
+  if (!validSubTypes.includes(finalSubType)) {
+    if (/国际/i.test(finalSubType)) finalSubType = '国际会议'
+    else if (/年会/i.test(finalSubType)) finalSubType = '年会'
+    else if (/学校|讲习/i.test(finalSubType)) finalSubType = '暑期学校'
+    else if (/论坛/i.test(finalSubType)) finalSubType = '学术论坛'
+    else if (/专题/i.test(finalSubType)) finalSubType = '专题研讨'
+    else finalSubType = '研讨会'
+  }
+  if (finalSubType === '研讨会' && (local?.sub_type === '国际会议' || local?.sub_type === '年会')) {
+    finalSubType = local.sub_type
+  }
 
   return {
     title: finalTitle,
-    sub_type: extracted.sub_type || '研讨会',
-    date: cleanDate(extracted.date),
-    end_date: cleanDate(extracted.end_date),
-    city: cleanAiExtractedText(extracted.city),
-    location: cleanAiExtractedText(extracted.location),
-    organizer: cleanAiExtractedText(extracted.organizer),
-    abstract_deadline: cleanDate(extracted.abstract_deadline),
-    early_bird_deadline: cleanDate(extracted.early_bird_deadline),
-    registration_deadline: cleanDate(extracted.registration_deadline),
-    website_url: cleanAiExtractedText(extracted.website_url),
-    registration_url: cleanAiExtractedText(extracted.registration_url),
+    sub_type: finalSubType,
+    date: startDate,
+    end_date: endDate,
+    city: cleanAiExtractedText(extracted.city) || local?.city || '',
+    location: cleanAiExtractedText(extracted.location) || local?.location || '',
+    organizer: cleanAiExtractedText(extracted.organizer) || local?.organizer || '',
+    abstract_start_date: cleanDeadline(extracted.abstract_start_date) || cleanDeadline(local?.abstract_start_date),
+    abstract_deadline: cleanDeadline(extracted.abstract_deadline) || cleanDeadline(local?.abstract_deadline),
+    early_bird_deadline: cleanDeadline(extracted.early_bird_deadline) || cleanDeadline(local?.early_bird_deadline),
+    registration_deadline: cleanDeadline(extracted.registration_deadline) || cleanDeadline(local?.registration_deadline),
+    website_url: cleanAiExtractedText(extracted.website_url) || local?.website_url || '',
+    registration_url: cleanAiExtractedText(extracted.registration_url) || local?.registration_url || '',
     notes: finalNotes,
     usedVision
   }
+
 }
 
 /**
@@ -1911,7 +2372,8 @@ export async function extractSingleNoticeWithAi(text, { config, signal, attachme
         userContent = [
           {
             type: 'text',
-            text: `${hasSubstantiveText ? rawText.slice(0, 3000) : '【提示：本通知信息主要记录在随附的通知附图中】'}\n\n【多模态通知图片 OCR 提取核心指令】：\n该条目已随附通知图片。请仔细阅读并 OCR 识别图片中的文字，提取通知标题 (title)、分类 (category)、重要程度 (importance)、起止日期 (start_date/end_date) 与详细正文 (content)。`
+            text: `${hasSubstantiveText ? rawText.slice(0, 3000) : '【提示：本通知信息主要记录在随附的通知附图中】'}\n\n【多模态通知图片 OCR 提取核心指令】：
+该条目已随附通知图片。请仔细阅读并 OCR 识别图片中的文字，提取通知标题 (title)、分类 (category)、重要程度 (importance)、起止日期 (start_date/end_date) 与详细正文 (content)。`
           },
           {
             type: 'image_url',
@@ -1942,8 +2404,7 @@ export async function extractSingleNoticeWithAi(text, { config, signal, attachme
   "importance": "urgent | important | normal",
   "start_date": "通知生效或开始日期，格式 YYYY-MM-DD，若无法确认请留空",
   "end_date": "时效截止日期，格式 YYYY-MM-DD（如申请截止时间、停水结束时间、放假结束时间；若无明确截止时效或长期有效则填空字符串 \"\"）"
-}
-幻觉防范：不要把指令提示字符串或空占位符输出到 title 或 content 中。`
+}幻觉防范：不要把指令提示字符串或空占位符输出到 title 或 content 中。`
 
   let responseText = ''
   try {
@@ -2010,3 +2471,4 @@ export async function extractSingleNoticeWithAi(text, { config, signal, attachme
     attachments: Array.isArray(attachments) ? attachments : []
   }
 }
+

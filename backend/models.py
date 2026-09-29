@@ -53,7 +53,6 @@ class User(Base):
     nickname = Column(String(50), default='', nullable=False)
     token_version = Column(Integer, default=0, nullable=False)
     can_manage_seminars = Column(Boolean, default=False, nullable=False)
-    tutorial_completed = Column(Boolean, default=False, nullable=False)
     email = Column(String(100), unique=True, index=True, nullable=False)
     hashed_password = Column(String(200), nullable=False)
     role = Column(String(20), default="student")  # "student", "teacher", "admin"
@@ -178,6 +177,7 @@ class ResourceBook(Base):
     
     order_num = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
 
 
 class LibraryPaper(Base):
@@ -243,6 +243,7 @@ class ObservatoryTalk(Base):
     city = Column(String(100), default="")
     organizer = Column(String(200), default="")
     sub_type = Column(String(50), default="")
+    abstract_start_date = Column(String(10), default="")
     abstract_deadline = Column(String(10), default="")
     early_bird_deadline = Column(String(10), default="")
     registration_deadline = Column(String(10), default="")
@@ -344,24 +345,5 @@ class Notice(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     creator = relationship("User")
-
-
-class PendingScheduleImport(Base):
-    __tablename__ = "pending_schedule_imports"
-    id = Column(Integer, primary_key=True)
-    raw_text = Column(Text, nullable=False, default="")
-    inferred_type = Column(String(20), nullable=False, default="talk")
-    parsed_data = Column(Text, default="{}")
-    image_urls = Column(Text, default="[]")
-    file_attachments = Column(Text, default="[]")
-    status = Column(String(20), default="pending", index=True)
-    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    created_by_name = Column(String(100), default="")
-    resolved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    resolved_by_name = Column(String(100), default="")
-    target_type = Column(String(20), default="")
-    target_id = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    resolved_at = Column(DateTime, nullable=True)
 
 

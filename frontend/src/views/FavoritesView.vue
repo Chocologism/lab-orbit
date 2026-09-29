@@ -8,6 +8,7 @@ import AttachmentLink from '../components/AttachmentLink.vue'
 import { useFavorites } from '../composables/favorites'
 import { resourceApi } from '../api/client'
 import WaveInput from '../components/WaveInput.vue'
+import SlidingSegmented from '../components/SlidingSegmented.vue'
 import { compareTitle } from '../utils/titleSort'
 
 const { entries, error, load } = useFavorites()
@@ -110,7 +111,7 @@ const date = value => new Date(`${value}Z`).toLocaleDateString('zh-CN')
     </header>
 
     <div class="collection-tools">
-      <div class="segmented category-segmented" aria-label="收藏分类">
+      <SlidingSegmented class="segmented category-segmented" aria-label="收藏分类">
         <button 
           v-for="option in categoryOptions" 
           :key="option.id" 
@@ -120,7 +121,7 @@ const date = value => new Date(`${value}Z`).toLocaleDateString('zh-CN')
         >
           {{ option.name }}
         </button>
-      </div>
+      </SlidingSegmented>
       <WaveInput 
         id="favorites-query"
         v-model="query" 
@@ -138,7 +139,7 @@ const date = value => new Date(`${value}Z`).toLocaleDateString('zh-CN')
       <p class="muted">{{ shown.length }} 项收藏 · 仅自己可见</p>
       <div v-if="!shown.length" class="panel collection-empty">
         <h2>{{ entries.length ? '该分类下没有匹配的收藏' : '收藏从一颗星开始' }}</h2>
-        <p>在文献或教材资料卡片右上角点击星号，即可保存到这里。</p>
+        <p>在文献或资料库卡片右上角点击星号，即可保存到这里。</p>
         <div class="empty-actions">
           <router-link class="button secondary" to="/arxiv">浏览文献推荐</router-link>
           <router-link class="button secondary" to="/resources">浏览资料整合</router-link>
@@ -201,8 +202,16 @@ const date = value => new Date(`${value}Z`).toLocaleDateString('zh-CN')
 
 .category-segmented {
   overflow-x: auto;
+  overflow-y: hidden;
   max-width: 100%;
   padding-bottom: 2px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.category-segmented::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 .empty-actions {
   display: flex;

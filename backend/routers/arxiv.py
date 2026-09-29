@@ -397,3 +397,40 @@ def _format_paper_out(paper: ArxivPaper, current_user_id: int, db: Session) -> A
         is_read_by_me=is_read_by_me,
         comments=comments_list,
     )
+
+
+@router.get("/proxy-markdown/{arxiv_id}")
+async def get_arxiv_markdown_proxy(arxiv_id: str):
+    clean_id = extract_arxiv_id(arxiv_id) or arxiv_id.strip()
+    url = f"https://www.alphaxiv.org/abs/{clean_id}.md"
+    try:
+        import httpx
+        async with httpx.AsyncClient(follow_redirects=True, timeout=20.0) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; LabHub/1.0)"})
+            if resp.status_code == 200:
+                from fastapi import Response
+                return Response(content=resp.text, media_type="text/markdown; charset=utf-8", headers={"Access-Control-Allow-Origin": "*"})
+            raise HTTPException(resp.status_code, f"alphaXiv returned {resp.status_code}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Failed to fetch markdown from alphaXiv: {str(e)}")
+
+
+@router.get("/proxy-pdf/{arxiv_id}")
+async def get_arxiv_pdf_proxy(arxiv_id: str):
+    clean_id = extract_arxiv_id(arxiv_id) or arxiv_id.strip()
+    url = f"https://arxiv.org/pdf/{clean_id}"
+    try:
+        import httpx
+        async with httpx.AsyncClient(follow_redirects=True, timeout=35.0) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; LabHub/1.0)"})
+            if resp.status_code == 200:
+                from fastapi import Response
+                return Response(content=resp.content, media_type="application/pdf", headers={"Access-Control-Allow-Origin": "*"})
+            raise HTTPException(resp.status_code, f"arXiv returned {resp.status_code}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Failed to fetch PDF from arXiv: {str(e)}")
+

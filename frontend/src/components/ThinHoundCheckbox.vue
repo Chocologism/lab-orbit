@@ -3,7 +3,11 @@ import { computed, ref, watch } from 'vue'
 
 const props = defineProps({
   modelValue: {
-    type: Boolean,
+    type: [Boolean, Array],
+    default: undefined
+  },
+  value: {
+    type: [String, Number, Boolean, Object],
     default: undefined
   },
   checked: {
@@ -44,6 +48,9 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'change'])
 
 const getPropChecked = () => {
+  if (Array.isArray(props.modelValue)) {
+    return props.value !== undefined ? props.modelValue.includes(props.value) : false
+  }
   if (props.modelValue !== undefined) return Boolean(props.modelValue)
   if (props.checked !== undefined) return Boolean(props.checked)
   return false
@@ -53,12 +60,11 @@ const getPropChecked = () => {
 const innerChecked = ref(getPropChecked())
 
 watch(
-  () => (props.modelValue !== undefined ? props.modelValue : props.checked),
-  (val) => {
-    if (val !== undefined) {
-      innerChecked.value = Boolean(val)
-    }
-  }
+  () => [props.modelValue, props.checked, props.value],
+  () => {
+    innerChecked.value = getPropChecked()
+  },
+  { deep: true }
 )
 
 const isChecked = computed(() => innerChecked.value)
@@ -67,7 +73,20 @@ const handleChange = (e) => {
   if (props.disabled) return
   const val = e.target.checked
   innerChecked.value = val
-  emit('update:modelValue', val)
+
+  if (Array.isArray(props.modelValue)) {
+    let nextArr = [...props.modelValue]
+    if (val) {
+      if (props.value !== undefined && !nextArr.includes(props.value)) {
+        nextArr.push(props.value)
+      }
+    } else {
+      nextArr = nextArr.filter(item => item !== props.value)
+    }
+    emit('update:modelValue', nextArr)
+  } else {
+    emit('update:modelValue', val)
+  }
   emit('change', e)
 }
 </script>
@@ -135,7 +154,10 @@ const handleChange = (e) => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  user-select: none;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
   vertical-align: middle;
   cursor: pointer;
   line-height: 1.2;
@@ -145,6 +167,16 @@ const handleChange = (e) => {
 .thin-hound-wrapper *::after,
 .thin-hound-wrapper *::before {
   box-sizing: border-box;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+}
+
+.thin-hound-wrapper::selection,
+.thin-hound-wrapper *::selection {
+  background: transparent !important;
+  color: inherit !important;
 }
 
 .thin-hound-wrapper.is-disabled,
@@ -157,10 +189,14 @@ const handleChange = (e) => {
 }
 
 .label-text {
-  font-size: 12px;
+  font-size: inherit;
   color: var(--soft, #cbd5e1);
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  line-height: inherit;
   transition: color 0.2s ease;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 .thin-hound-wrapper:hover:not(.is-disabled) .label-text {
@@ -177,6 +213,8 @@ const handleChange = (e) => {
   line-height: 0;
   border-radius: 6px;
   transition: filter 0.2s ease;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 /* Real native checkbox positioned exactly over the visual box to capture user clicks */
@@ -191,6 +229,13 @@ const handleChange = (e) => {
   opacity: 0;
   cursor: pointer;
   z-index: 5;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.check-input::selection {
+  background: transparent !important;
+  color: inherit !important;
 }
 
 .is-disabled .check-input {
@@ -236,12 +281,20 @@ const handleChange = (e) => {
   stroke: var(--accent, #b89bf8);
 }
 
+.checkbox-box:focus-within {
+  filter: drop-shadow(0 0 4px var(--accent, #b89bf8));
+}
+
 .thin-hound-wrapper:has(.check-input:focus-visible) .checkbox-box {
   filter: drop-shadow(0 0 4px var(--accent, #b89bf8));
 }
 
 [data-theme-style="vanta-fog"] .check-input:focus-visible + .checkbox-svg .box-rect {
   stroke: var(--accent, #c5e6df);
+}
+
+[data-theme-style="vanta-fog"] .checkbox-box:focus-within {
+  filter: drop-shadow(0 0 4px var(--accent, #c5e6df));
 }
 
 [data-theme-style="vanta-fog"] .thin-hound-wrapper:has(.check-input:focus-visible) .checkbox-box {
@@ -270,7 +323,7 @@ const handleChange = (e) => {
   stroke-linejoin: round;
   stroke-dasharray: 403;
   stroke-dashoffset: 403;
-  transition: stroke-dashoffset 0.32s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
+  transition: stroke-dashoffset 0.45s ease-out, opacity 0.22s ease;
   opacity: 0;
   will-change: stroke-dashoffset, opacity;
   transform: translateZ(0);
@@ -284,5 +337,6 @@ const handleChange = (e) => {
 .thin-hound-wrapper.is-checked .path1 {
   stroke-dashoffset: 0;
   opacity: 1;
+  transition: stroke-dashoffset 0.62s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease;
 }
 </style>

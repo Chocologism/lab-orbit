@@ -386,6 +386,18 @@ def get_seminars(
     db: Session = Depends(get_db)
 ):
     """获取组会排期列表（按日期升序/倒序排列）"""
+    from zoneinfo import ZoneInfo
+    today_str = datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()
+    # 自动将过去的待举行组会标记为已完成
+    try:
+        db.query(SeminarSchedule).filter(
+            SeminarSchedule.date < today_str,
+            SeminarSchedule.status == 'upcoming'
+        ).update({SeminarSchedule.status: 'completed'}, synchronize_session=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+
     seminars = db.query(SeminarSchedule).order_by(SeminarSchedule.date.desc(), SeminarSchedule.time.desc()).all()
     
     return [format_seminar(s, current_user.id, db) for s in seminars]
@@ -393,7 +405,11 @@ def get_seminars(
 
 def format_seminar(seminar, user_id, db):
     from .arxiv import _format_paper_out
+    from zoneinfo import ZoneInfo
     data = {c.name: getattr(seminar, c.name) for c in SeminarSchedule.__table__.columns}
+    today_str = datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()
+    if data.get('date') and data['date'] < today_str and data.get('status') == 'upcoming':
+        data['status'] = 'completed'
     # Shared seminars only embed public recommendations, never private comments or recipients.
     shared_paper = seminar.paper if seminar.paper and not seminar.paper.audience else None
     data['paper'] = _format_paper_out(shared_paper, user_id, db) if shared_paper else None

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+<title>Zotero 彩色应用图标 — 矢量重绘</title>
+<desc>Vector recreation based on Zotero official 1024px artwork. Smooth Bézier curves and gradients; no embedded raster images.</desc>
+<defs>
+ <linearGradient id="pink" x1="388" y1="20" x2="388" y2="110" gradientUnits="userSpaceOnUse"><stop stop-color="#cc6699"/><stop offset="1" stop-color="#c06090"/></linearGradient>
+ <linearGradient id="orange"><stop stop-color="#ff8e55"/><stop offset="1" stop-color="#e96a3b"/></linearGradient>
+ <linearGradient id="blue"><stop stop-color="#6e80dc"/><stop offset="1" stop-color="#8094ff"/></linearGradient>
+ <linearGradient id="cyan"><stop stop-color="#53a6d4"/><stop offset="1" stop-color="#61bff5"/></linearGradient>
+ <linearGradient id="base" x1="370" y1="640" x2="790" y2="915" gradientUnits="userSpaceOnUse"><stop stop-color="#b6b6bb"/><stop offset=".52" stop-color="#c1c1c6"/><stop offset=".82" stop-color="#e6e6eb"/><stop offset="1" stop-color="#ebebef"/></linearGradient>
+ <linearGradient id="paper" x1="220" y1="240" x2="850" y2="850" gradientUnits="userSpaceOnUse"><stop stop-color="#fff"/><stop offset=".35" stop-color="#fafafb"/><stop offset="1" stop-color="#e4e4e9"/></linearGradient>
+ <linearGradient id="red" x1="331" y1="260" x2="720" y2="724" gradientUnits="userSpaceOnUse"><stop stop-color="#ff6565"/><stop offset=".5" stop-color="#ef4850"/><stop offset="1" stop-color="#db2939"/></linearGradient>
+ <linearGradient id="fold" x1="737" y1="677" x2="793" y2="741" gradientUnits="userSpaceOnUse"><stop stop-color="#e4e4e9"/><stop offset=".48" stop-color="#d6d6dc"/><stop offset="1" stop-color="#b9b9bd"/></linearGradient>
+ <path id="sheet" d="M312 100H712C854 100 924 168 924 310V508C924 578 918 608 875 620C851 627 824 627 796 638C734 663 685 711 669 777C660 814 666 849 623 870C599 882 562 884 510 884H312C171 884 100 815 100 674V310C100 168 170 100 312 100Z"/>
+ <clipPath id="front"><use href="#sheet"/></clipPath>
+ <clipPath id="excerpt"><path d="M682 682H828V837H672Z"/></clipPath>
+</defs>
+<g opacity=".95">
+ <path fill="url(#pink)" d="M260 20H516V122H260Z"/>
+ <path fill="url(#orange)" d="M36 468H114V724H36Z"/>
+ <path fill="url(#cyan)" d="M910 492H972V644H910Z"/>
+ <path fill="url(#blue)" d="M908 260H1004V516H908Z"/>
+</g>
+<path fill="url(#base)" d="M312 140H712C854 140 924 208 924 350V714C924 854 854 924 712 924H312C170 924 100 854 100 714V350C100 208 170 140 312 140Z"/>
+<g clip-path="url(#excerpt)" font-family="Times New Roman,serif" font-size="20" fill="#9d9c96">
+ <path fill="#e5c74c" d="M704 682H828V706H704ZM688 714H828V738H688ZM676 746H828V770H676ZM684 778H828V802H684Z"/>
+ <text x="694" y="700">research sources</text><text x="678" y="732">PDFs and documents</text><text x="675" y="764">automatically collect</text><text x="674" y="796">journals. SmartFox</text><text x="682" y="829">digital library.</text>
+</g>
+<use href="#sheet" fill="url(#paper)"/>
+<path clip-path="url(#front)" fill="url(#red)" d="M331.5 260H692.7L720.5 317.5L474.5 625.5H720.5V724H331.5L303.5 665.5L553.3 357H331.5Z"/>
+<path fill="url(#fold)" d="M924 508C924 577 918 608 875 620C851 627 824 627 796 638C734 663 685 711 669 777C662 806 665 829 647 853C713 787 821 679 879 621C915 591 923 560 924 508Z"/>
+<path fill="#fff" d="M875 620C851 627 824 627 796 638C734 663 685 711 669 777C662 806 665 829 647 853C668 825 666 802 675 777C694 714 739 668 800 643C827 632 853 629 875 620Z"/>
+</svg>

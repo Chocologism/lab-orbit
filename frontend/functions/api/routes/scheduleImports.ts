@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { Env, UserRow } from '../types';
 import { authMiddleware } from '../middleware/auth';
+import { scrapeUrlDeep } from '../utils/webScraper';
 
 const app = new Hono<{ Bindings: Env; Variables: { user: UserRow } }>();
 
@@ -45,6 +46,7 @@ async function ensureTalksColumns(db: any) {
     "city VARCHAR(100) DEFAULT ''",
     "organizer VARCHAR(200) DEFAULT ''",
     "sub_type VARCHAR(50) DEFAULT ''",
+    "abstract_start_date VARCHAR(10) DEFAULT ''",
     "abstract_deadline VARCHAR(10) DEFAULT ''",
     "early_bird_deadline VARCHAR(10) DEFAULT ''",
     "registration_deadline VARCHAR(10) DEFAULT ''",
@@ -275,6 +277,7 @@ app.post('/:id/resolve', async (c) => {
       const city = isConference ? (cardData.city || '').trim() : '';
       const organizer = isConference ? (cardData.organizer || '').trim() : '';
       const subType = isConference ? (cardData.sub_type || '研讨会').trim() : '';
+      const abstractStartDate = isConference ? (cardData.abstract_start_date || '').trim() : '';
       const abstractDeadline = isConference ? (cardData.abstract_deadline || '').trim() : '';
       const earlyBirdDeadline = isConference ? (cardData.early_bird_deadline || '').trim() : '';
       const registrationDeadline = isConference ? (cardData.registration_deadline || '').trim() : '';
@@ -286,9 +289,9 @@ app.post('/:id/resolve', async (c) => {
       const insertTalkRes = await c.env.DB.prepare(`
         INSERT INTO observatory_talks (
           date, end_date, time, title, speaker, location, poster_url, notes, event_type,
-          city, organizer, sub_type, abstract_deadline, early_bird_deadline, registration_deadline,
+          city, organizer, sub_type, abstract_start_date, abstract_deadline, early_bird_deadline, registration_deadline,
           website_url, registration_url, handbook_url, source, created_by_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
       `).bind(
         date,
         effectiveEndDate,
@@ -302,6 +305,7 @@ app.post('/:id/resolve', async (c) => {
         city,
         organizer,
         subType,
+        abstractStartDate,
         abstractDeadline,
         earlyBirdDeadline,
         registrationDeadline,
@@ -357,6 +361,30 @@ app.delete('/:id', async (c) => {
 
   await c.env.DB.prepare('DELETE FROM pending_schedule_imports WHERE id = ?').bind(id).run();
   return c.json({ success: true, message: '待处理条目已移除' });
+});
+
+/**
+ * 抓取会议/学术报告官网或报名链接，深度提取页面信息与海报
+ */
+app.post('/scrape-url', async (c) => {
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ detail: '请求体格式错误' }, 400);
+  }
+
+  const targetUrl = (body.url || '').trim();
+  if (!targetUrl) {
+    return c.json({ detail: '请提供待抓取的网址链接' }, 400);
+  }
+
+  const result = await scrapeUrlDeep(targetUrl);
+  if (!result.success) {
+    return c.json({ detail: result.error || '抓取网页失败' }, 400);
+  }
+
+  return c.json(result);
 });
 
 export default app;

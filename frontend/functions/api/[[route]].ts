@@ -14,15 +14,16 @@ import feedback from './routes/feedback';
 import favorites from './routes/favorites';
 import mailbox from './routes/mailbox';
 import notices from './routes/notices';
-import system from './routes/system';
 import scheduleImports from './routes/scheduleImports';
+import zotero from './routes/zotero';
+import video from './routes/video';
 
 const app = new Hono<{ Bindings: Env }>().basePath('/api');
 
-// 兼容不同的 D1 数据库 Binding 名称（DB, lab_hub_db）
+// 兼容不同的 D1 数据库 Binding 名称（DB, csbd_hub_db, cssbd_hub_db）
 app.use('*', async (c, next) => {
   if (!c.env.DB) {
-    c.env.DB = (c.env as any).lab_hub_db;
+    c.env.DB = (c.env as any).csbd_hub_db || (c.env as any).cssbd_hub_db;
   }
   await next();
 });
@@ -50,8 +51,9 @@ app.route('/feedback', feedback);
 app.route('/favorites', favorites);
 app.route('/mailbox', mailbox);
 app.route('/notices', notices);
-app.route('/system', system);
 app.route('/schedule-imports', scheduleImports);
+app.route('/zotero', zotero);
+app.route('/video', video);
 
 
 export const onRequest = handle(app);

@@ -33,19 +33,39 @@ function handleClick(event) {
   isBackdropMouseDown = false
 }
 
+function openDialog(el) {
+  if (!el) return
+  if (typeof el.showModal === 'function') {
+    el.showModal()
+  } else {
+    el.setAttribute('open', '')
+    el.open = true
+  }
+}
+
+function closeDialog(el) {
+  if (!el) return
+  if (typeof el.close === 'function') {
+    el.close()
+  } else {
+    el.removeAttribute('open')
+    el.open = false
+  }
+}
+
 watch(() => props.open, async open => {
   await nextTick()
   if (!dialog.value) return
   animation?.kill()
   if (open) {
     previousFocus = document.activeElement
-    if (!dialog.value.open) dialog.value.showModal()
+    if (!dialog.value.open) openDialog(dialog.value)
     animation = gsap.fromTo(frame.value, { opacity: 0, x: props.drawer && !reducedMotion() ? 32 : 0, y: !props.drawer && !reducedMotion() ? 14 : 0 }, { opacity: 1, x: 0, y: 0, duration: reducedMotion() ? 0 : .32, ease: 'power3.out', onComplete: () => { if (frame.value) gsap.set(frame.value, { clearProps: 'transform' }) } })
   } else if (dialog.value.open) {
-    animation = gsap.to(frame.value, { opacity: 0, x: props.drawer && !reducedMotion() ? 24 : 0, duration: reducedMotion() ? 0 : .18, onComplete: () => { dialog.value?.close(); if (previousFocus?.isConnected) previousFocus.focus() } })
+    animation = gsap.to(frame.value, { opacity: 0, x: props.drawer && !reducedMotion() ? 24 : 0, duration: reducedMotion() ? 0 : .18, onComplete: () => { closeDialog(dialog.value); if (previousFocus?.isConnected) previousFocus.focus() } })
   }
 }, { immediate: true })
-onBeforeUnmount(() => { animation?.kill(); dialog.value?.close(); if (previousFocus?.isConnected) previousFocus.focus() })
+onBeforeUnmount(() => { animation?.kill(); closeDialog(dialog.value); if (previousFocus?.isConnected) previousFocus.focus() })
 </script>
 <template>
   <Teleport to="body">

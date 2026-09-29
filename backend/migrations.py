@@ -4,7 +4,7 @@ from sqlalchemy import inspect, text
 
 def migrate(engine):
     additions = {
-        'users': {'real_name': "TEXT NOT NULL DEFAULT ''", 'nickname': "TEXT NOT NULL DEFAULT ''", 'token_version': 'INTEGER NOT NULL DEFAULT 0', 'can_manage_seminars': 'INTEGER NOT NULL DEFAULT 0', 'tutorial_completed': 'INTEGER NOT NULL DEFAULT 0'},
+        'users': {'real_name': "TEXT NOT NULL DEFAULT ''", 'nickname': "TEXT NOT NULL DEFAULT ''", 'token_version': 'INTEGER NOT NULL DEFAULT 0', 'can_manage_seminars': 'INTEGER NOT NULL DEFAULT 0'},
         'seminar_schedules': {'abstract': "TEXT DEFAULT ''"},
         'seminar_presentations': {'presenter_id': 'INTEGER REFERENCES users(id)'},
         'arxiv_papers': {'journal': "TEXT DEFAULT ''", 'source_url': "TEXT DEFAULT ''"},
@@ -18,6 +18,7 @@ def migrate(engine):
             'city': "VARCHAR(100) DEFAULT ''",
             'organizer': "VARCHAR(200) DEFAULT ''",
             'sub_type': "VARCHAR(50) DEFAULT ''",
+            'abstract_start_date': "VARCHAR(10) DEFAULT ''",
             'abstract_deadline': "VARCHAR(10) DEFAULT ''",
             'early_bird_deadline': "VARCHAR(10) DEFAULT ''",
             'registration_deadline': "VARCHAR(10) DEFAULT ''",
@@ -102,25 +103,5 @@ def migrate(engine):
         """))
         connection.execute(text("CREATE INDEX IF NOT EXISTS idx_paper_comments_paper ON paper_comments(paper_id)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS idx_paper_comments_user ON paper_comments(user_id)"))
-        connection.execute(text("""
-            CREATE TABLE IF NOT EXISTS pending_schedule_imports (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                raw_text TEXT NOT NULL,
-                inferred_type VARCHAR(20) NOT NULL DEFAULT 'talk',
-                parsed_data TEXT DEFAULT '{}',
-                image_urls TEXT DEFAULT '[]',
-                file_attachments TEXT DEFAULT '[]',
-                status VARCHAR(20) DEFAULT 'pending',
-                created_by_id INTEGER REFERENCES users(id),
-                created_by_name VARCHAR(100) DEFAULT '',
-                resolved_by_id INTEGER REFERENCES users(id),
-                resolved_by_name VARCHAR(100) DEFAULT '',
-                target_type VARCHAR(20) DEFAULT '',
-                target_id INTEGER,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                resolved_at DATETIME
-            )
-        """))
-        connection.execute(text("CREATE INDEX IF NOT EXISTS idx_pending_imports_status ON pending_schedule_imports(status)"))
 
 

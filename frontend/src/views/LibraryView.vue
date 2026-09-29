@@ -3,22 +3,27 @@ import { paperLabel, paperSource, paperRead, paperReadLabel } from '../utils/pap
 import { renderLatex } from '../utils/latex'
 import FavoriteButton from '../components/FavoriteButton.vue'
 import { ref, watch, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { authApi, libraryApi } from '../api/client'
 import LoadingState from '../components/LoadingState.vue'
 import AppIcon from '../components/AppIcon.vue'
 import WaveInput from '../components/WaveInput.vue'
 import SmartEmuDelete from '../components/SmartEmuDelete.vue'
+import SlidingSegmented from '../components/SlidingSegmented.vue'
 import { notify } from '../composables/feedback'
 
 const router = useRouter()
+const route = useRoute()
 const query = ref(''), source = ref('all'), papers = ref([]), loading = ref(true), error = ref(''), refreshing = ref(null), deleting = ref(null), currentUser = ref(null)
 let request = 0
 
 function handlePaperCardClick(paper, event) {
-  if (!paper.seminar_id) return
-  if (event?.target?.closest('a, button, input, textarea, select, .card-star, .smart-emu-btn')) return
-  goToSeminar(paper.seminar_id)
+  if (event?.target?.closest('a, button, input, textarea, select, .card-star, .smart-emu-btn, .badge, .library-recommend-quote')) return
+  if (paper.seminar_id) {
+    goToSeminar(paper.seminar_id)
+  } else if (paper.recommendation_id || paper.from_recommendation) {
+    goToRecommendation(paper)
+  }
 }
 
 function goToSeminar(seminarId) {
@@ -30,6 +35,21 @@ function goToSeminar(seminarId) {
       target_seminar: String(seminarId),
       no_reset: '1'
     }
+  })
+}
+
+function goToRecommendation(paper) {
+  const query = {}
+  if (paper.recommendation_id) {
+    query.paper_id = String(paper.recommendation_id)
+  }
+  if (paper.arxiv_id) {
+    query.arxiv_id = String(paper.arxiv_id)
+  }
+  query.highlight = '1'
+  router.push({
+    path: '/arxiv',
+    query
   })
 }
 
@@ -63,8 +83,18 @@ async function deletePaper(paper) {
 
 watch(source, load)
 onMounted(async () => {
+  if (route.query.q) {
+    query.value = String(route.query.q)
+  }
   try { currentUser.value = await authApi.getMe() } catch (e) {}
   load()
+})
+
+watch(() => route.query.q, (newQ) => {
+  if (newQ !== undefined) {
+    query.value = String(newQ || '')
+    load()
+  }
 })
 </script>
 <template>
@@ -92,20 +122,28 @@ onMounted(async () => {
         <span>检索</span>
       </button>
     </form>
-    <div class="segmented"><button :class="{ active: source === 'all' }" @click="source = 'all'">全部文献</button><button :class="{ active: source === 'recommendation' }" @click="source = 'recommendation'">来自推荐</button><button :class="{ active: source === 'direct' }" @click="source = 'direct'">定向收录</button><button :class="{ active: source === 'seminar' }" @click="source = 'seminar'">来自组会</button></div>
+    <SlidingSegmented class="segmented"><button :class="{ active: source === 'all' }" @click="source = 'all'">全部文献</button><button :class="{ active: source === 'recommendation' }" @click="source = 'recommendation'">来自推荐</button><button :class="{ active: source === 'direct' }" @click="source = 'direct'">定向收录</button><button :class="{ active: source === 'seminar' }" @click="source = 'seminar'">来自组会</button></SlidingSegmented>
     <LoadingState v-if="loading" message="正在检索文献库" /><div v-else-if="error" class="error-banner">{{ error }}<button class="button secondary" @click="load">重试</button></div>
     <template v-else><p class="muted">共 {{ papers.length }} 篇 · 同一 arXiv 文献自动合并版本</p><div v-if="!papers.length" class="library-empty">没有匹配的文献。试试其他关键词，或在推荐和组会中添加文献。</div>
     <article
       v-for="paper in papers"
       :key="paper.id"
       class="library-paper"
-      :class="{ 'clickable-seminar-card': paper.seminar_id }"
+      :class="{ 'clickable-seminar-card': paper.seminar_id, 'clickable-rec-card': !paper.seminar_id && (paper.recommendation_id || paper.from_recommendation) }"
       @click="handlePaperCardClick(paper, $event)"
     >
       <FavoriteButton kind="paper" :target="paper.arxiv_id" class="card-star" />
       <div class="paper-badges">
         <span class="mono accent">{{ paperLabel(paper) }}</span>
-        <span v-if="paper.from_recommendation" class="badge cyan">文献推荐</span>
+        <span
+          v-if="paper.from_recommendation"
+          class="badge cyan"
+          :class="{ 'recommend-jump-pill': paper.recommendation_id || paper.arxiv_id }"
+          :title="(paper.recommendation_id || paper.arxiv_id) ? '点击跳转至推荐流查看推荐理由与讨论' : '文献推荐'"
+          @click.stop="(paper.recommendation_id || paper.arxiv_id) && goToRecommendation(paper)"
+        >
+          文献推荐{{ (paper.recommendation_id || paper.arxiv_id) ? ' ↗' : '' }}
+        </span>
         <span v-if="paper.from_direct" class="badge amber">我的定向收录</span>
         <span
           v-if="paper.from_seminar"
@@ -116,14 +154,54 @@ onMounted(async () => {
         >
           组会讨论{{ paper.seminar_id ? ' ↗' : '' }}
         </span>
+        <span
+          v-if="paper.recommender_name"
+          class="badge recommender-badge"
+          :class="{ 'teacher-recommender': paper.recommender_identity === 'teacher' }"
+          :title="'由 ' + paper.recommender_name + (paper.recommender_identity === 'teacher' ? ' (导师)' : '') + ' 推荐，点击前往推荐流查看推荐理由与评论区'"
+          @click.stop="goToRecommendation(paper)"
+        >
+          推荐人: {{ paper.recommender_name }}{{ paper.recommender_identity === 'teacher' ? ' (导师)' : '' }}
+        </span>
+        <span
+          v-if="paper.comment_count > 0"
+          class="badge comment-count-badge"
+          :title="'推荐流中已有 ' + paper.comment_count + ' 条讨论，点击前往查看'"
+          @click.stop="goToRecommendation(paper)"
+        >
+          讨论 ({{ paper.comment_count }})
+        </span>
         <span v-if="paper.journal" class="badge">{{ paper.journal }}</span>
         <span v-if="paper.primary_category" class="badge">{{ paper.primary_category }}</span>
       </div>
       <h2 class="academic"><a :href="paperSource(paper)" target="_blank" rel="noreferrer" v-html="renderLatex(paper.title)"></a></h2>
-      <p class="muted">{{ Array.isArray(paper.authors) ? paper.authors.join(' · ') : (paper.authors || '') }} <span v-if="paper.published_date">· {{ paper.published_date }}</span></p>
+      <p class="muted">{{ paper.authors.join(' · ') }} <span v-if="paper.published_date">· {{ paper.published_date }}</span></p>
+      
+      <!-- 推荐理由引用小样：点击直达推荐流与评论区 -->
+      <div
+        v-if="paper.recommend_comment"
+        class="library-recommend-quote"
+        title="点击跳转至推荐流查看完整推荐理由与讨论"
+        @click.stop="goToRecommendation(paper)"
+      >
+        <span class="quote-symbol">“</span>
+        <span class="quote-text">{{ paper.recommend_comment }}</span>
+        <span class="quote-symbol">”</span>
+        <span v-if="paper.recommender_name" class="quote-author">—— {{ paper.recommender_name }} 的推荐理由</span>
+      </div>
+
       <p class="abstract" v-html="renderLatex(paper.abstract || '已保存文献链接，元数据待补全。')"></p>
       <div class="paper-actions">
         <a class="button small secondary" :href="paperRead(paper)" target="_blank" rel="noreferrer">{{ paperReadLabel(paper) }}</a>
+        <button
+          v-if="paper.recommendation_id || paper.from_recommendation"
+          class="button small secondary"
+          type="button"
+          title="前往推荐流查看推荐理由、推荐人及评论区讨论"
+          @click.stop="goToRecommendation(paper)"
+        >
+          查看推荐流
+        </button>
         <button
           v-if="paper.seminar_id"
           class="button small secondary"
@@ -217,5 +295,91 @@ onMounted(async () => {
   .library-paper h2 { font-size: 17px; margin: 10px 0 6px; }
   .paper-badges { padding-right: 40px; }
   .paper-actions { gap: 8px; }
+}
+
+.library-paper.clickable-rec-card {
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.library-paper.clickable-rec-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.07);
+  transform: translateY(-1px);
+}
+
+.recommender-badge {
+  cursor: pointer;
+  background: color-mix(in srgb, var(--accent) 15%, var(--panel));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  transition: all 0.15s ease;
+}
+.recommender-badge:hover {
+  background: color-mix(in srgb, var(--accent) 28%, var(--panel));
+  border-color: var(--accent);
+}
+
+.recommender-badge.teacher-recommender {
+  background: color-mix(in srgb, #a855f7 18%, var(--panel));
+  color: #c084fc;
+  border-color: color-mix(in srgb, #a855f7 35%, transparent);
+}
+.recommender-badge.teacher-recommender:hover {
+  background: color-mix(in srgb, #a855f7 28%, var(--panel));
+  border-color: #a855f7;
+}
+
+.comment-count-badge {
+  cursor: pointer;
+  background: color-mix(in srgb, #06b6d4 15%, var(--panel));
+  color: #22d3ee;
+  border: 1px solid color-mix(in srgb, #06b6d4 30%, transparent);
+  transition: all 0.15s ease;
+}
+.comment-count-badge:hover {
+  background: color-mix(in srgb, #06b6d4 28%, var(--panel));
+  border-color: #06b6d4;
+}
+
+.recommend-jump-pill {
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.recommend-jump-pill:hover {
+  opacity: 0.85;
+  transform: scale(1.05);
+}
+
+.library-recommend-quote {
+  margin: 10px 0 14px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  border-radius: 0 8px 8px 0;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.6;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.library-recommend-quote:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
+.quote-symbol {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 15px;
+}
+.quote-text {
+  font-style: italic;
+  margin: 0 4px;
+}
+.quote-author {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  font-style: normal;
 }
 </style>

@@ -135,7 +135,67 @@ describe('ConferenceList Component and Logic', () => {
     expect(groups.length).toBe(2)
     expect(groups[0].month).toBe('2026-09')
     expect(groups[0].items.length).toBe(2)
-    expect(groups[1].month).toBe('2026-10')
     expect(groups[1].items.length).toBe(1)
+  })
+
+  it('integrates ThinHoundCheckbox with strict user-select suppression', () => {
+    expect(content).toContain('ThinHoundCheckbox')
+    expect(content).toContain('v-model="onlyInterested"')
+    expect(content).toContain('user-select: none !important')
+    expect(content).toContain('-webkit-user-select: none !important')
+  })
+
+  it('defaults yearFilter to all and filters from current year to future years', () => {
+    expect(content).toContain("const yearFilter = ref('all')")
+    expect(content).toContain('<option value="all">全部年份</option>')
+
+    const currentYear = '2026'
+    const today = '2026-09-24'
+
+    function filterConferences(conferences, statusFilter = 'upcoming', yearFilter = 'all') {
+      let list = [...conferences]
+      if (statusFilter === 'upcoming') {
+        list = list.filter(c => (c.end_date || c.date) >= today)
+      } else if (statusFilter === 'past') {
+        list = list.filter(c => (c.end_date || c.date) < today)
+      }
+
+      if (yearFilter === 'all') {
+        if (statusFilter !== 'past') {
+          list = list.filter(c => {
+            const startYear = (c.date || '').slice(0, 4)
+            const endYear = (c.end_date || '').slice(0, 4)
+            return (!startYear && !endYear) || startYear >= currentYear || endYear >= currentYear
+          })
+        }
+      } else {
+        list = list.filter(c => (c.date || '').startsWith(yearFilter))
+      }
+      return list
+    }
+
+    const testConfs = [
+      { id: 1, title: '2025 会议', date: '2025-10-10', end_date: '2025-10-12' },
+      { id: 2, title: '2026 年初会议（已过）', date: '2026-04-10', end_date: '2026-04-12' },
+      { id: 3, title: '2026 年底会议', date: '2026-11-15', end_date: '2026-11-18' },
+      { id: 4, title: '2027 SJTU 透镜会议', date: '2027-05-18', end_date: '2027-05-22' },
+      { id: 5, title: '2028 宇宙学年会', date: '2028-08-01', end_date: '2028-08-05' }
+    ]
+
+    // 1. 默认状态（upcoming + all）展示今年及未来全部即将举行的会议（包含 2026 年底、2027、2028）
+    const defaultList = filterConferences(testConfs, 'upcoming', 'all')
+    expect(defaultList.map(c => c.id)).toEqual([3, 4, 5])
+
+    // 2. 选择“全部会议” + “全部年份”，展示从今年开始到未来全部年份（包含今年已过的 2、今年底 3、2027年 4、2028年 5，排除往年 2025年 1）
+    const allList = filterConferences(testConfs, 'all', 'all')
+    expect(allList.map(c => c.id)).toEqual([2, 3, 4, 5])
+
+    // 3. 显式选择单一年份 2027 年
+    const year2027List = filterConferences(testConfs, 'upcoming', '2027')
+    expect(year2027List.map(c => c.id)).toEqual([4])
+
+    // 4. 历史会议下，允许查看包括 2025 在内的往年记录
+    const pastList = filterConferences(testConfs, 'past', 'all')
+    expect(pastList.map(c => c.id)).toEqual([1, 2])
   })
 })

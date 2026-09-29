@@ -19,12 +19,16 @@ export function createMarkdownRenderer(options = {}) {
       html({ text }) {
         return escapeHtml(text)
       },
-      // 超链接安全处理：仅允许安全协议，默认开启 target="_blank" 与 rel 属性
+      // 超链接安全处理：内部链接(/ 或 # 开头)使用 SPA 路由标记，外部链接保留 target="_blank"
       link({ href, title, text }) {
         const cleanHref = (href || '').trim()
         const isSafe = /^(https?:\/\/|mailto:|\/|#)/i.test(cleanHref)
         const safeHref = isSafe ? escapeHtml(cleanHref) : '#'
         const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
+        const isInternal = cleanHref.startsWith('/') || cleanHref.startsWith('#')
+        if (isInternal) {
+          return `<a href="${safeHref}" class="chat-internal-link" target="_self"${titleAttr}>${text}</a>`
+        }
         return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`
       },
       // 纯文本节点：支持非公式区域的裸 TeX 符号转 Unicode（如 \sim -> ∼），且支持 \textsc 等 TeX 文本样式排版
@@ -83,7 +87,8 @@ export function createMarkdownRenderer(options = {}) {
           return Math.min(idx1, idx2)
         },
         tokenizer(src) {
-          const match = src.match(/^(\\\([\s\S]*?\\\)|\$(?!\s)((?:\\\$|[^\$\n])+?)(?<!\s)\$)/)
+          // 采用 Safari 兼容正则，避免使用 lookbehind (?<!\s)
+          const match = src.match(/^(\\\([\s\S]*?\\\)|\$(?!\s)((?:\\\$|[^\$\n])*?[^\s\$\n])\$)/)
           if (match) {
             const raw = match[0]
             const text = raw.startsWith('\\(') ? raw.slice(2, -2).trim() : match[2].trim()

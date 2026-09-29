@@ -1,8 +1,9 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
-import { statusLabel } from '../utils/schedule'
+import { statusLabel, isSeminarCompleted } from '../utils/schedule'
 import { renderLatex } from '../utils/latex'
+import { getPresentationArxivList } from '../utils/papers'
 
 const props = defineProps({
   items: {
@@ -343,7 +344,6 @@ function getCardStyle(idx) {
           'is-target': idx === targetIndex,
           'is-side': idx !== currentIndex,
         }"
-        :id="idx === currentIndex ? 'tour-seminars-card' : undefined"
         :style="getCardStyle(idx)"
         @click="handleCardClick(idx, item)"
       >
@@ -371,7 +371,7 @@ function getCardStyle(idx) {
                 <span class="pulse-indicator cyan-pulse"></span>
                 <span>目标日程</span>
               </span>
-              <span v-else :class="['badge', item.status === 'completed' ? 'success' : statusLabel(item) === '待补纪要' ? 'amber' : 'cyan']">
+              <span v-else :class="['badge', isSeminarCompleted(item) ? 'success' : 'cyan']">
                 {{ statusLabel(item) }}
               </span>
             </div>
@@ -395,7 +395,7 @@ function getCardStyle(idx) {
             <div v-if="item.presentations?.length" class="sharing-scroll">
               <div v-for="(p, i) in item.presentations" :key="i" class="sharing-item">
                 <span class="sharing-name">{{ p.presenter_name }}</span>
-                <span v-if="p.arxiv_id" class="sharing-arxiv mono">arXiv:{{ p.arxiv_id }}</span>
+                <span v-if="p.arxiv_id" class="sharing-arxiv mono" :title="getPresentationArxivList(p.arxiv_id).join(', ')">{{ getPresentationArxivList(p.arxiv_id).map(id => id.startsWith('arXiv:') ? id : 'arXiv:' + id).join(', ') }}</span>
                 <span v-else class="sharing-pending">待补充</span>
               </div>
             </div>
@@ -502,8 +502,8 @@ function getCardStyle(idx) {
   width: min(86vw, 330px);
   height: 450px;
   border-radius: 20px;
-  background: linear-gradient(155deg, rgba(18, 12, 36, 0.96) 0%, rgba(10, 6, 22, 0.99) 100%);
-  border: 1px solid rgba(184, 155, 248, 0.18);
+  background: linear-gradient(155deg, var(--panel-solid) 0%, var(--surface) 100%);
+  border: 1px solid var(--line);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.52), inset 0 1px 0 rgba(255, 255, 255, 0.12);
   overflow: hidden;
   transform-origin: center center;
@@ -518,7 +518,7 @@ function getCardStyle(idx) {
   border-color: var(--accent, #b89bf8);
   box-shadow: 
     0 24px 50px rgba(0, 0, 0, 0.65), 
-    0 0 32px rgba(184, 155, 248, 0.25),
+    0 0 32px color-mix(in srgb, var(--accent) 25%, transparent),
     inset 0 1px 1px rgba(255, 255, 255, 0.25);
 }
 
@@ -527,15 +527,15 @@ function getCardStyle(idx) {
 }
 
 .carousel-card-3d.is-side:hover {
-  border-color: rgba(184, 155, 248, 0.45);
-  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.6), 0 0 20px rgba(184, 155, 248, 0.2);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.6), 0 0 20px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .card-glow-overlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: radial-gradient(circle at 50% 0%, rgba(184, 155, 248, 0.15), transparent 60%);
+  background: radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 60%);
   opacity: 0.8;
 }
 
@@ -591,7 +591,7 @@ function getCardStyle(idx) {
   background: var(--accent, #b89bf8);
   padding: 3px 9px;
   border-radius: 9999px;
-  box-shadow: 0 0 12px rgba(184, 155, 248, 0.45);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -652,8 +652,8 @@ function getCardStyle(idx) {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: rgba(10, 6, 22, 0.55);
-  border: 1px solid rgba(184, 155, 248, 0.12);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 12px;
   padding: 12px 14px;
   margin-bottom: 16px;
@@ -676,7 +676,7 @@ function getCardStyle(idx) {
 .sharing-count {
   font-size: 10.5px;
   color: var(--accent, #b89bf8);
-  background: rgba(184, 155, 248, 0.12);
+  background: var(--raised);
   padding: 1px 6px;
   border-radius: 4px;
 }
@@ -744,7 +744,7 @@ function getCardStyle(idx) {
   border-radius: 12px;
   font-size: 13.5px;
   font-weight: 600;
-  border: 1px solid rgba(184, 155, 248, 0.2);
+  border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.05);
   color: var(--text, #ffffff);
   cursor: pointer;
@@ -762,13 +762,13 @@ function getCardStyle(idx) {
   background: var(--accent, #b89bf8);
   color: var(--accent-ink, #070314);
   border-color: var(--accent, #b89bf8);
-  box-shadow: 0 4px 14px rgba(184, 155, 248, 0.35);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .view-agenda-btn.primary-btn:hover {
-  background: #d8b4fe;
-  border-color: #d8b4fe;
-  box-shadow: 0 6px 20px rgba(184, 155, 248, 0.5);
+  background: color-mix(in srgb, var(--accent) 85%, #ffffff);
+  border-color: color-mix(in srgb, var(--accent) 85%, #ffffff);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .empty-carousel-state {
@@ -810,14 +810,14 @@ function getCardStyle(idx) {
   height: 34px;
   border-radius: 50%;
   background: var(--panel, rgba(12, 10, 26, 0.85));
-  border: 1px solid var(--line, rgba(184, 155, 248, 0.18));
+  border: 1px solid var(--line);
   color: var(--text, #ffffff);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .nav-step-btn:hover:not(:disabled) {
-  background: var(--raised, rgba(184, 155, 248, 0.15));
+  background: var(--raised);
   border-color: var(--accent, #b89bf8);
   color: var(--accent, #b89bf8);
   transform: scale(1.08);
@@ -835,7 +835,7 @@ function getCardStyle(idx) {
   padding: 5px 14px;
   border-radius: 9999px;
   background: var(--surface, rgba(12, 10, 26, 0.75));
-  border: 1px solid var(--line, rgba(184, 155, 248, 0.16));
+  border: 1px solid var(--line);
 }
 
 .current-num {
@@ -860,8 +860,8 @@ function getCardStyle(idx) {
   gap: 6px;
   padding: 5px 12px;
   border-radius: 9999px;
-  border: 1px solid rgba(184, 155, 248, 0.35);
-  background: rgba(184, 155, 248, 0.14);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: var(--raised);
   color: var(--accent, #b89bf8);
   font-size: 12px;
   font-weight: 600;
@@ -870,9 +870,9 @@ function getCardStyle(idx) {
 }
 
 .jump-nearest-btn:hover {
-  background: rgba(184, 155, 248, 0.22);
+  background: color-mix(in srgb, var(--accent) 22%, var(--raised));
   border-color: var(--accent, #b89bf8);
-  box-shadow: 0 0 12px rgba(184, 155, 248, 0.35);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 @media (max-width: 680px) {

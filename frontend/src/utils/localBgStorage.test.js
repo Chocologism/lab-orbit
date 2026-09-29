@@ -113,4 +113,43 @@ describe('localBgStorage', () => {
     expect(res2.type).toBe('video')
     expect(res2.mime).toBe('video/quicktime')
   })
+
+  it('correctly decodes and converts .tiff / .tif images to displayable format', async () => {
+    const { saveLocalBackground, getLocalBackgroundMeta, convertTiffToDisplayableBlob } = await import('./localBgStorage')
+    const UTIF = (await import('utif')).default || (await import('utif'))
+    
+    // Create a valid 2x2 test TIFF image
+    const rgba = new Uint8Array([
+      255, 0, 0, 255,   0, 255, 0, 255,
+      0, 0, 255, 255,   255, 255, 255, 255
+    ])
+    const tiffBuffer = UTIF.encodeImage(rgba, 2, 2)
+
+    const tiffFile = {
+      name: 'james_webb_deep_space.tiff',
+      type: 'image/tiff',
+      size: tiffBuffer.byteLength,
+      arrayBuffer: async () => tiffBuffer
+    }
+
+    const res = await saveLocalBackground(tiffFile)
+    expect(res.name).toBe('james_webb_deep_space.tiff')
+    expect(res.type).toBe('image')
+    expect(res.isConvertedTiff).toBe(true)
+    expect(res.originalSize).toBe(tiffBuffer.byteLength)
+
+    const meta = await getLocalBackgroundMeta()
+    expect(meta.name).toBe('james_webb_deep_space.tiff')
+    expect(meta.isConvertedTiff).toBe(true)
+    expect(meta.originalSize).toBe(tiffBuffer.byteLength)
+
+    // Test corrupted TIFF error handling
+    const corruptedTiff = {
+      name: 'corrupted.tif',
+      type: 'image/tiff',
+      size: 16,
+      arrayBuffer: async () => new ArrayBuffer(16)
+    }
+    await expect(saveLocalBackground(corruptedTiff)).rejects.toThrow('解析 TIFF 图像失败')
+  })
 })

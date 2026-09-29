@@ -3,14 +3,20 @@ import { computed, onMounted, onBeforeUnmount, reactive, ref } from 'vue'
 import { personalApi } from '../api/client'
 import LoadingState from '../components/LoadingState.vue'
 import IssueFeedbackDialog from '../components/IssueFeedbackDialog.vue'
+import ThinHoundCheckbox from '../components/ThinHoundCheckbox.vue'
+import SlidingSegmented from '../components/SlidingSegmented.vue'
 import { notify } from '../composables/feedback'
+import { parseUtcDate } from '../utils/date'
 const props = defineProps({ admin: Boolean })
 const rows = ref([]), loading = ref(true), error = ref(''), filter = ref('all'), search = ref(''), busy = ref(null), showSubmit = ref(false)
 const drafts = reactive({}), finished = reactive({})
 const shown = computed(() => rows.value.filter(r => (filter.value === 'all' || r.resolved === (filter.value === 'resolved')) && `${r.title} ${r.content} ${r.author}`.toLowerCase().includes(search.value.toLowerCase())))
 const pending = computed(() => rows.value.filter(r => !r.resolved).length)
 const unread = row => row.replies.some(r => !r.read_at)
-const date = value => new Date(`${value}Z`).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+const date = value => {
+  const d = parseUtcDate(value)
+  return d ? d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : ''
+}
 let alive = true, timer, fetching = false
 async function load(initial = false) {
   if (fetching) return
@@ -45,14 +51,14 @@ onBeforeUnmount(() => { alive = false; clearInterval(timer); window.removeEventL
     <LoadingState v-if="loading" label="正在读取反馈" />
     <div v-if="error" class="error-banner" role="alert">{{ error }} <button class="button secondary" @click="load(true)">重试</button></div>
     <template v-if="!loading && !error">
-      <div class="feedback-filters"><div class="segmented" aria-label="反馈状态"><button v-for="s in [{id:'all',name:`全部 ${rows.length}`},{id:'pending',name:`待处理 ${pending}`},{id:'resolved',name:`已处理 ${rows.length-pending}`}]" :key="s.id" :class="{active:filter===s.id}" :aria-pressed="filter===s.id" @click="filter=s.id">{{ s.name }}</button></div><input v-model="search" aria-label="搜索反馈" placeholder="搜索标题、内容或提交人" type="search" /></div>
+      <div class="feedback-filters"><SlidingSegmented class="segmented" aria-label="反馈状态"><button v-for="s in [{id:'all',name:`全部 ${rows.length}`},{id:'pending',name:`待处理 ${pending}`},{id:'resolved',name:`已处理 ${rows.length-pending}`}]" :key="s.id" :class="{active:filter===s.id}" :aria-pressed="filter===s.id" @click="filter=s.id">{{ s.name }}</button></SlidingSegmented><input v-model="search" aria-label="搜索反馈" placeholder="搜索标题、内容或提交人" type="search" /></div>
       <div v-if="!shown.length" class="panel collection-empty">暂无符合条件的反馈</div>
       <article v-for="row in shown" :key="row.id" class="panel feedback-card">
         <div class="collection-meta"><span class="badge">{{ row.resolved ? '已处理' : '待处理' }}</span><span v-if="!admin && unread(row)" class="badge">有新回复</span><span>#{{ row.id }} · {{ row.author }} · {{ date(row.created_at) }}</span></div>
         <h2>{{ row.title }}</h2><p class="feedback-content">{{ row.content }}</p><p class="muted">提交页面：{{ row.page || '未记录' }}</p>
         <section v-if="row.replies.length" class="reply-history" aria-label="处理记录"><h3>管理员回复</h3><article v-for="item in row.replies" :key="item.id" class="reply-item"><p class="muted">{{ item.author }} · {{ date(item.created_at) }} · {{ item.read_at ? '提交人已读' : '提交人未读' }}</p><p class="feedback-content">{{ item.content }}</p></article></section>
         <p v-else class="muted">{{ row.resolved ? '已标记处理完成，尚未填写处理说明。' : '等待管理员处理回复。' }}</p>
-        <form v-if="admin" class="reply-form" @submit.prevent="reply(row)"><label :for="`reply-${row.id}`">向 {{ row.author }} 回复处理结果</label><textarea :id="`reply-${row.id}`" v-model="drafts[row.id]" required maxlength="5000" rows="3" placeholder="说明处理结果，或告知还需要补充的信息" :disabled="busy === row.id" /><label class="reply-check"><input type="checkbox" :checked="finished[row.id] !== false" @change="finished[row.id] = $event.target.checked" />发送后标记为已处理</label><div class="reply-actions"><button type="button" class="button secondary" :disabled="busy !== null" @click="resolve(row)">{{ row.resolved ? '重新打开' : '仅标记已处理' }}</button><button class="button primary" :disabled="busy !== null || !drafts[row.id]?.trim()">{{ busy === row.id ? '保存中…' : '发送处理回复' }}</button></div></form>
+        <form v-if="admin" class="reply-form" @submit.prevent="reply(row)"><label :for="`reply-${row.id}`">向 {{ row.author }} 回复处理结果</label><textarea :id="`reply-${row.id}`" v-model="drafts[row.id]" required maxlength="5000" rows="3" placeholder="说明处理结果，或告知还需要补充的信息" :disabled="busy === row.id" /><ThinHoundCheckbox :checked="finished[row.id] !== false" @change="finished[row.id] = $event.target.checked" :size="18" class="reply-check"><span>发送后标记为已处理</span></ThinHoundCheckbox><div class="reply-actions"><button type="button" class="button secondary" :disabled="busy !== null" @click="resolve(row)">{{ row.resolved ? '重新打开' : '仅标记已处理' }}</button><button class="button primary" :disabled="busy !== null || !drafts[row.id]?.trim()">{{ busy === row.id ? '保存中…' : '发送处理回复' }}</button></div></form>
         <button v-else-if="unread(row)" class="button secondary" :disabled="busy !== null" @click="markRead(row)">标记回复已读</button>
       </article>
     </template>

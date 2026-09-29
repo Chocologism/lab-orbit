@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { addDays, monday, railDates, shanghaiToday, parseDate, seminarIcs, weekScheduleIcs, filterScheduleEvents, moveDraft, previewSeminars, reconcileChanges, findConflicts, nextSeminar, filterSeminars, statusLabel } from './schedule'
+import { addDays, monday, railDates, shanghaiToday, parseDate, seminarIcs, weekScheduleIcs, filterScheduleEvents, moveDraft, previewSeminars, reconcileChanges, findConflicts, nextSeminar, filterSeminars, statusLabel, isSeminarCompleted, effectiveSeminarStatus } from './schedule'
 
 const a = { id: 1, date: '2026-12-31', time: '23:30', status: 'upcoming', presenter_name: '甲', topic: '题目', location: '302' }
 const b = { ...a, id: 2, time: '14:30', presenter_name: '乙' }
@@ -12,12 +12,29 @@ describe('research group calendar', () => {
     expect(railDates('2027-01-03')).toHaveLength(14)
     expect(shanghaiToday(new Date('2026-12-31T16:01:00Z'))).toBe('2027-01-01')
   })
-  it('sorts same-day sessions and keeps actual status', () => {
+  it('sorts same-day sessions and handles automatic completion after meeting day', () => {
     const archived = { ...a, id: 3, status: 'completed' }
-    expect(filterSeminars([a, b, archived], 'upcoming', '').map(s => s.id)).toEqual([2, 1])
-    expect(filterSeminars([a, b], 'all', '甲')).toEqual([a])
-    expect(nextSeminar([a, b], Date.parse('2026-12-30'))).toEqual(b)
-    expect(statusLabel(a, Date.parse('2027-01-02'))).toBe('待补纪要')
+    const dec30 = Date.parse('2026-12-30T10:00:00+08:00')
+    expect(filterSeminars([a, b, archived], 'upcoming', '', dec30).map(s => s.id)).toEqual([2, 1])
+    expect(filterSeminars([a, b], 'all', '甲', dec30)).toEqual([a])
+    expect(nextSeminar([a, b], dec30)).toEqual(b)
+    expect(statusLabel(a, dec30)).toBe('待举行')
+    expect(isSeminarCompleted(a, dec30)).toBe(false)
+    expect(effectiveSeminarStatus(a, dec30)).toBe('upcoming')
+
+    // 当天依然显示待举行
+    const dec31 = Date.parse('2026-12-31T15:00:00+08:00')
+    expect(statusLabel(a, dec31)).toBe('待举行')
+    expect(isSeminarCompleted(a, dec31)).toBe(false)
+    expect(effectiveSeminarStatus(a, dec31)).toBe('upcoming')
+
+    // 组会当天过去后自动显示已完成，不再显示待补纪要
+    const jan02 = Date.parse('2027-01-02T10:00:00+08:00')
+    expect(statusLabel(a, jan02)).toBe('已完成')
+    expect(isSeminarCompleted(a, jan02)).toBe(true)
+    expect(effectiveSeminarStatus(a, jan02)).toBe('completed')
+    expect(filterSeminars([a, b, archived], 'upcoming', '', jan02)).toEqual([])
+    expect(filterSeminars([a, b, archived], 'completed', '', jan02).map(s => s.id)).toEqual([2, 1, 3])
     expect(a.status).toBe('upcoming')
   })
   it('keeps original date through repeated drags and removes no-op changes', () => {
@@ -37,10 +54,10 @@ describe('research group calendar', () => {
     expect(findConflicts(changes, [{ ...a, date: '2027-02-01' }])[0].current_date).toBe('2027-02-01')
   })
   it('exports UTC times across midnight and safely folds/escapes Unicode', () => {
-    const ics = seminarIcs({ ...a, topic: '红移, 宇宙学; ' + '中文标题'.repeat(30), notes: '甲\n乙\\丙' }, new Date('2026-01-01T00:00:00Z'))
+    const ics = seminarIcs({ ...a, topic: '透镜, 时延; ' + '中文标题'.repeat(30), notes: '甲\n乙\\丙' }, new Date('2026-01-01T00:00:00Z'))
     expect(ics).toContain('DTSTART:20261231T153000Z')
     expect(ics).toContain('DTEND:20261231T173000Z')
-    expect(ics).toContain('红移\\, 宇宙学\\;')
+    expect(ics).toContain('透镜\\, 时延\\;')
     expect(ics).toContain('甲\\n乙\\\\丙')
     for (const line of ics.split('\r\n')) expect(new TextEncoder().encode(line).length).toBeLessThanOrEqual(75)
     expect(() => seminarIcs({ ...a, time: '25:60' })).toThrow()
@@ -48,11 +65,11 @@ describe('research group calendar', () => {
   it('exports weekly schedule with seminars and talks to multi-event iCalendar', () => {
     const seminarItem = { ...a, type: 'seminar', presentations: [{ presenter_name: '丙', arxiv_id: '2609.12345' }] }
     const talkItem = { id: 10, type: 'talk', date: '2026-12-31', time: '10:00', title: '星系巡天进展', speaker: '李教授', location: '天文楼502' }
-    const ics = weekScheduleIcs([seminarItem, talkItem], '课题组周日程', new Date('2026-01-01T00:00:00Z'))
+    const ics = weekScheduleIcs([seminarItem, talkItem], 'CSBD 本周日程', new Date('2026-01-01T00:00:00Z'))
     expect(ics).toContain('BEGIN:VCALENDAR')
-    expect(ics).toContain('X-WR-CALNAME:课题组周日程')
-    expect(ics).toContain('UID:seminar-1-2026-12-31@laborbit.local')
-    expect(ics).toContain('UID:talk-10-2026-12-31@laborbit.local')
+    expect(ics).toContain('X-WR-CALNAME:CSBD 本周日程')
+    expect(ics).toContain('UID:seminar-1-2026-12-31@csbd-hub.local')
+    expect(ics).toContain('UID:talk-10-2026-12-31@csbd-hub.local')
     expect(ics).toContain('SUMMARY:[组会] 题目 (甲)')
     expect(ics).toContain('SUMMARY:[学术报告] 星系巡天进展 (李教授)')
     expect(ics).toContain('arXiv 分享: 丙 (2609.12345)')
@@ -95,7 +112,7 @@ describe('research group calendar', () => {
     }
     const ics = weekScheduleIcs([confItem], '学术日程', new Date('2026-01-01T00:00:00Z'))
     expect(ics).toContain('SUMMARY:[学术会议] 全国星系宇宙学年会 (国家天文台)')
-    expect(ics).toContain('UID:conference-99-2026-10-15@laborbit.local')
+    expect(ics).toContain('UID:conference-99-2026-10-15@csbd-hub.local')
     expect(ics.replace(/\r\n /g, '')).toContain('会议会期: 2026-10-15 至 2026-10-18')
     expect(ics.replace(/\r\n /g, '')).toContain('地点/网址: 北京国际会议中心')
 

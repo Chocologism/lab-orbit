@@ -14,7 +14,7 @@
     </section>
 
     <!-- 分类与检索栏 -->
-    <section id="tour-resources-category-bar" class="category-bar">
+    <section class="category-bar">
       <div class="category-buttons">
         <button 
           :class="{ active: selectedCategory === '全部' }" 
@@ -55,7 +55,7 @@
       </div>
 
       <div class="category-tools">
-        <div class="segmented resource-sort-segmented" role="group" aria-label="资料排序方式">
+        <SlidingSegmented class="segmented resource-sort-segmented" role="group" aria-label="资料排序方式">
           <button 
             type="button" 
             :class="{ active: sortBy === 'title' }" 
@@ -72,7 +72,7 @@
           >
             收藏量排序
           </button>
-        </div>
+        </SlidingSegmented>
 
         <WaveInput 
           v-model="search" 
@@ -93,7 +93,7 @@
     </section>
 
     <!-- 资料卡片矩阵 -->
-    <section v-else id="tour-resources-book-grid" class="book-grid">
+    <section v-else class="book-grid">
       <article 
         v-for="book in sortedBooks" 
         :key="book.id" 
@@ -103,10 +103,20 @@
           'is-flipped': activeBookId === book.id, 
           'is-website': book.category === '网站',
           'has-cover': hasCover(book),
-          'is-highlighted': highlightedBookId === book.id
+          'is-highlighted': highlightedBookId === book.id,
+          'is-system-card': isSystemTutorial(book)
         }"
         @click="handleCardClick(book)"
+        @mouseenter="handleCardHover(book)"
       >
+        <!-- 资料变动未读小红点：悬浮翻转即自动消除 -->
+        <span 
+          v-if="isBookUnread(book.id)" 
+          class="card-unread-dot" 
+          title="该收藏资料有新变动"
+          aria-label="未读更新"
+        ></span>
+
         <!-- 背景层：若具有封面图片，全卡片背景展示该图片并带磨砂、模糊与暗化遮罩以突出文字标题 -->
         <div v-if="hasCover(book)" class="book-card-backdrop" aria-hidden="true">
           <div 
@@ -120,6 +130,7 @@
         <div class="book-front-visual">
           <div class="card-badges-row">
             <span class="category-badge">{{ book.category }}</span>
+            <span v-if="isSystemTutorial(book)" class="system-badge">内置教程</span>
           </div>
           <FavoriteButton 
             kind="book" 
@@ -138,6 +149,9 @@
                 :alt="`${book.title} 封面`" 
                 class="book-img"
               />
+              <span v-else-if="isSystemTutorial(book)" class="book-custom-icon">
+                <AppIcon name="cpu" :size="36" />
+              </span>
               <span v-else class="book-custom-icon">
                 <AppIcon :name="categoryIconName(book.category)" :size="32" />
               </span>
@@ -152,6 +166,7 @@
           <div class="card__header">
             <div class="card-badges-row">
               <span class="category-badge-small">{{ book.category }}</span>
+              <span v-if="isSystemTutorial(book)" class="system-badge-small">内置教程</span>
             </div>
             <div class="card-header-actions" @click.stop>
               <button 
@@ -177,10 +192,26 @@
 
           <h2 class="card__title">{{ book.title }}</h2>
           <p v-if="book.authors" class="card__author">{{ book.authors }}</p>
-          <p class="card__description">{{ book.description || '暂无详细说明' }}</p>
+          <p 
+            class="card__description" 
+            title="点击查看完整说明与外链" 
+            @click.stop="openBookDetail(book)"
+          >
+            {{ book.description || '暂无详细说明' }}
+          </p>
 
           <div class="card__footer">
             <div class="resource-links" @click.stop>
+              <!-- 方案三：新增「详情 ↗」按钮 -->
+              <button
+                type="button"
+                class="resource-jump-link"
+                title="查看详细说明与外链"
+                @click.stop="openBookDetail(book)"
+              >
+                详情 ↗
+              </button>
+
               <!-- 网站类目专属翻转后左下角访问链接 -->
               <a 
                 v-if="book.category === '网站' && getWebsiteUrl(book)" 
@@ -192,15 +223,24 @@
               >
                 访问 ↗
               </a>
+              <button
+                v-if="isSystemTutorial(book)"
+                type="button"
+                class="resource-jump-link"
+                title="查看详细配置教程与步骤"
+                @click.stop="openTutorialDetail(book)"
+              >
+                教程 ↗
+              </button>
               <a 
                 v-if="book.tutorial_url && book.category !== '网站'" 
                 :href="book.tutorial_url" 
                 target="_blank" 
                 rel="noreferrer" 
-                class="resource-jump-link" 
+                class="resource-jump-link"
                 @click.stop
               >
-                {{ book.category === '工具' ? '指南 ↗' : '讲义 ↗' }}
+                {{ isSystemTutorial(book) ? '官网 ↗' : (book.category === '工具' ? '指南 ↗' : '讲义 ↗') }}
               </a>
               <a 
                 v-if="book.exercise_url" 
@@ -223,9 +263,9 @@
                 代码 ↗
               </a>
               <AttachmentLink 
-                v-if="book.download_url && isPdf(book.download_url)" 
+                v-if="book.download_url && book.category !== '网站'" 
                 :url="book.download_url" 
-                label="打开 PDF" 
+                :label="getFileLabel(book.download_url)" 
               />
             </div>
 
@@ -279,13 +319,13 @@
 
         <label>
           名称 *
-          <input v-model="form.title" required placeholder="如：天体物理导论 / Astropy / NASA ADS" />
+          <input v-model="form.title" required placeholder="如：引力透镜导论 / Astropy / NASA ADS" />
         </label>
 
         <!-- 只有添加教材时才必须填写作者 -->
         <label v-if="form.category === '教材'">
           作者 *
-          <input v-model="form.authors" required placeholder="如：Bradley W. Carroll" />
+          <input v-model="form.authors" required placeholder="如：Massimo Meneghetti" />
         </label>
         <label v-else>
           作者 / 维护机构（选填）
@@ -325,13 +365,16 @@
         
         <FileField 
           v-model="form.download_url" 
-          :label="form.category === '网站' ? '网站网址或文件 (可选)' : '资料 PDF / 下载链接 (可选)'" 
+          allow-any
+          :label="form.category === '网站' ? '网站网址或文件 (可选)' : '资料文件 / 下载链接 (可选)'" 
           @busy="uploading = $event" 
         />
 
         <div class="dialog-actions">
           <button type="button" class="button button-quiet" @click="showModal = false">取消</button>
-          <button class="button button-primary" :disabled="saving || uploading">保存资料</button>
+          <button class="button button-primary" :disabled="saving || uploading">
+            {{ editingId ? (isFormChanged ? '更新资料' : '保存资料') : '保存资料' }}
+          </button>
         </div>
       </form>
     </BaseDialog>
@@ -360,6 +403,99 @@
       </form>
     </BaseDialog>
 
+    <!-- VLab SSH 隧道配置详细教程全功能弹窗 -->
+    <VlabTutorialModal 
+      :open="showTutorialModal" 
+      @close="showTutorialModal = false"
+    />
+
+    <!-- 方案三：资料卡片完整说明与配套外链独立详情弹窗 -->
+    <BaseDialog 
+      :open="showDetailModal" 
+      :title="activeDetailBook?.title || '资料详情'" 
+      @close="showDetailModal = false"
+    >
+      <div v-if="activeDetailBook" class="book-detail-dialog-body">
+        <div class="detail-header-meta">
+          <span class="category-badge">{{ activeDetailBook.category }}</span>
+          <span v-if="isSystemTutorial(activeDetailBook)" class="system-badge">内置教程</span>
+          <span v-if="activeDetailBook.authors" class="detail-author-text">
+            {{ activeDetailBook.authors }}
+          </span>
+        </div>
+
+        <div class="detail-description-section">
+          <div class="detail-section-title">详细说明</div>
+          <div class="detail-description-content">
+            {{ activeDetailBook.description || '暂无详细说明' }}
+          </div>
+        </div>
+
+        <div class="detail-actions-bar">
+          <button 
+            type="button" 
+            class="button button-quiet detail-copy-btn" 
+            title="复制完整说明到剪贴板"
+            @click="copyDetailDescription"
+          >
+            <AppIcon name="copy" :size="15" />
+            <span>{{ detailCopied ? '已复制说明' : '复制说明' }}</span>
+          </button>
+
+          <div class="detail-link-buttons">
+            <a 
+              v-if="activeDetailBook.category === '网站' && getWebsiteUrl(activeDetailBook)" 
+              :href="getWebsiteUrl(activeDetailBook)" 
+              target="_blank" 
+              rel="noreferrer" 
+              class="button button-primary"
+            >
+              访问网站 ↗
+            </a>
+            <button
+              v-if="isSystemTutorial(activeDetailBook)"
+              type="button"
+              class="button button-primary"
+              @click="openTutorialFromDetail"
+            >
+              打开教程 ↗
+            </button>
+            <a 
+              v-if="activeDetailBook.tutorial_url && activeDetailBook.category !== '网站'" 
+              :href="activeDetailBook.tutorial_url" 
+              target="_blank" 
+              rel="noreferrer" 
+              class="button button-primary"
+            >
+              {{ activeDetailBook.category === '工具' ? '查看指南 ↗' : '查看讲义 ↗' }}
+            </a>
+            <a 
+              v-if="activeDetailBook.exercise_url" 
+              :href="activeDetailBook.exercise_url" 
+              target="_blank" 
+              rel="noreferrer" 
+              class="button button-quiet"
+            >
+              习题解答 ↗
+            </a>
+            <a 
+              v-if="activeDetailBook.github_url" 
+              :href="activeDetailBook.github_url" 
+              target="_blank" 
+              rel="noreferrer" 
+              class="button button-quiet"
+            >
+              代码仓库 ↗
+            </a>
+            <AttachmentLink 
+              v-if="activeDetailBook.download_url && activeDetailBook.category !== '网站'" 
+              :url="activeDetailBook.download_url" 
+              :label="getFileLabel(activeDetailBook.download_url)" 
+            />
+          </div>
+        </div>
+      </div>
+    </BaseDialog>
   </main>
 </template>
 
@@ -368,17 +504,39 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { resourceApi, authApi } from '../api/client'
 import { useFavorites } from '../composables/favorites'
+import { useResourceUnread } from '../composables/resourceUnread'
 import FavoriteButton from '../components/FavoriteButton.vue'
 import FileField from '../components/FileField.vue'
 import AttachmentLink from '../components/AttachmentLink.vue'
 import AppIcon from '../components/AppIcon.vue'
 import BaseDialog from '../components/BaseDialog.vue'
+import VlabTutorialModal from '../components/VlabTutorialModal.vue'
 import LoadingState from '../components/LoadingState.vue'
 import WaveInput from '../components/WaveInput.vue'
 import SmartEmuDelete from '../components/SmartEmuDelete.vue'
 import KindBobcatEdit from '../components/KindBobcatEdit.vue'
+import SlidingSegmented from '../components/SlidingSegmented.vue'
 import { confirmAction, notify } from '../composables/feedback'
 import { compareTitle } from '../utils/titleSort'
+
+const { unreadResourceCount, preferredCategory, refresh: refreshUnread, markBookAsViewed, isBookUnread } = useResourceUnread()
+
+const SYSTEM_VLAB_TUTORIAL = {
+  id: 'vlab-tunnel',
+  title: '中国科大大模型 VLab 隧道配置教程',
+  original_title: 'USTC VLab LLM SSH Tunnel Setup Guide',
+  authors: '系统管理',
+  category: '工具',
+  description: '总共只需十步即可畅享科大为师生每日提供的 100 元免费 Token 额度。通过校内 VLab 虚拟机建立 SSH 隧道（127.0.0.1:4000）对接中国科大大模型公共服务平台，代理端已内置认证，免密直连 deepseek V4.1、deepseek V4.1 flash 等 16 款主流开源模型。拥有本地 Agent 仅需手动完成前 2 步，支持一键下载 Markdown 供 Agent 全自动完成配置。',
+  tutorial_url: 'https://llm.ustc.edu.cn/',
+  exercise_url: '',
+  github_url: '',
+  download_url: '',
+  order_num: -1,
+  is_system: true,
+  created_by_id: null,
+  favorite_count: 0
+}
 
 const route = useRoute()
 const { load: loadFavorites, saved: isFavorite } = useFavorites()
@@ -395,18 +553,61 @@ const loading = ref(false)
 const activeBookId = ref(null)
 const sortBy = ref('title') // 'title' | 'favorites'
 const highlightedBookId = ref(null)
+const showTutorialModal = ref(false)
+const activeTutorialBook = ref(null)
+const sshCopied = ref(false)
+
+function isSystemTutorial(b) {
+  if (!b) return false
+  return Boolean(
+    b.is_system ||
+    b.id === 'vlab-tunnel' ||
+    (b.category === '工具' && (b.title?.includes('VLab') || b.title?.includes('隧道')))
+  )
+}
 
 function canDeleteBook(b) {
+  if (isSystemTutorial(b)) {
+    return currentUser.value?.role === 'admin'
+  }
   return b.created_by_id === currentUser.value?.id || currentUser.value?.role === 'admin'
 }
 
 function canEditBook(b) {
+  if (isSystemTutorial(b)) {
+    return currentUser.value?.role === 'admin'
+  }
   return b.created_by_id === currentUser.value?.id || currentUser.value?.role === 'admin'
+}
+
+function openTutorialDetail(b) {
+  activeTutorialBook.value = b || SYSTEM_VLAB_TUTORIAL
+  showTutorialModal.value = true
+}
+
+function copySshCommand() {
+  const cmd = 'ssh -L 4000:127.0.0.1:4000 <校内统一身份用户名>@vlab.ustc.edu.cn'
+  if (navigator?.clipboard?.writeText) {
+    navigator.clipboard.writeText(cmd).then(() => {
+      sshCopied.value = true
+      setTimeout(() => { sshCopied.value = false }, 2000)
+      notify('SSH 隧道命令已复制到剪贴板', 'info')
+    }).catch(() => {
+      notify('复制失败，请手动复制命令。', 'warning')
+    })
+  } else {
+    notify('复制功能受限，请手动选中复制。', 'warning')
+  }
 }
 
 const sortedBooks = computed(() => {
   if (!books.value || !books.value.length) return []
   return [...books.value].sort((a, b) => {
+    // 0. 系统内置教程始终置顶在最前
+    const aSys = isSystemTutorial(a) ? 1 : 0
+    const bSys = isSystemTutorial(b) ? 1 : 0
+    if (aSys !== bSys) return bSys - aSys
+
     // 1. 收藏的默认依然靠前显示 (当前用户收藏的项目优先置顶)
     const aFav = isFavorite('book', String(a.id)) ? 1 : 0
     const bFav = isFavorite('book', String(b.id)) ? 1 : 0
@@ -473,6 +674,9 @@ function getFirstLink(book) {
 }
 
 function handleCardClick(book) {
+  if (book && isBookUnread(book.id)) {
+    markBookAsViewed(book.id)
+  }
   // 如果用户正在选中文本（如复制作者或简介），则不触发跳转
   if (window.getSelection && window.getSelection().toString().trim().length > 0) {
     return
@@ -488,6 +692,62 @@ function handleCardClick(book) {
     activeBookId.value = (activeBookId.value === book.id ? null : book.id)
     notify('该资料暂未收录可用跳转链接', 'info')
   }
+}
+
+function handleCardHover(book) {
+  if (!book) return
+  if (isBookUnread(book.id)) {
+    markBookAsViewed(book.id)
+  }
+}
+
+// 方案三：资料详情弹窗与复制逻辑
+const showDetailModal = ref(false)
+const activeDetailBook = ref(null)
+const detailCopied = ref(false)
+
+function openBookDetail(book) {
+  if (!book) return
+  if (isBookUnread(book.id)) {
+    markBookAsViewed(book.id)
+  }
+  activeDetailBook.value = book
+  detailCopied.value = false
+  showDetailModal.value = true
+}
+
+function openTutorialFromDetail() {
+  showDetailModal.value = false
+  openTutorialDetail(activeDetailBook.value)
+}
+
+function copyDetailDescription() {
+  const text = activeDetailBook.value?.description || activeDetailBook.value?.title || ''
+  if (!text) return
+  if (navigator?.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      detailCopied.value = true
+      setTimeout(() => { detailCopied.value = false }, 2000)
+      notify('资料说明已复制到剪贴板', 'info')
+    }).catch(() => {
+      notify('复制受限，请手动复制', 'warning')
+    })
+  } else {
+    notify('复制功能受限，请手动选中复制', 'warning')
+  }
+}
+
+function getFileLabel(url) {
+  if (!url) return '下载附件'
+  const cleanUrl = url.split('?')[0].toLowerCase()
+  if (cleanUrl.endsWith('.pdf')) return '打开 PDF'
+  if (cleanUrl.endsWith('.zip') || cleanUrl.endsWith('.tar') || cleanUrl.endsWith('.gz') || cleanUrl.endsWith('.7z') || cleanUrl.endsWith('.rar')) return '下载压缩包'
+  if (cleanUrl.endsWith('.ppt') || cleanUrl.endsWith('.pptx') || cleanUrl.endsWith('.key')) return '下载课件'
+  if (cleanUrl.endsWith('.doc') || cleanUrl.endsWith('.docx')) return '下载文档'
+  if (cleanUrl.endsWith('.xls') || cleanUrl.endsWith('.xlsx') || cleanUrl.endsWith('.csv')) return '下载表格'
+  if (cleanUrl.endsWith('.py') || cleanUrl.endsWith('.ipynb') || cleanUrl.endsWith('.sh') || cleanUrl.endsWith('.json')) return '下载代码'
+  if (cleanUrl.endsWith('.png') || cleanUrl.endsWith('.jpg') || cleanUrl.endsWith('.jpeg') || cleanUrl.endsWith('.webp') || cleanUrl.endsWith('.svg')) return '查看图片'
+  return '下载附件'
 }
 
 function handleToggleBookFavorite(book, isSaved) {
@@ -509,6 +769,8 @@ const showAddCategoryDialog = ref(false)
 const newCategoryName = ref('')
 const categorySaving = ref(false)
 
+const originalForm = ref(null)
+
 const form = ref({
   title: '',
   authors: '',
@@ -519,6 +781,21 @@ const form = ref({
   exercise_url: '',
   github_url: '',
   download_url: '',
+})
+
+const isFormChanged = computed(() => {
+  if (!editingId.value || !originalForm.value) return false
+  return (
+    form.value.title !== originalForm.value.title ||
+    form.value.authors !== originalForm.value.authors ||
+    form.value.category !== originalForm.value.category ||
+    form.value.description !== originalForm.value.description ||
+    form.value.cover_url !== originalForm.value.cover_url ||
+    form.value.tutorial_url !== originalForm.value.tutorial_url ||
+    form.value.exercise_url !== originalForm.value.exercise_url ||
+    form.value.github_url !== originalForm.value.github_url ||
+    form.value.download_url !== originalForm.value.download_url
+  )
 })
 
 let timer
@@ -565,6 +842,7 @@ function checkAndApplyHighlight() {
   const key = String(highlightKey).toLowerCase()
   const target = sortedBooks.value.find(b =>
     String(b.id) === key ||
+    (isSystemTutorial(b) && (key === 'vlab-tunnel' || key.includes('vlab') || key.includes('tunnel'))) ||
     b.title?.toLowerCase().includes(key)
   )
   if (target) {
@@ -574,6 +852,9 @@ function checkAndApplyHighlight() {
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' })
       }
+      if (isSystemTutorial(target) && (route.query.open === 'true' || key === 'vlab-tunnel')) {
+        openTutorialDetail(target)
+      }
     })
   }
 }
@@ -582,8 +863,22 @@ const loadBooks = async () => {
   loading.value = true
   try {
     const fetched = await resourceApi.getBooks(selectedCategory.value, search.value)
-    books.value = Array.isArray(fetched) ? [...fetched] : []
+    let list = Array.isArray(fetched) ? [...fetched] : []
+
+    // 确保无论后端数据库状态如何，工具分类下均常驻系统内置教程卡片
+    const hasVlabCard = list.some(b => isSystemTutorial(b))
+    if (!hasVlabCard && (selectedCategory.value === '全部' || selectedCategory.value === '工具')) {
+      const q = (search.value || '').trim().toLowerCase()
+      const matchesSearch = !q ||
+        SYSTEM_VLAB_TUTORIAL.title.toLowerCase().includes(q) ||
+        SYSTEM_VLAB_TUTORIAL.description.toLowerCase().includes(q)
+      if (matchesSearch) {
+        list.unshift(SYSTEM_VLAB_TUTORIAL)
+      }
+    }
+    books.value = list
     checkAndApplyHighlight()
+    refreshUnread().catch(() => {})
   } catch (e) {
     notify(e.message, 'error')
   } finally {
@@ -598,10 +893,12 @@ const queueSearch = () => {
 
 onMounted(async () => {
   loadFavorites().catch(() => {})
+  refreshUnread().catch(() => {})
   if (route.query.category) {
     selectedCategory.value = String(route.query.category)
   }
   await Promise.all([loadCategories(), loadBooks()])
+  refreshUnread().catch(() => {})
   try {
     currentUser.value = await authApi.getMe()
   } catch {}
@@ -622,6 +919,7 @@ watch(
 
 const openCreate = () => {
   editingId.value = null
+  originalForm.value = null
   form.value = {
     title: '',
     authors: '',
@@ -649,6 +947,7 @@ const openEdit = (b) => {
     github_url: b.github_url || '',
     download_url: b.download_url || '',
   }
+  originalForm.value = { ...form.value }
   showModal.value = true
 }
 
@@ -676,8 +975,14 @@ const handleSave = async () => {
 }
 
 const handleDelete = async (b) => {
+  if (isSystemTutorial(b) && currentUser.value?.role !== 'admin') {
+    notify('该教程为系统内置资料，普通用户无法移除。', 'warning')
+    return
+  }
   if (await confirmAction(`移除「${b.title}」？`, { title: '移除资料', confirmLabel: '移除', danger: true })) {
-    await resourceApi.deleteBook(b.id)
+    if (b.id !== 'vlab-tunnel') {
+      await resourceApi.deleteBook(b.id)
+    }
     await loadBooks()
     notify('资料已移除', 'success')
   }
@@ -759,7 +1064,7 @@ const handleDeleteCategory = async (name) => {
   border: 1px solid var(--line);
   border-radius: 9999px;
   background: var(--panel);
-  color: var(--muted);
+  color: var(--soft);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -773,7 +1078,7 @@ const handleDeleteCategory = async (name) => {
 
 .category-buttons button.active {
   background: var(--accent);
-  color: #0b1e25;
+  color: var(--accent-ink, #0b1e25);
   border-color: var(--accent);
   font-weight: 600;
 }
@@ -809,6 +1114,7 @@ const handleDeleteCategory = async (name) => {
 }
 
 .resource-sort-segmented {
+  --glider-radius: 9999px;
   display: inline-flex;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -816,6 +1122,10 @@ const handleDeleteCategory = async (name) => {
   padding: 3px;
   margin-bottom: 2px;
   flex-shrink: 0;
+}
+
+.resource-sort-segmented :deep(.glass-glider) {
+  border-radius: 9999px !important;
 }
 
 .resource-sort-segmented button {
@@ -836,14 +1146,14 @@ const handleDeleteCategory = async (name) => {
 }
 
 .resource-sort-segmented button.active {
-  background: var(--accent);
-  color: #0b1e25;
+  background: transparent !important;
+  color: var(--text, #ffffff) !important;
   font-weight: 600;
 }
 
 [data-theme-style="vanta-fog"] .resource-sort-segmented button.active {
-  background: var(--accent);
-  color: #081f28;
+  background: transparent !important;
+  color: #ffffff !important;
   font-weight: 600;
 }
 
@@ -955,7 +1265,7 @@ const handleDeleteCategory = async (name) => {
 }
 
 .book-card.has-cover .book-front-visual .category-badge {
-  background: var(--surface);
+  background: var(--raised);
   border-color: var(--line);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
@@ -1019,12 +1329,12 @@ const handleDeleteCategory = async (name) => {
   top: 14px;
   left: 14px;
   right: auto;
-  color: var(--soft);
+  color: var(--accent);
   font-size: 11.5px;
   line-height: 1.4;
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
-  background: var(--surface);
+  background: var(--raised);
   padding: 3px 10px;
   border-radius: 9999px;
   backdrop-filter: blur(8px);
@@ -1180,7 +1490,14 @@ const handleDeleteCategory = async (name) => {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
   overflow: hidden;
-  flex: 1;
+  max-height: 4.5em;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+
+.card__description:hover {
+  color: var(--text, #f5f3ff);
 }
 
 .card__footer {
@@ -1208,11 +1525,114 @@ const handleDeleteCategory = async (name) => {
   text-decoration: none;
   white-space: nowrap;
   transition: opacity 0.15s;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
 }
 
 .resource-jump-link:hover {
   text-decoration: underline;
   opacity: 0.85;
+}
+
+/* 卡片右上角变动未读小红点 */
+.card-unread-dot {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 10px #ef4444, 0 0 4px rgba(255, 255, 255, 0.8);
+  border: 1.5px solid var(--panel, #0c0a1a);
+  z-index: 25;
+  pointer-events: none;
+  animation: pulse-card-unread 2.2s infinite ease-in-out;
+}
+
+@keyframes pulse-card-unread {
+  0% { transform: scale(0.9); opacity: 0.85; }
+  50% { transform: scale(1.25); opacity: 1; box-shadow: 0 0 14px #ef4444; }
+  100% { transform: scale(0.9); opacity: 0.85; }
+}
+
+/* 方案三：资料详情弹窗样式 */
+.book-detail-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 4px;
+}
+
+.detail-header-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.detail-author-text {
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.detail-description-section {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.detail-section-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.detail-description-content {
+  font-size: 13.5px;
+  line-height: 1.68;
+  color: var(--text, #e2e8f0);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.detail-actions-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.detail-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.detail-link-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .card-admin-actions {
@@ -1389,6 +1809,159 @@ button.resource-jump-link {
   }
 }
 
+/* VLab SSH 教程弹窗排版样式 */
+.vlab-tutorial-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 640px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.tutorial-intro-box {
+  background: var(--subtle, var(--surface));
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.tutorial-intro-box p {
+  margin: 0;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.tutorial-step-card {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.tutorial-step-card .step-num {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--accent);
+  border: 1px solid var(--line);
+  font-weight: 700;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.tutorial-step-card .step-detail {
+  flex: 1;
+  min-width: 0;
+}
+
+.tutorial-step-card .step-detail h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 6px 0;
+}
+
+.tutorial-step-card .step-detail p {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 6px 0;
+  line-height: 1.55;
+}
+
+.tutorial-step-card .step-detail code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  background: var(--subtle);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--accent);
+}
+
+.tutorial-step-card .step-detail ul {
+  margin: 6px 0 0 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.tutorial-step-card .step-detail li {
+  margin-bottom: 4px;
+}
+
+.command-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--subtle);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 8px 0;
+}
+
+.command-box code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  color: var(--accent);
+  word-break: break-all;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+}
+
+.copy-cmd-btn {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.copy-cmd-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tip-note {
+  display: block;
+  color: var(--soft);
+  font-size: 11.5px;
+  margin-top: 4px;
+}
+
+.tutorial-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.tutorial-modal-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  font-size: 13px;
+}
 
 @media (max-width: 960px) {
   .book-grid {

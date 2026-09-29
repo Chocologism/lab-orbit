@@ -40,6 +40,28 @@ async function ensureNoticesTable(db: any) {
   }
 }
 
+let ratingsTableEnsured = false;
+async function ensureNoticeRatingsTable(db: any) {
+  if (ratingsTableEnsured) return;
+  try {
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS notice_ratings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        notice_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        rating VARCHAR(20) NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(notice_id, user_id)
+      )
+    `).run();
+    await db.prepare('CREATE INDEX IF NOT EXISTS idx_notice_ratings_notice_id ON notice_ratings(notice_id)').run();
+    ratingsTableEnsured = true;
+  } catch (e) {
+    console.warn('ensureNoticeRatingsTable warning:', e);
+  }
+}
+
 function getShanghaiToday(): string {
   const parts = new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Shanghai',
@@ -104,7 +126,7 @@ function sanitizeNoticeDates(startDateRaw: string, endDateRaw: string): { startD
   return { startDate: startDateStr, endDate: endDateStr };
 }
 
-function normalizeNoticeTitle(title: string): string {
+export function normalizeNoticeTitle(title: string): string {
   return (title || '')
     .replace(/^[【\[](?:重要通知|通知|温馨提示|转发|教务通知|后勤通知|放假通知)[\]】]\s*/i, '')
     .replace(/[\s·•（）()\[\]【】《》""''“”‘’，。、：:；;！!？?·•\-—_]/g, '')
@@ -128,10 +150,10 @@ app.get('', async (c) => {
   if (marqueeOnly) {
     const today = getShanghaiToday();
     const [ty, tm, td] = today.split('-').map(Number);
-    const twoWeeksAgoMs = Date.UTC(ty, tm - 1, td) - 14 * 24 * 60 * 60 * 1000;
-    const twoWeeksAgo = new Date(twoWeeksAgoMs).toISOString().slice(0, 10);
+    const sevenDaysAgoMs = Date.UTC(ty, tm - 1, td) - 7 * 24 * 60 * 60 * 1000;
+    const sevenDaysAgo = new Date(sevenDaysAgoMs).toISOString().slice(0, 10);
     query += " AND ((end_date IS NOT NULL AND end_date != '' AND end_date >= ?) OR ((end_date IS NULL OR end_date = '') AND ((start_date != '' AND start_date >= ?) OR (start_date = '' AND substr(created_at, 1, 10) >= ?))))";
-    params.push(today, twoWeeksAgo, twoWeeksAgo);
+    params.push(today, sevenDaysAgo, sevenDaysAgo);
   } else if (activeOnly) {
     const today = getShanghaiToday();
     query += " AND (end_date IS NULL OR end_date = '' OR end_date >= ?)";
@@ -161,7 +183,49 @@ app.get('', async (c) => {
   const bound = params.length > 0 ? stmt.bind(...params) : stmt;
   const { results } = await bound.all();
 
-  return c.json(results || []);
+  await ensureNoticeRatingsTable(c.env.DB);
+  const user = c.get('user');
+  const ratingCountsMap: Record<number, Record<string, number>> = {};
+  const userRatingsMap: Record<number, string> = {};
+
+  try {
+    const { results: ratingRows } = await c.env.DB.prepare(`
+      SELECT notice_id, rating, COUNT(*) as cnt 
+      FROM notice_ratings 
+      GROUP BY notice_id, rating
+    `).all();
+    if (ratingRows && Array.isArray(ratingRows)) {
+      for (const r of ratingRows as any[]) {
+        if (!ratingCountsMap[r.notice_id]) {
+          ratingCountsMap[r.notice_id] = { 'super-happy': 0, 'neutral': 0, 'super-sad': 0 };
+        }
+        ratingCountsMap[r.notice_id][r.rating] = Number(r.cnt) || 0;
+      }
+    }
+
+    if (user && user.id) {
+      const { results: myRows } = await c.env.DB.prepare(`
+        SELECT notice_id, rating 
+        FROM notice_ratings 
+        WHERE user_id = ?
+      `).bind(user.id).all();
+      if (myRows && Array.isArray(myRows)) {
+        for (const mr of myRows as any[]) {
+          userRatingsMap[mr.notice_id] = mr.rating;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('ratings query error:', e);
+  }
+
+  const enriched = (results || []).map((n: any) => ({
+    ...n,
+    ratings_count: ratingCountsMap[n.id] || { 'super-happy': 0, 'neutral': 0, 'super-sad': 0 },
+    my_rating: userRatingsMap[n.id] || null
+  }));
+
+  return c.json(enriched);
 });
 
 /**
@@ -169,6 +233,7 @@ app.get('', async (c) => {
  */
 app.get('/:id', async (c) => {
   await ensureNoticesTable(c.env.DB);
+  await ensureNoticeRatingsTable(c.env.DB);
   const id = Number(c.req.param('id'));
   if (isNaN(id)) {
     return c.json({ detail: '无效的通知ID' }, 400);
@@ -179,7 +244,101 @@ app.get('/:id', async (c) => {
     return c.json({ detail: '通知不存在或已被删除' }, 404);
   }
 
-  return c.json(notice);
+  const user = c.get('user');
+  const ratingsCount: Record<string, number> = { 'super-happy': 0, 'neutral': 0, 'super-sad': 0 };
+  let myRating: string | null = null;
+
+  try {
+    const { results: countRows } = await c.env.DB.prepare(`
+      SELECT rating, COUNT(*) as cnt 
+      FROM notice_ratings 
+      WHERE notice_id = ? 
+      GROUP BY rating
+    `).bind(id).all();
+    if (countRows && Array.isArray(countRows)) {
+      for (const cr of countRows as any[]) {
+        ratingsCount[cr.rating] = Number(cr.cnt) || 0;
+      }
+    }
+
+    if (user && user.id) {
+      const myRow = await c.env.DB.prepare(
+        'SELECT rating FROM notice_ratings WHERE notice_id = ? AND user_id = ?'
+      ).bind(id, user.id).first();
+      if (myRow) {
+        myRating = (myRow as any).rating;
+      }
+    }
+  } catch (e) {
+    console.warn('single notice rating error:', e);
+  }
+
+  return c.json({
+    ...notice,
+    ratings_count: ratingsCount,
+    my_rating: myRating
+  });
+});
+
+/**
+ * 评价通知（超满意、中立、不满意，支持取消）
+ */
+app.post('/:id/rate', async (c) => {
+  await ensureNoticeRatingsTable(c.env.DB);
+  const user = c.get('user');
+  const noticeId = Number(c.req.param('id'));
+  if (isNaN(noticeId)) {
+    return c.json({ detail: '无效的通知ID' }, 400);
+  }
+
+  const body = await c.req.json().catch(() => ({}));
+  const rating = (body.rating || '').trim();
+  const allowed = ['super-happy', 'neutral', 'super-sad'];
+  if (!allowed.includes(rating)) {
+    return c.json({ detail: '无效的评价类型' }, 400);
+  }
+
+  const existing = await c.env.DB.prepare(
+    'SELECT rating FROM notice_ratings WHERE notice_id = ? AND user_id = ?'
+  ).bind(noticeId, user.id).first();
+
+  let newRating: string | null = rating;
+  if (existing && (existing as any).rating === rating) {
+    // 再次点击同一评价则取消
+    await c.env.DB.prepare(
+      'DELETE FROM notice_ratings WHERE notice_id = ? AND user_id = ?'
+    ).bind(noticeId, user.id).run();
+    newRating = null;
+  } else {
+    // 写入或更新评价
+    await c.env.DB.prepare(`
+      INSERT INTO notice_ratings (notice_id, user_id, rating, updated_at)
+      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(notice_id, user_id) DO UPDATE SET rating = excluded.rating, updated_at = CURRENT_TIMESTAMP
+    `).bind(noticeId, user.id, rating).run();
+    newRating = rating;
+  }
+
+  // 重新汇总当前各评价数量
+  const { results: countRows } = await c.env.DB.prepare(`
+    SELECT rating, COUNT(*) as cnt 
+    FROM notice_ratings 
+    WHERE notice_id = ? 
+    GROUP BY rating
+  `).bind(noticeId).all();
+
+  const ratingsCount: Record<string, number> = { 'super-happy': 0, 'neutral': 0, 'super-sad': 0 };
+  if (countRows && Array.isArray(countRows)) {
+    for (const cr of countRows as any[]) {
+      ratingsCount[cr.rating] = Number(cr.cnt) || 0;
+    }
+  }
+
+  return c.json({
+    notice_id: noticeId,
+    my_rating: newRating,
+    ratings_count: ratingsCount
+  });
 });
 
 /**
@@ -244,7 +403,7 @@ app.post('', async (c) => {
       title, content, category, importance, start_date, end_date, attachments,
       source_email_uid, source_email_subject, source_email_sender,
       created_by_id, created_by_name, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
   `).bind(
     title, content, category, importance, startDate, endDate, attachments,
     sourceEmailUid, sourceEmailSubject, sourceEmailSender,
@@ -268,7 +427,7 @@ app.post('/batch', async (c) => {
   const rawList = Array.isArray(body.notices) ? body.notices : [];
 
   if (rawList.length === 0) {
-    return c.json({ inserted_count: 0, skipped_count: 0, total: 0, inserted_items: [] });
+    return c.json({ inserted_count: 0, skipped_count: 0, error_count: 0, total: 0, inserted_items: [] });
   }
 
   // 1. 预先加载所有已存在的 source_email_uid 与最近有效通知标题
@@ -283,6 +442,7 @@ app.post('/batch', async (c) => {
   const creatorName = user.real_name || user.nickname || user.name || '系统组员';
   let insertedCount = 0;
   let skippedCount = 0;
+  let errorCount = 0;
   const insertedItems: any[] = [];
 
   for (const item of rawList) {
@@ -321,7 +481,7 @@ app.post('/batch', async (c) => {
           title, content, category, importance, start_date, end_date, attachments,
           source_email_uid, source_email_subject, source_email_sender,
           created_by_id, created_by_name, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
       `).bind(
         title, content, category, importance, startDate, endDate, attachments,
         sourceUid, sourceSubject, sourceSender,
@@ -334,14 +494,15 @@ app.post('/batch', async (c) => {
       insertedCount++;
       insertedItems.push({ id: createdId, title, category, importance, start_date: startDate, end_date: endDate, attachments });
     } catch (e) {
-      console.warn('Batch insert notice item error:', e);
-      skippedCount++;
+      console.error('Batch insert notice item error:', e);
+      errorCount++;
     }
   }
 
   return c.json({
     inserted_count: insertedCount,
     skipped_count: skippedCount,
+    error_count: errorCount,
     total: rawList.length,
     inserted_items: insertedItems
   });

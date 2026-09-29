@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isJournal, paperLabel, paperSource, paperRead, paperReadLabel } from './papers'
+import { isJournal, paperLabel, paperSource, paperRead, paperReadLabel, extractAllArxivIds, getPresentationArxivList } from './papers'
 
 describe('frontend papers utils', () => {
   it('identifies journal / non-arxiv papers properly', () => {
@@ -48,5 +48,25 @@ describe('frontend papers utils', () => {
     expect(meta.abstract).toBe('We extend the Dark Matter-Baryon Separability Condition...')
     expect(meta.pdf_url).toBe('https://arxiv.org/pdf/2609.10661.pdf')
     expect(meta.source_url).toBe('https://arxiv.org/abs/2609.10661')
+  })
+
+  it('extractAllArxivIds extracts and deduplicates multiple modern and legacy arXiv IDs', () => {
+    const input = 'Check out https://arxiv.org/abs/2302.13971v2 and 2401.00123; also hep-th/9901001 and https://arxiv.org/pdf/2302.13971.pdf'
+    const result = extractAllArxivIds(input)
+    expect(result).toEqual(['2302.13971v2', '2401.00123', 'hep-th/9901001'])
+  })
+
+  it('extractAllArxivIds ignores calendar dates and IP addresses without false positives', () => {
+    const text = 'Meeting on 2024.12.01 at server 192.168.1.1 about arXiv:2302.13971'
+    const result = extractAllArxivIds(text)
+    expect(result).toEqual(['2302.13971'])
+  })
+
+  it('getPresentationArxivList handles multiple, single, empty, and non-arxiv strings', () => {
+    expect(getPresentationArxivList('2302.13971, 2401.00123')).toEqual(['2302.13971', '2401.00123'])
+    expect(getPresentationArxivList('https://arxiv.org/abs/2302.13971')).toEqual(['2302.13971'])
+    expect(getPresentationArxivList('')).toEqual([])
+    expect(getPresentationArxivList(null)).toEqual([])
+    expect(getPresentationArxivList('Custom Topic Presentation')).toEqual(['Custom Topic Presentation'])
   })
 })

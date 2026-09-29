@@ -154,6 +154,8 @@ describe('Custom Color Scheme System', () => {
     expect(styles['--panel-solid']).toBe('#2b200b')
     expect(styles['--panel']).toBe('rgba(43, 32, 11, 0.82)')
     expect(styles['--line']).toContain('rgba(')
+    expect(styles['--soft']).toBe('#e5dcc7')
+    expect(styles['--muted']).toBe('#b2a687')
   })
 
   it('binds sidebar and all cards directly to theme CSS variables under custom scheme in index.css', async () => {
@@ -179,4 +181,21 @@ describe('Custom Color Scheme System', () => {
     expect(css).toContain('background: var(--panel) !important;')
     expect(css).toContain('border-color: var(--line) !important;')
   })
+
+  it('aligns forecast-day.today to translucent crystal frosted glass across all schemes', async () => {
+    const fs = await import('fs')
+    const path = await import('path')
+    const cssPath = path.resolve(__dirname, '../index.css')
+    const css = fs.readFileSync(cssPath, 'utf-8')
+
+    // Base rule should use var(--accent) mixed with transparent, NOT hardcoded cyan
+    expect(css).toContain('.forecast-day.today { background:color-mix(in srgb, var(--accent) 12%, transparent); border-color:color-mix(in srgb, var(--accent) 28%, transparent); backdrop-filter:blur(16px);')
+
+    // Custom scheme rule should use translucent color-mix with transparent and blur, NEVER opaque var(--panel)
+    expect(css).toContain('[data-color-scheme="custom"] .forecast-day.today {')
+    expect(css).toContain('background: color-mix(in srgb, var(--accent) 12%, transparent) !important;')
+    expect(css).toContain('border-color: color-mix(in srgb, var(--accent) 28%, transparent) !important;')
+    expect(css).toContain('backdrop-filter: blur(16px) !important;')
+  })
 })
+

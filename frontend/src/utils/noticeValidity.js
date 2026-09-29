@@ -56,14 +56,14 @@ export function getDaysDifference(fromDateStr, toDateStr) {
  * 校验通知当前是否可在工作台走马灯滚动展示：
  * 1. 若具有截止日期 end_date：必须在截止日期前（end_date >= todayStr）。
  * 2. 若属于长期有效通知（无 end_date 或为空）：
- *    在超过其邮件通知/发布时间 2 周（14天）后，不再在走马灯上显示。
+ *    在超过其邮件通知/发布时间 7 天后，不再在走马灯上显示。
  *
  * @param {Object} notice - 通知对象
  * @param {string} [todayStr] - 基准今天日期（默认上海时区今天）
- * @param {number} [maxPermanentDays=14] - 长期有效通知在走马灯上展示的最长天数（默认14天即2周）
+ * @param {number} [maxPermanentDays=7] - 长期有效通知在走马灯上展示的最长天数（默认7天）
  * @returns {boolean} 是否符合走马灯展示条件
  */
-export function isNoticeActiveForMarquee(notice, todayStr = shanghaiToday(), maxPermanentDays = 14) {
+export function isNoticeActiveForMarquee(notice, todayStr = shanghaiToday(), maxPermanentDays = 7) {
   if (!notice) return false
 
   // 1. 时效性通知：设定了具体的截止日期
@@ -81,7 +81,7 @@ export function isNoticeActiveForMarquee(notice, todayStr = shanghaiToday(), max
   // 计算从邮件通知/发布日期到今天经过的天数
   const daysPassed = getDaysDifference(noticeDate, todayStr)
 
-  // 超过 2 周（14 天）后不再在走马灯展示
+  // 超过 7 天后不再在走马灯展示
   return daysPassed <= maxPermanentDays
 }
 
@@ -90,10 +90,25 @@ export function isNoticeActiveForMarquee(notice, todayStr = shanghaiToday(), max
  *
  * @param {Array} notices - 待过滤的通知列表
  * @param {string} [todayStr] - 基准今天日期
- * @param {number} [maxPermanentDays=14] - 长期有效最长展示天数
+ * @param {number} [maxPermanentDays=7] - 长期有效最长展示天数
  * @returns {Array} 过滤后的通知列表
  */
-export function filterMarqueeNotices(notices, todayStr = shanghaiToday(), maxPermanentDays = 14) {
+export function filterMarqueeNotices(notices, todayStr = shanghaiToday(), maxPermanentDays = 7) {
   if (!Array.isArray(notices) || notices.length === 0) return []
   return notices.filter(item => isNoticeActiveForMarquee(item, todayStr, maxPermanentDays))
 }
+
+/**
+ * 规范化通知标题以进行高精度查重。
+ * 去除常见前缀标签（如【重要通知】、【教务通知】）以及标点与空白，统一转为小写。
+ *
+ * @param {string} title
+ * @returns {string}
+ */
+export function normalizeNoticeTitle(title) {
+  return (title || '')
+    .replace(/^[【\[](?:重要通知|通知|温馨提示|转发|教务通知|后勤通知|放假通知)[\]】]\s*/i, '')
+    .replace(/[\s·•（）()\[\]【】《》""''“”‘’，。、：:；;！!？?·•\-—_]/g, '')
+    .toLowerCase()
+}
+

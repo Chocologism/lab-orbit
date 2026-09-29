@@ -4,6 +4,7 @@ import { shanghaiToday } from '../utils/schedule'
 import { renderLatex } from '../utils/latex'
 import AppIcon from './AppIcon.vue'
 import PopularPumaLikeButton from './PopularPumaLikeButton.vue'
+import ThinHoundCheckbox from './ThinHoundCheckbox.vue'
 
 const props = defineProps({
   conferences: {
@@ -21,7 +22,7 @@ const emit = defineEmits(['select-conference', 'create-conference', 'toggle-inte
 const today = shanghaiToday()
 const statusFilter = ref('upcoming') // 'upcoming' | 'past' | 'all'
 const currentYear = new Date().getFullYear().toString()
-const yearFilter = ref(currentYear)
+const yearFilter = ref('all')
 const searchQuery = ref('')
 const onlyInterested = ref(false)
 
@@ -128,9 +129,16 @@ function getDeadlineStatus(conf) {
       diffText = `还剩 ${closest.diff} 天`
     }
 
+    let label = closest.label
+    if (closest.key === 'abstract_deadline' && conf.abstract_start_date) {
+      if (conf.abstract_start_date <= today) {
+        label = '摘要征集中'
+      }
+    }
+
     return {
       state: 'open',
-      text: `${closest.label}：${formatShortDate(closest.date)} (${diffText})`,
+      text: `${label}：${formatShortDate(closest.date)} (${diffText})`,
       isUrgent,
       diff: closest.diff
     }
@@ -170,8 +178,16 @@ const filteredConferences = computed(() => {
     list = list.filter(c => (c.end_date || c.date) < today)
   }
 
-  // 年份筛选
-  if (yearFilter.value !== 'all') {
+  // 年份筛选：默认“全部年份”展示从今年开始到未来全部年份；非 past 状态下排除往年旧会议
+  if (yearFilter.value === 'all') {
+    if (statusFilter.value !== 'past') {
+      list = list.filter(c => {
+        const startYear = (c.date || '').slice(0, 4)
+        const endYear = (c.end_date || '').slice(0, 4)
+        return (!startYear && !endYear) || startYear >= currentYear || endYear >= currentYear
+      })
+    }
+  } else {
     list = list.filter(c => (c.date || '').startsWith(yearFilter.value))
   }
 
@@ -239,7 +255,7 @@ function formatGroupTitle(monthKey) {
 <template>
   <div class="conference-list-view" role="tabpanel" id="tabpanel-conferences" aria-labelledby="tab-conferences">
     <!-- 顶部筛选与控制栏 -->
-    <div id="tour-conf-toolbar" class="conference-toolbar">
+    <div class="conference-toolbar">
       <div class="toolbar-left">
         <!-- 状态筛选 -->
         <div class="custom-select-wrap">
@@ -254,8 +270,8 @@ function formatGroupTitle(monthKey) {
         <!-- 年份筛选 -->
         <div class="custom-select-wrap">
           <select v-model="yearFilter" class="toolbar-select" aria-label="会议年份筛选">
-            <option v-for="y in availableYears" :key="y" :value="y">{{ y }} 年</option>
             <option value="all">全部年份</option>
+            <option v-for="y in availableYears" :key="y" :value="y">{{ y }} 年</option>
           </select>
           <AppIcon name="right" :size="12" class="select-chevron" />
         </div>
@@ -273,10 +289,12 @@ function formatGroupTitle(monthKey) {
         </div>
 
         <!-- 只看我感兴趣的 -->
-        <label class="interested-checkbox-label">
-          <input v-model="onlyInterested" type="checkbox" class="interested-checkbox" />
-          <span>只看我关注的</span>
-        </label>
+        <ThinHoundCheckbox
+          v-model="onlyInterested"
+          :size="18"
+          label="只看我关注的"
+          class="interested-checkbox-thin"
+        />
       </div>
 
       <div class="toolbar-right">
@@ -293,7 +311,7 @@ function formatGroupTitle(monthKey) {
 
     <!-- 会议纵向列表 -->
     <div v-if="groupedConferences.length > 0" class="conference-groups">
-      <section v-for="(group, gIdx) in groupedConferences" :key="group.monthKey" class="conference-month-group">
+      <section v-for="group in groupedConferences" :key="group.monthKey" class="conference-month-group">
         <header class="group-month-header">
           <span class="group-month-tag">{{ group.title }}</span>
           <span class="group-count-badge">{{ group.items.length }} 场会议</span>
@@ -301,9 +319,8 @@ function formatGroupTitle(monthKey) {
 
         <div class="conference-cards-grid">
           <article
-            v-for="(conf, cIdx) in group.items"
+            v-for="conf in group.items"
             :key="conf.id"
-            :id="gIdx === 0 && cIdx === 0 ? 'tour-conf-card' : undefined"
             class="glass-card conference-card"
             tabindex="0"
             @click="emit('select-conference', conf)"
@@ -387,7 +404,7 @@ function formatGroupTitle(monthKey) {
         <AppIcon name="calendar" :size="38" />
       </div>
       <h3>暂无匹配的学术会议</h3>
-      <p v-if="searchQuery || onlyInterested || statusFilter !== 'upcoming' || yearFilter !== currentYear">
+      <p v-if="searchQuery || onlyInterested || statusFilter !== 'upcoming' || yearFilter !== 'all'">
         当前筛选条件下未检索到相关会议安排，您可以尝试清空搜索词或切换筛选选项。
       </p>
       <p v-else>
@@ -498,6 +515,20 @@ function formatGroupTitle(monthKey) {
   background: var(--surface-hover, rgba(255, 255, 255, 0.08));
 }
 
+.interested-checkbox-thin {
+  padding: 0 4px;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.interested-checkbox-thin :deep(.label-text) {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
 .interested-checkbox-label {
   display: flex;
   align-items: center;
@@ -505,13 +536,28 @@ function formatGroupTitle(monthKey) {
   font-size: 13px;
   color: var(--text);
   cursor: pointer;
-  user-select: none;
+  user-select: none !important;
+  -webkit-user-select: none !important;
   padding: 0 4px;
+}
+
+.interested-checkbox-label *,
+.interested-checkbox-label::selection,
+.interested-checkbox-label *::selection {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  background: transparent !important;
 }
 
 .interested-checkbox {
   cursor: pointer;
   accent-color: var(--accent);
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.interested-checkbox::selection {
+  background: transparent !important;
 }
 
 .toolbar-right {
@@ -651,9 +697,9 @@ function formatGroupTitle(monthKey) {
   font-size: 11px;
   font-weight: 600;
   border-radius: 6px;
-  background: var(--accent-subtle, rgba(99, 102, 241, 0.15));
+  background: var(--raised);
   color: var(--accent);
-  border: 1px solid rgba(99, 102, 241, 0.25);
+  border: 1px solid var(--line);
   white-space: nowrap;
 }
 

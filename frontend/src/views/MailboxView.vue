@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute } from 'vue-router'
 import { mailboxApi, authApi, talkApi } from '../api/client'
 import BaseDialog from '../components/BaseDialog.vue'
 import LoadingState from '../components/LoadingState.vue'
@@ -8,10 +9,12 @@ import WaveInput from '../components/WaveInput.vue'
 import ThinHoundCheckbox from '../components/ThinHoundCheckbox.vue'
 import AttachmentLink from '../components/AttachmentLink.vue'
 import FileField from '../components/FileField.vue'
+import SlidingSegmented from '../components/SlidingSegmented.vue'
 import { notify, confirmAction } from '../composables/feedback'
-import { isTalkEmail, isConferenceEmail, detectScheduleType, parseTalkMetadataLocally, parseConferenceMetadataLocally, pickChinesePartIfDual, applyInstitutionLocationPrefix } from '../utils/talkEmail'
+import { isTalkEmail, isConferenceEmail, isNoticeEmail, detectScheduleType, parseTalkMetadataLocally, parseConferenceMetadataLocally, pickChinesePartIfDual, applyInstitutionLocationPrefix } from '../utils/talkEmail'
 import { isAiAssistantReady, extractScheduleFromEmailWithAi, extractConferenceFromEmailWithAi, loadAiConfig, isModelVisionCapable } from '../services/aiService'
 
+const route = useRoute()
 const currentUser = ref(null)
 
 const config = ref({
@@ -107,6 +110,14 @@ const deletingConfig = ref(false)
 // 预设配置
 const presets = [
   {
+    name: '紫金山天文台',
+    domain: '@pmo.ac.cn',
+    imapHost: 'mail.cstnet.cn',
+    popHost: 'mail.cstnet.cn',
+    imapPort: 993,
+    popPort: 995,
+  },
+  {
     name: '中科院科技网',
     domain: '@cstnet.cn',
     imapHost: 'mail.cstnet.cn',
@@ -143,6 +154,13 @@ const activePreset = ref('自定义')
 
 // SMTP 发信预设
 const smtpPresets = [
+  {
+    name: '紫金山天文台',
+    domain: '@pmo.ac.cn',
+    host: 'mail.cstnet.cn',
+    port: 465,
+    use_ssl: true
+  },
   {
     name: '中科院科技网',
     domain: '@cstnet.cn',
@@ -217,6 +235,11 @@ function onProtocolChange(newProto) {
 function onEmailBlur() {
   if (configForm.value.email_address) {
     let email = configForm.value.email_address.trim()
+    // 若输入纯用户名未包含 @，失焦时默认自动补全 @pmo.ac.cn
+    if (email && !email.includes('@')) {
+      email = `${email}@pmo.ac.cn`
+      configForm.value.email_address = email
+    }
     if (!configForm.value.username) {
       configForm.value.username = email
     }
@@ -355,6 +378,7 @@ async function loadEmails(forceRefresh = false) {
   try {
     const res = await mailboxApi.getEmails({ q: query.value, refresh: false })
     emails.value = deduplicateEmailList(res)
+    checkRouteEmail()
   } catch (e) {
     let msg = e.message || '获取邮件失败，请检查邮箱配置或网络连通性。'
     if (msg.includes('timeout')) {
@@ -401,11 +425,11 @@ async function loadSmtpConfig() {
         from_email: defaultEmail,
         from_name: currentUser.value?.real_name || currentUser.value?.name || ''
       }
-      if (!defaultEmail) {
-        activeSmtpPreset.value = '自定义'
+      if (!defaultEmail || defaultEmail.toLowerCase().endsWith('@pmo.ac.cn')) {
+        activeSmtpPreset.value = '紫金山天文台'
       } else {
         const matched = smtpPresets.find(p => p.domain && defaultEmail.toLowerCase().endsWith(p.domain))
-        activeSmtpPreset.value = matched ? matched.name : '自定义'
+        activeSmtpPreset.value = matched ? matched.name : '紫金山天文台'
       }
     }
   } catch (e) {
@@ -523,11 +547,11 @@ async function openConfig() {
       username: defaultEmail,
       password: ''
     }
-    if (!defaultEmail) {
-      activePreset.value = '自定义'
+    if (!defaultEmail || defaultEmail.toLowerCase().endsWith('@pmo.ac.cn')) {
+      activePreset.value = '紫金山天文台'
     } else {
       const matched = presets.find(p => p.domain && defaultEmail.toLowerCase().endsWith(p.domain))
-      activePreset.value = matched ? matched.name : '自定义'
+      activePreset.value = matched ? matched.name : '紫金山天文台'
     }
   }
   showConfigModal.value = true
@@ -681,6 +705,20 @@ async function openEmailDetail(email, isSent = false) {
   }
 }
 
+function checkRouteEmail() {
+  const targetId = route.query.email_id ? Number(route.query.email_id) : null
+  if (targetId && emails.value.length > 0) {
+    const item = emails.value.find(e => Number(e.id) === targetId)
+    if (item) {
+      openEmailDetail(item, false)
+    }
+  }
+}
+
+watch(() => route.query.email_id, () => {
+  checkRouteEmail()
+})
+
 function copyEmailContent() {
   const text = emailDetail.value?.body_text || emailDetail.value?.snippet || ''
   if (!text) return
@@ -755,21 +793,16 @@ function getEmailSnippet(item) {
     803: '尊敬的李华教授：您负责的重点项目《宽视场巡天中弱引力透镜多维系统误差建模与宇宙学限制》（项目号：12233005）2026 年度进展报告填报通道已开放，请组织项目组成员系统梳理本年度代表性成果并在线提交。',
     804: 'Dear Prof. Hua Li: We have received the referee report for your manuscript #ApJ-108291 "Precision Cosmology with Stage-IV Weak Lensing Surveys". The referee recommends Minor Revision. Please check attached referee comments and submit your revised manuscript within 30 days.'
   }
-  if (item.id && fallbackSnippets[item.id]) {
-    return fallbackSnippets[item.id]
-  }
-  if (item.subject?.includes('讲座') || item.subject?.includes('报告')) {
-    return '兹定于本周举行学术报告研讨会，特邀学科前沿专家作学术报告，探讨关键理论模型与最新观测约束结果，欢迎全组师生参会交流。'
-  }
-  if (item.subject?.includes('年会') || item.subject?.includes('会议')) {
-    return '学术年会与学术研讨会征文及注册通道现已开放，涵盖专题研讨、口头报告与展板交流。请拟参会人员在截止日前完成注册与摘要提交。'
-  }
-  return '本邮件包含学术报告交流、学术会议日程或科研项目进展沟通等正文内容。'
+  if (item.id && fallbackSnippets[item.id]) return fallbackSnippets[item.id]
+  return '本邮件包含学术报告交流与会议通知正文内容。'
 }
 
 function parseDateToTimestamp(str) {
   if (!str) return 0
-  const t = Date.parse(str)
+  let t = Date.parse(str)
+  if (isNaN(t) && typeof str === 'string') {
+    t = Date.parse(str.replace(' ', 'T'))
+  }
   return isNaN(t) ? 0 : t
 }
 
@@ -829,6 +862,7 @@ const confForm = ref({
   speaker: '',
   organizer: '',
   source: '',
+  abstract_start_date: '',
   abstract_deadline: '',
   early_bird_deadline: '',
   registration_deadline: '',
@@ -873,9 +907,60 @@ function isImageAttachment(att) {
 
 function isDocAttachment(att) {
   if (!att) return false
+  if (isImageAttachment(att)) return false
   const ct = (att.content_type || '').toLowerCase()
   const fn = (att.filename || '').toLowerCase()
-  return ct.includes('pdf') || ct.includes('word') || ct.includes('msword') || ct.includes('officedocument') || /\.(pdf|docx?)$/i.test(fn)
+  return ct.includes('pdf') || ct.includes('word') || ct.includes('msword') || ct.includes('officedocument') || ct.includes('excel') || ct.includes('sheet') || ct.includes('presentation') || ct.includes('zip') || ct.includes('rar') || /\.(pdf|docx?|xlsx?|pptx?|zip|rar|7z|csv|txt)$/i.test(fn) || !ct.startsWith('image/')
+}
+
+const fetchingAttachmentsEmailId = ref(null)
+
+async function handleFetchEmailAttachments(email) {
+  if (!email || !email.id || fetchingAttachmentsEmailId.value === email.id) return
+  fetchingAttachmentsEmailId.value = email.id
+  try {
+    const res = await mailboxApi.fetchEmailAttachments(email.id)
+    if (res && res.data) {
+      const { attachments: newAtts, poster_url: newPoster, count } = res.data
+      const hasAttValue = (newAtts && newAtts.length > 0) || Boolean(newPoster) ? 1 : 0
+
+      // 1. 同步更新当前选中邮件与详情
+      if (selectedEmail.value && selectedEmail.value.id === email.id) {
+        selectedEmail.value = {
+          ...selectedEmail.value,
+          attachments: newAtts,
+          has_attachments: hasAttValue,
+          poster_url: newPoster || selectedEmail.value.poster_url || ''
+        }
+      }
+      if (emailDetail.value && emailDetail.value.id === email.id) {
+        emailDetail.value = {
+          ...emailDetail.value,
+          attachments: newAtts,
+          has_attachments: hasAttValue,
+          poster_url: newPoster || emailDetail.value.poster_url || ''
+        }
+      }
+
+      // 2. 同步更新邮件列表中的对应项
+      const targetInList = emails.value.find(e => e.id === email.id)
+      if (targetInList) {
+        targetInList.attachments = newAtts
+        targetInList.has_attachments = hasAttValue
+        if (newPoster) targetInList.poster_url = newPoster
+      }
+
+      if (count > 0) {
+        notify(`成功下载本邮件 ${count} 个附件！`)
+      } else {
+        notify('已连接邮箱服务器，但本邮件未发现更多可下载的附件', 'info')
+      }
+    }
+  } catch (err) {
+    notify(err.response?.data?.detail || err.message || '下载本邮件附件失败，请重试', 'error')
+  } finally {
+    fetchingAttachmentsEmailId.value = null
+  }
 }
 
 function hasEmailImages(item) {
@@ -1077,6 +1162,7 @@ async function openPushScheduleModal(email, preferredPosterUrl = '', initialType
     speaker: localConfMeta.organizer || '',
     organizer: localConfMeta.organizer || '',
     source: fullEmail.subject || '',
+    abstract_start_date: localConfMeta.abstract_start_date || '',
     abstract_deadline: localConfMeta.abstract_deadline || '',
     early_bird_deadline: localConfMeta.early_bird_deadline || '',
     registration_deadline: localConfMeta.registration_deadline || '',
@@ -1196,6 +1282,7 @@ async function handleAiRecognizeSchedule() {
           confForm.value.organizer = extracted.organizer
           confForm.value.speaker = extracted.organizer
         }
+        if (extracted.abstract_start_date) confForm.value.abstract_start_date = extracted.abstract_start_date
         if (extracted.abstract_deadline) confForm.value.abstract_deadline = extracted.abstract_deadline
         if (extracted.early_bird_deadline) confForm.value.early_bird_deadline = extracted.early_bird_deadline
         if (extracted.registration_deadline) confForm.value.registration_deadline = extracted.registration_deadline
@@ -1212,14 +1299,16 @@ async function handleAiRecognizeSchedule() {
         }
 
         let tip = 'AI 智能识别完成，已自动填充会议各栏目内容！'
-        if (extracted.usedVision && extracted.usedPdf) {
+        if (extracted.fallbackToLocal) {
+          tip = '大模型未返回规范结果，已自动基于邮件正文完成会议各栏目提取！'
+        } else if (extracted.usedVision && extracted.usedPdf) {
           tip = 'AI 多模态智能识别完成，已结合海报与 PDF 通知文件提取完整会议信息！'
         } else if (extracted.usedVision) {
           tip = 'AI 多模态智能识别完成，已结合海报图片解析会议内容！'
         } else if (extracted.usedPdf) {
           tip = 'AI 智能识别完成，已深入解析 PDF 会议通知文件！'
         }
-        notify(tip)
+        notify(tip, extracted.fallbackToLocal ? 'info' : 'success')
       }
       return
     }
@@ -1253,6 +1342,8 @@ async function handleAiRecognizeSchedule() {
       }
       if (extracted.usedVision) {
         notify('AI 多模态智能识别完成，已结合海报提取报告内容并填充说明！')
+      } else if (extracted.fallbackToLocal) {
+        notify('大模型未返回规范结果，已自动基于邮件正文完成智能结构化提取！', 'info')
       } else if (posterForAi && !isCurrentAiVisionCapable.value) {
         notify(`AI 智能填报完成。提示：当前模型 (${currentAiModelName.value}) 未开启海报识图；若需自动从海报提取内容，可在 AI 助手设置中开启视觉支持 (Vision)。`, 'info')
       } else {
@@ -1424,6 +1515,7 @@ onMounted(async () => {
     window.addEventListener('storage', refreshAiState)
     window.addEventListener('focus', refreshAiState)
     window.addEventListener('labhub-ai-config-changed', refreshAiState)
+    window.addEventListener('csbd-ai-config-changed', refreshAiState)
   }
   try {
     currentUser.value = await authApi.getMe()
@@ -1441,6 +1533,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('storage', refreshAiState)
     window.removeEventListener('focus', refreshAiState)
     window.removeEventListener('labhub-ai-config-changed', refreshAiState)
+    window.removeEventListener('csbd-ai-config-changed', refreshAiState)
   }
 })
 </script>
@@ -1474,7 +1567,7 @@ onBeforeUnmount(() => {
     </header>
 
     <!-- 邮箱分类标签：收件箱 / 已发通知（发件箱） -->
-    <div class="mailbox-tabs-nav">
+    <SlidingSegmented class="mailbox-tabs-nav">
       <button
         type="button"
         class="mailbox-tab-btn"
@@ -1496,7 +1589,7 @@ onBeforeUnmount(() => {
         <span>已发通知（发件箱）</span>
         <span v-if="sentEmails.length" class="tab-count-pill">{{ sentEmails.length }}</span>
       </button>
-    </div>
+    </SlidingSegmented>
 
     <!-- 收件箱视图 -->
     <template v-if="currentFolder === 'inbox'">
@@ -1566,20 +1659,20 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 1. 未配置邮箱引导状态 -->
-      <section v-if="!config.has_config && !loading" id="tour-mailbox-main" class="empty-state glass-card mailbox-welcome">
+      <section v-if="!config.has_config && !loading" class="empty-state glass-card mailbox-welcome">
         <div class="welcome-icon-box">
           <AppIcon name="envelope" :size="48" />
         </div>
         <h2>开启个人学术邮箱</h2>
-        <p id="tour-mailbox-features" class="welcome-desc">
+        <p class="welcome-desc">
           随时随地在科研协作工作台中查收学术报告、组会通知、期刊审稿与学术邮件。<br />
-          已深度适配 <strong>中科院科技网 (@cstnet.cn)</strong>、网易 163/126、QQ 邮箱及各类高校与科研机构 IMAP / POP3 服务。
+          已深度适配 <strong>中国科学院紫金山天文台邮箱 (@pmo.ac.cn，默认服务器 mail.cstnet.cn / 993 TLS)</strong>、<strong>科技网 (@cstnet.cn)</strong>、网易 163/126、QQ 邮箱及各类高校机构 IMAP / POP3 服务。
         </p>
         <div class="preset-badges-show">
+          <span class="badge cyan">紫金山天文台 (@pmo.ac.cn)</span>
           <span class="badge cyan">中科院科技网 (@cstnet.cn)</span>
           <span class="badge">网易企业/个人邮</span>
           <span class="badge">QQ 邮箱</span>
-          <span class="badge">高校 / 机构邮箱</span>
           <span class="badge">自定义 IMAP / POP3</span>
         </div>
         <button class="button primary welcome-cta" @click="openConfig">
@@ -1610,7 +1703,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 4. 邮件列表 -->
-      <section v-else id="tour-mailbox-main" class="emails-container">
+      <section v-else class="emails-container">
         <div class="emails-meta-summary">
           <span class="muted">共 {{ emails.length }} 封邮件（最近 7 天） · 点击卡片展开查看正文与详情</span>
           <button
@@ -1663,7 +1756,6 @@ onBeforeUnmount(() => {
                     <AppIcon name="calendar" :size="13" />
                     <span>推送到日程</span>
                   </button>
-                  <span class="email-date" :title="item.date_str">{{ formatEmailDate(item.date_str) }}</span>
                   <button
                     type="button"
                     class="email-delete-btn"
@@ -1673,6 +1765,7 @@ onBeforeUnmount(() => {
                   >
                     <AppIcon name="trash" :size="13" />
                   </button>
+                  <span class="email-date" :title="item.date_str">{{ formatEmailDate(item.date_str) }}</span>
                 </div>
               </div>
 
@@ -1686,6 +1779,9 @@ onBeforeUnmount(() => {
 
               <div class="email-card-footer">
                 <div class="footer-badges">
+                  <span v-if="isNoticeEmail(item)" class="badge blue small-badge" title="识别为通知公文">
+                    通知
+                  </span>
                   <span v-if="hasEmailDocs(item)" class="badge cyan small-badge">
                     包含通知文档 {{ getEmailDocsCount(item) > 1 ? `(${getEmailDocsCount(item)})` : '' }}
                   </span>
@@ -1693,8 +1789,19 @@ onBeforeUnmount(() => {
                     包含图片 {{ getEmailImagesCount(item) > 1 ? `(${getEmailImagesCount(item)})` : '' }}
                   </span>
                   <span v-else-if="item.has_attachments && !hasEmailDocs(item)" class="badge amber small-badge">
-                    包含附件
+                    包含附件 (未下载)
                   </span>
+                  <button
+                    v-if="item.has_attachments && !hasEmailDocs(item) && !hasEmailImages(item)"
+                    type="button"
+                    class="button ghost tiny quick-fetch-att-btn"
+                    :disabled="fetchingAttachmentsEmailId === item.id"
+                    title="单独下载此邮件的附件"
+                    @click.stop="handleFetchEmailAttachments(item)"
+                  >
+                    <AppIcon name="download" :size="11" />
+                    <span>{{ fetchingAttachmentsEmailId === item.id ? '下载中…' : '下载附件' }}</span>
+                  </button>
                 </div>
                 <span class="read-hint">查看详情 →</span>
               </div>
@@ -1782,10 +1889,10 @@ onBeforeUnmount(() => {
           <div class="reader-header-row">
             <div class="reader-sender">
               <span class="meta-label">发件人：</span>
-              <strong>{{ selectedEmail.sender_name || selectedEmail.from_name || '学术发件人' }}</strong>
-              <span class="mono muted">&lt;{{ selectedEmail.sender_email || selectedEmail.from_addr || 'academic@nao.cas.cn' }}&gt;</span>
+              <strong>{{ selectedEmail.sender_name }}</strong>
+              <span class="mono muted">&lt;{{ selectedEmail.sender_email }}&gt;</span>
             </div>
-            <span class="email-date-badge">{{ selectedEmail.date_str || selectedEmail.created_at }}</span>
+            <span class="email-date-badge">{{ selectedEmail.date_str }}</span>
           </div>
 
           <div v-if="selectedEmail.isSent && selectedEmail.recipients?.length" class="reader-recipient sent-recipients-box">
@@ -1796,9 +1903,9 @@ onBeforeUnmount(() => {
               </span>
             </div>
           </div>
-          <div v-else-if="selectedEmail.recipient || selectedEmail.to_addr" class="reader-recipient">
+          <div v-else-if="selectedEmail.recipient" class="reader-recipient">
             <span class="meta-label">收件人：</span>
-            <span class="mono">{{ selectedEmail.recipient || selectedEmail.to_addr }}</span>
+            <span class="mono">{{ selectedEmail.recipient }}</span>
           </div>
         </div>
 
@@ -1923,15 +2030,26 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- 邮件文档附件区 (PDF / Word) -->
+        <!-- 邮件文档附件区 (PDF / Word / 表格 / 压缩包) -->
         <div v-if="emailDocAttachments.length" class="email-doc-attachments-banner glass-card">
           <div class="attachments-banner-header">
             <div class="attachments-title-row">
               <AppIcon name="paper" :size="16" />
               <strong>通知文档 / 附件文件</strong>
               <span class="badge cyan small-badge">共 {{ emailDocAttachments.length }} 个文件</span>
+              <button
+                v-if="!selectedEmail.isSent"
+                type="button"
+                class="button ghost tiny re-fetch-att-btn"
+                :disabled="fetchingAttachmentsEmailId === selectedEmail.id"
+                title="重新连接邮箱服务器检查并更新本邮件附件"
+                @click="handleFetchEmailAttachments(selectedEmail)"
+              >
+                <AppIcon name="refresh" :size="12" />
+                <span>{{ fetchingAttachmentsEmailId === selectedEmail.id ? '正在拉取…' : '重新拉取附件' }}</span>
+              </button>
             </div>
-            <span class="attachments-hint muted">包含 PDF 或 Word 通知文件，可在线预览或推送到会议手册</span>
+            <span class="attachments-hint muted">包含 PDF 或 Word 通知文件，支持在线内嵌预览、直接下载或推送到会议手册</span>
           </div>
           <div class="email-doc-attachments-list">
             <div
@@ -1956,10 +2074,19 @@ onBeforeUnmount(() => {
                   target="_blank"
                   rel="noopener noreferrer"
                   class="button ghost tiny"
-                  title="在新标签页中查看或下载原文件"
+                  title="在新标签页中在线预览文件"
                 >
                   <AppIcon name="link" :size="12" />
-                  <span>查看/下载 ↗</span>
+                  <span>在线预览 ↗</span>
+                </a>
+                <a
+                  :href="doc.url + '?download=1'"
+                  :download="doc.filename || 'attachment'"
+                  class="button ghost tiny doc-download-btn"
+                  title="直接下载该文件到本地"
+                >
+                  <AppIcon name="download" :size="12" />
+                  <span>下载</span>
                 </a>
                 <button
                   v-if="!selectedEmail.isSent && isConferenceEmail(selectedEmail)"
@@ -1973,6 +2100,33 @@ onBeforeUnmount(() => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- 当邮件标记有附件但本地尚未下载时，展示按需下载专属横幅 -->
+        <div
+          v-if="!selectedEmail.isSent && !emailDocAttachments.length && selectedEmail.has_attachments"
+          class="email-doc-attachments-banner email-ondemand-banner glass-card"
+        >
+          <div class="attachments-banner-header">
+            <div class="attachments-title-row">
+              <AppIcon name="paper" :size="16" />
+              <strong>邮件附件</strong>
+              <span class="badge amber small-badge">包含附件 · 待下载</span>
+            </div>
+            <span class="attachments-hint muted">本邮件在邮箱服务器上包含附件，但尚未下载到本地缓存</span>
+          </div>
+          <div class="ondemand-actions-box">
+            <p class="ondemand-hint muted">点击下方按钮可单独拉取本邮件的全部附件（PDF、文档、表格、图片等），不影响其他邮件。</p>
+            <button
+              type="button"
+              class="button primary small ondemand-fetch-btn"
+              :disabled="fetchingAttachmentsEmailId === selectedEmail.id"
+              @click="handleFetchEmailAttachments(selectedEmail)"
+            >
+              <AppIcon v-if="fetchingAttachmentsEmailId !== selectedEmail.id" name="download" :size="14" />
+              <span>{{ fetchingAttachmentsEmailId === selectedEmail.id ? '正在连接邮箱服务器拉取附件…' : '下载本邮件附件' }}</span>
+            </button>
           </div>
         </div>
 
@@ -1999,7 +2153,7 @@ onBeforeUnmount(() => {
       @close="showConfigModal = false"
     >
       <!-- 管理员专享 Tab 切换 -->
-      <div v-if="isAdmin" class="segmented config-tab-segmented">
+      <SlidingSegmented v-if="isAdmin" class="segmented config-tab-segmented">
         <button
           type="button"
           :class="{ active: configTab === 'incoming' }"
@@ -2014,7 +2168,7 @@ onBeforeUnmount(() => {
         >
           发送服务 (SMTP - 管理员专属)
         </button>
-      </div>
+      </SlidingSegmented>
 
       <!-- 1. 接收配置表单 (IMAP/POP3) -->
       <form v-if="configTab === 'incoming'" class="mail-config-form" @submit.prevent="handleSaveConfig">
@@ -2038,7 +2192,7 @@ onBeforeUnmount(() => {
         <!-- 协议选择 -->
         <div class="form-group">
           <label class="form-label">接收协议</label>
-          <div class="segmented proto-segmented">
+          <SlidingSegmented class="segmented proto-segmented">
             <button
               type="button"
               :class="{ active: configForm.protocol === 'imap' }"
@@ -2053,7 +2207,7 @@ onBeforeUnmount(() => {
             >
               POP3
             </button>
-          </div>
+          </SlidingSegmented>
         </div>
 
         <!-- 邮箱地址与用户名 -->
@@ -2063,12 +2217,12 @@ onBeforeUnmount(() => {
             <input
               v-model="configForm.email_address"
               type="text"
-              placeholder="如：researcher@univ.edu.cn"
+              placeholder="如：dinghk@pmo.ac.cn"
               required
               @blur="onEmailBlur"
             />
             <small class="muted field-hint">
-              请输入完整的学术机构或个人邮箱地址
+              PMO 邮箱以 <strong>@pmo.ac.cn</strong> 结尾（直接输入账号失焦将自动补齐）
             </small>
           </label>
           <label>
@@ -2080,7 +2234,7 @@ onBeforeUnmount(() => {
               required
             />
             <small class="muted field-hint">
-              科技网及多数机构邮箱登录名通常为完整邮箱地址
+              科技网与紫金山天文台登录名通常为完整邮箱地址
             </small>
           </label>
         </div>
@@ -2127,7 +2281,7 @@ onBeforeUnmount(() => {
           </div>
 
           <small class="muted field-hint">
-            中科院科技网及各类学术与个人邮箱均使用客户端专用授权码进行认证。授权码一旦输入即安全加密存储，不支持查看，仅支持重新输入修改。
+            中科院科技网、PMO 邮箱 (@pmo.ac.cn) 及各类学术与个人邮箱均使用客户端专用授权码进行认证。授权码一旦输入即安全加密存储，不支持查看，仅支持重新输入修改。
           </small>
         </div>
 
@@ -2142,7 +2296,7 @@ onBeforeUnmount(() => {
               required
             />
             <small class="muted field-hint">
-              常用机构 IMAP 服务器地址（如 <strong>mail.cstnet.cn</strong> 或 <strong>imap.univ.edu.cn</strong>）
+              PMO 默认 IMAP 服务器地址为 <strong>mail.cstnet.cn</strong>
             </small>
           </label>
           <label>
@@ -2161,10 +2315,9 @@ onBeforeUnmount(() => {
 
         <!-- SSL 安全传输开关 -->
         <div class="ssl-checkbox-wrap">
-          <label class="checkbox-label">
-            <input v-model="configForm.use_ssl" type="checkbox" />
+          <ThinHoundCheckbox v-model="configForm.use_ssl" :size="18" class="checkbox-label">
             <span>启用 SSL / TLS 安全加密连接（推荐默认开启）</span>
-          </label>
+          </ThinHoundCheckbox>
         </div>
 
         <!-- 连接测试反馈信息 -->
@@ -2235,7 +2388,7 @@ onBeforeUnmount(() => {
               required
             />
             <small class="muted field-hint">
-              常用机构默认 SMTP 地址（如 <strong>mail.cstnet.cn</strong> 或 <strong>smtp.163.com</strong>）
+              科技网与紫金山天文台默认 SMTP 地址为 <strong>mail.cstnet.cn</strong>
             </small>
           </label>
           <label>
@@ -2254,10 +2407,9 @@ onBeforeUnmount(() => {
 
         <!-- SSL 开关 -->
         <div class="ssl-checkbox-wrap">
-          <label class="checkbox-label">
-            <input v-model="smtpForm.use_ssl" type="checkbox" />
+          <ThinHoundCheckbox v-model="smtpForm.use_ssl" :size="18" class="checkbox-label">
             <span>启用 SSL / TLS 安全加密（465 端口默认推荐开启）</span>
-          </label>
+          </ThinHoundCheckbox>
         </div>
 
         <!-- SMTP 登录用户名 -->
@@ -2267,7 +2419,7 @@ onBeforeUnmount(() => {
             <input
               v-model="smtpForm.username"
               type="text"
-              placeholder="如：admin@univ.edu.cn"
+              placeholder="如：dinghk@pmo.ac.cn"
               required
             />
             <small class="muted field-hint">
@@ -2280,10 +2432,9 @@ onBeforeUnmount(() => {
         <div class="form-group">
           <!-- 选项：复用接收服务 (IMAP) 客户端专用授权码 -->
           <div v-if="config.has_config || smtpConfig.has_imap_password" class="use-imap-option">
-            <label class="checkbox-label imap-sync-checkbox">
-              <input v-model="smtpForm.use_imap_password" type="checkbox" />
+            <ThinHoundCheckbox v-model="smtpForm.use_imap_password" :size="18" class="checkbox-label imap-sync-checkbox">
               <span>使用与接收服务 (IMAP) 相同的客户端授权码（推荐）</span>
-            </label>
+            </ThinHoundCheckbox>
             <div v-if="smtpForm.use_imap_password" class="imap-sync-tip">
               <AppIcon name="check" :size="15" />
               <span>已绑定接收服务 ({{ config.email_address || smtpConfig.imap_email }}) 的客户端授权码，发件与连通测试将直接复用该授权码，无需重复输入。</span>
@@ -2344,7 +2495,7 @@ onBeforeUnmount(() => {
             <input
               v-model="smtpForm.from_email"
               type="email"
-              placeholder="如：admin@univ.edu.cn"
+              placeholder="如：dinghk@pmo.ac.cn"
               required
             />
             <small class="muted field-hint">
@@ -2356,7 +2507,7 @@ onBeforeUnmount(() => {
             <input
               v-model="smtpForm.from_name"
               type="text"
-              placeholder="如：科研秘书 / 管理员"
+              placeholder="如：郑文雯"
             />
             <small class="muted field-hint">
               通知邮件发送人显示名称（默认管理员真实姓名）
@@ -2402,7 +2553,7 @@ onBeforeUnmount(() => {
     >
       <form class="form-grid" @submit.prevent="handleSaveTalkToSchedule">
         <!-- 模式切换：学术报告 vs 学术会议 -->
-        <div class="schedule-type-segmented">
+        <SlidingSegmented class="schedule-type-segmented">
           <button
             type="button"
             class="schedule-type-btn"
@@ -2421,7 +2572,7 @@ onBeforeUnmount(() => {
             <AppIcon name="paper" :size="14" />
             <span>学术会议</span>
           </button>
-        </div>
+        </SlidingSegmented>
 
         <div v-if="isAiAssistantReadyState" class="ai-schedule-recognize-bar">
           <div class="ai-recognize-lead">
@@ -2473,6 +2624,7 @@ onBeforeUnmount(() => {
             <label>
               会议类型
               <select v-model="confForm.sub_type">
+                <option value="国际会议">国际会议</option>
                 <option value="研讨会">研讨会</option>
                 <option value="年会">年会</option>
                 <option value="暑期学校">暑期学校</option>
@@ -2515,7 +2667,7 @@ onBeforeUnmount(() => {
               <input
                 v-model="confForm.speaker"
                 type="text"
-                placeholder="如：中国天文学会 / 研究所"
+                placeholder="如：紫金山天文台 / 中国天文学会"
               />
             </label>
             <label>
@@ -2523,7 +2675,7 @@ onBeforeUnmount(() => {
               <input
                 v-model="confForm.location"
                 type="text"
-                placeholder="如：第一学术报告厅 / 腾讯会议号"
+                placeholder="如：紫台仙林 5-516 会议室 / 腾讯会议号"
               />
             </label>
           </div>
@@ -2531,11 +2683,17 @@ onBeforeUnmount(() => {
           <!-- 会议关键时间节点卡片 -->
           <div class="form-section-card">
             <div class="form-section-title">关键时间节点（选填）</div>
-            <div class="form-row form-row-3">
+            <div class="form-row" style="margin-bottom: 12px;">
+              <label>
+                摘要提交开始
+                <input v-model="confForm.abstract_start_date" type="date" />
+              </label>
               <label>
                 摘要投递截止
                 <input v-model="confForm.abstract_deadline" type="date" />
               </label>
+            </div>
+            <div class="form-row">
               <label>
                 早鸟优惠截止
                 <input v-model="confForm.early_bird_deadline" type="date" />
@@ -2743,7 +2901,7 @@ onBeforeUnmount(() => {
             <input
               v-model="scheduleForm.title"
               type="text"
-              placeholder="如：特邀学术报告：宇宙加速膨胀测量"
+              placeholder="如：紫台学术报告：宇宙加速膨胀射电测量"
               required
             />
           </label>
@@ -2773,7 +2931,7 @@ onBeforeUnmount(() => {
               <input
                 v-model="scheduleForm.speaker"
                 type="text"
-                placeholder="如：李教授 / 专家学者"
+                placeholder="如：李菂 研究员"
               />
             </label>
             <label>
@@ -2781,7 +2939,7 @@ onBeforeUnmount(() => {
               <input
                 v-model="scheduleForm.location"
                 type="text"
-                placeholder="如：第一学术会议室 / 腾讯会议号"
+                placeholder="如：紫台仙林 5-516 会议室 / 腾讯会议号"
               />
             </label>
           </div>
@@ -2925,6 +3083,7 @@ onBeforeUnmount(() => {
   gap: 10px;
   background: rgba(22, 32, 46, 0.75);
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--line);
   border-radius: 14px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
@@ -3013,7 +3172,7 @@ onBeforeUnmount(() => {
 .proto-tag {
   font-size: 11px;
   color: var(--accent);
-  background: rgba(184, 155, 248, 0.15);
+  background: var(--raised);
   padding: 2px 6px;
   border-radius: 4px;
   font-weight: 600;
@@ -3074,7 +3233,7 @@ onBeforeUnmount(() => {
   width: 72px;
   height: 72px;
   border-radius: 20px;
-  background: rgba(184, 155, 248, 0.14);
+  background: var(--raised);
   color: var(--accent);
   display: flex;
   align-items: center;
@@ -3182,8 +3341,8 @@ onBeforeUnmount(() => {
 
 .email-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(184, 155, 248, 0.4);
-  background: rgba(184, 155, 248, 0.08);
+  border-color: var(--accent);
+  background: var(--raised);
 }
 
 .email-card.active {
@@ -3194,7 +3353,7 @@ onBeforeUnmount(() => {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: rgba(184, 155, 248, 0.16);
+  background: var(--raised);
   color: var(--accent);
   font-weight: 600;
   font-size: 18px;
@@ -3376,7 +3535,7 @@ onBeforeUnmount(() => {
   font-size: 13px;
   color: var(--accent);
   padding: 8px 12px;
-  background: rgba(184, 155, 248, 0.12);
+  background: var(--raised);
   border-radius: 8px;
   margin-bottom: 8px;
 }
@@ -3446,12 +3605,12 @@ onBeforeUnmount(() => {
 
 .multi-talk-tab:hover {
   border-color: var(--accent);
-  background: rgba(184, 155, 248, 0.08);
+  background: var(--raised);
 }
 
 .multi-talk-tab.active {
   border-color: var(--accent);
-  background: rgba(184, 155, 248, 0.14);
+  background: var(--raised);
   box-shadow: 0 0 0 1px var(--accent);
 }
 
@@ -3525,6 +3684,32 @@ onBeforeUnmount(() => {
   color: var(--accent);
 }
 
+.sender-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.email-date {
+  font-size: 12px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.email-subject {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text);
+  margin: 2px 0;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .email-sender-line {
   display: flex;
   align-items: center;
@@ -3543,52 +3728,20 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.sender-name {
-  font-weight: 500;
-  font-size: 13px;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  letter-spacing: 0.1px;
-}
-
 .sender-email {
   color: var(--soft);
   font-size: 11px;
   opacity: 0.85;
 }
 
-.email-date {
-  font-size: 12px;
-  color: var(--muted);
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-  margin: 0 2px;
-}
-
-.email-subject {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
-  margin: 0;
-  line-height: 1.45;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
-}
-
 .email-snippet {
   font-size: 13px;
-  color: var(--soft);
+  color: var(--muted);
   line-height: 1.6;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  margin: 2px 0 4px;
 }
 
 .email-card-footer {
@@ -3599,13 +3752,6 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
-.footer-badges {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .sender-email-chip {
   font-size: 11px;
   color: var(--soft);
@@ -3613,12 +3759,6 @@ onBeforeUnmount(() => {
   padding: 2px 8px;
   border-radius: 6px;
   border: 1px solid var(--line);
-  display: inline-flex;
-  align-items: center;
-}
-
-.sender-email-chip:empty {
-  display: none !important;
 }
 
 .small-badge {
@@ -3742,7 +3882,7 @@ onBeforeUnmount(() => {
 }
 
 .preset-btn.active {
-  background: rgba(184, 155, 248, 0.18);
+  background: var(--raised);
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 500;
@@ -3791,8 +3931,8 @@ onBeforeUnmount(() => {
 }
 
 .use-imap-option {
-  background: rgba(184, 155, 248, 0.1);
-  border: 1px solid rgba(184, 155, 248, 0.25);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 12px 14px;
   display: grid;
@@ -3914,12 +4054,12 @@ onBeforeUnmount(() => {
 
 .mailbox-tab-btn:hover {
   color: var(--text);
-  border-color: rgba(184, 155, 248, 0.4);
-  background: rgba(184, 155, 248, 0.08);
+  border-color: var(--accent);
+  background: var(--raised);
 }
 
 .mailbox-tab-btn.active {
-  background: rgba(184, 155, 248, 0.16);
+  background: var(--raised);
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -3928,7 +4068,7 @@ onBeforeUnmount(() => {
   padding: 1px 7px;
   border-radius: 9999px;
   font-size: 11px;
-  background: rgba(184, 155, 248, 0.2);
+  background: var(--raised);
   color: var(--accent);
   font-weight: 600;
 }
@@ -3948,11 +4088,11 @@ onBeforeUnmount(() => {
 
 /* 已发通知卡片定制 */
 .sent-card {
-  border-left: 3px solid rgba(184, 155, 248, 0.5);
+  border-left: 3px solid var(--accent);
 }
 
 .sent-avatar {
-  background: rgba(184, 155, 248, 0.2);
+  background: var(--raised);
   color: var(--accent);
   font-size: 16px;
 }
@@ -4010,8 +4150,8 @@ onBeforeUnmount(() => {
   font-size: 12px;
   padding: 3px 8px;
   border-radius: 6px;
-  background: rgba(184, 155, 248, 0.14);
-  border: 1px solid rgba(184, 155, 248, 0.25);
+  background: var(--raised);
+  border: 1px solid var(--line);
   color: var(--accent);
 }
 
@@ -4072,29 +4212,19 @@ onBeforeUnmount(() => {
     border-radius: 10px;
     flex-shrink: 0;
   }
-  .email-card-top-row,
   .email-card-header {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 6px;
+    gap: 5px;
     width: 100%;
-  }
-  .email-subject {
-    width: 100%;
-    font-size: 14px;
-    white-space: normal;
-    line-height: 1.4;
-  }
-  .email-sender-line {
-    flex-wrap: wrap;
   }
   .sender-name {
-    max-width: 100%;
+    width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 13px;
+    font-size: 14px;
   }
   .header-right-meta {
     width: 100%;
@@ -4149,6 +4279,7 @@ onBeforeUnmount(() => {
   }
   .mail-reader-content {
     padding: 14px;
+    max-height: calc(85vh - 180px);
     max-height: calc(85dvh - 180px);
   }
   .config-actions {
@@ -4526,15 +4657,16 @@ onBeforeUnmount(() => {
 }
 
 .schedule-type-btn.active {
-  background: var(--accent);
-  color: var(--accent-ink, #070314) !important;
+  background: transparent !important;
+  color: #ffffff !important;
   font-weight: 600;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  box-shadow: none;
 }
 
 .schedule-type-btn.active :deep(.app-icon),
 .schedule-type-btn.active .app-icon {
-  color: var(--accent-ink, #070314) !important;
+  color: #ffffff !important;
 }
 
 /* 会议关键时间节点与资料分组卡片 */
@@ -4633,5 +4765,62 @@ onBeforeUnmount(() => {
 
 .doc-candidate-chip {
   padding: 5px 10px;
+}
+
+.re-fetch-att-btn {
+  margin-left: 8px;
+  font-size: 11px;
+  padding: 2px 8px;
+  min-height: 24px;
+}
+
+.doc-download-btn {
+  border-color: rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+}
+
+.doc-download-btn:hover {
+  background: rgba(56, 189, 248, 0.15) !important;
+  color: #38bdf8 !important;
+}
+
+.email-ondemand-banner {
+  border: 1px dashed rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.05);
+  margin-bottom: 16px;
+}
+
+.ondemand-actions-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.ondemand-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ondemand-fetch-btn {
+  align-self: flex-start;
+  min-height: 36px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.quick-fetch-att-btn {
+  padding: 3px 8px;
+  min-height: 22px;
+  font-size: 11px;
+  color: var(--warning, #f59e0b);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.quick-fetch-att-btn:hover {
+  background: rgba(245, 158, 11, 0.12) !important;
+  color: var(--warning, #f59e0b) !important;
 }
 </style>

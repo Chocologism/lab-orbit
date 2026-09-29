@@ -1,18 +1,18 @@
 // src/defaults.ts
 var DEFAULTS = {
-  blurAmount: 0.25,
-  refraction: 0.3,
-  chromAberration: 0.04,
+  blurAmount: 0.28,
+  refraction: 0.35,
+  chromAberration: 0.05,
   edgeHighlight: 0.08,
-  specular: 0.1,
-  fresnel: 0.28,
+  specular: 0.0,
+  fresnel: 1,
   distortion: 0,
   cornerRadius: 20,
   zRadius: 20,
-  opacity: 0.72,
+  opacity: 1,
   saturation: 0,
   tintStrength: 0,
-  brightness: 0.0,
+  brightness: -0.05,
   shadowOpacity: 0.0,
   shadowSpread: 0,
   shadowOffsetY: 0,
@@ -2239,7 +2239,7 @@ var LiquidGlass = class _LiquidGlass {
   _detectDynamic() {
     if (typeof document !== 'undefined') {
       const bgVideo = document.querySelector('video.custom-bg-media');
-      if (bgVideo && !bgVideo.paused && !bgVideo.ended) {
+      if (bgVideo && (!bgVideo.closest || !bgVideo.closest('.earth-orbit-media-layer:not(.is-active)')) && !bgVideo.paused && !bgVideo.ended) {
         return true;
       }
     }
@@ -2445,9 +2445,9 @@ var LiquidGlass = class _LiquidGlass {
     if (bgType === 'galaxy' || bgType === 'vanta-fog') {
       return true;
     }
-    if (bgType === 'custom-local') {
+    if (bgType === 'earth-orbit' || bgType === 'custom-local') {
       const vid = document.querySelector('video.custom-bg-media');
-      if (vid && !vid.paused && !vid.ended && vid.readyState >= 2) {
+      if (vid && (!vid.closest || !vid.closest('.earth-orbit-media-layer:not(.is-active)')) && !vid.paused && !vid.ended && vid.readyState >= 2) {
         return true;
       }
     }
@@ -2577,7 +2577,6 @@ var LiquidGlass = class _LiquidGlass {
         dpr
       );
       const ctx = glassCanvas.getContext("2d");
-      ctx.clearRect(0, 0, glassCanvas.width, glassCanvas.height);
       ctx.drawImage(
         this.renderer.canvas,
         0,
@@ -2625,26 +2624,41 @@ var LiquidGlass = class _LiquidGlass {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    const colorScheme = typeof document !== 'undefined' ? document.documentElement.getAttribute('data-color-scheme') : '';
-    const themeStyle = typeof document !== 'undefined' ? document.documentElement.getAttribute('data-theme-style') : '';
+    const doc = typeof document !== 'undefined' ? document.documentElement : null;
+    const colorScheme = doc ? doc.getAttribute('data-color-scheme') : '';
+    const themeStyle = doc ? doc.getAttribute('data-theme-style') : '';
+    const bgType = doc ? (doc.getAttribute('data-bg-type') || doc.getAttribute('data-bg-style') || '') : '';
     const isCyan = colorScheme === 'classic-cyan' || themeStyle === 'vanta-fog';
-    const isCustom = colorScheme === 'custom';
+    const isObsidian = colorScheme === 'obsidian-gray' || themeStyle === 'earth-orbit';
+    const isCustomLocal = bgType === 'custom-local' || bgType === 'earth-orbit';
+    const isHome = typeof document !== 'undefined' && !!document.querySelector('.is-home');
 
-    let fallbackColor = "#020108";
-    let tintR = 6, tintG = 4, tintB = 16;
+    let fallbackColor = "#03020a";
+    let tintR = 3, tintG = 2, tintB = 10;
 
     if (isCyan) {
       fallbackColor = "#05161c";
       tintR = 3; tintG = 23; tintB = 32;
-    } else if (isCustom && typeof window !== 'undefined') {
+    } else if (isObsidian) {
+      fallbackColor = "#090d16";
+      tintR = 9; tintG = 13; tintB = 22;
+    } else if (typeof window !== 'undefined') {
       const computedBg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
-      if (computedBg) fallbackColor = computedBg;
-      const computedPanel = getComputedStyle(document.documentElement).getPropertyValue('--panel-solid').trim() || fallbackColor;
-      const m = computedPanel.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
-      if (m) {
-        tintR = parseInt(m[1], 16);
-        tintG = parseInt(m[2], 16);
-        tintB = parseInt(m[3], 16);
+      if (computedBg) {
+        fallbackColor = computedBg;
+        const hexMatch = computedBg.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
+        if (hexMatch) {
+          tintR = parseInt(hexMatch[1], 16);
+          tintG = parseInt(hexMatch[2], 16);
+          tintB = parseInt(hexMatch[3], 16);
+        } else {
+          const rgbMatch = computedBg.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+          if (rgbMatch) {
+            tintR = parseInt(rgbMatch[1], 10);
+            tintG = parseInt(rgbMatch[2], 10);
+            tintB = parseInt(rgbMatch[3], 10);
+          }
+        }
       }
     }
 
@@ -2659,7 +2673,10 @@ var LiquidGlass = class _LiquidGlass {
     let backgroundDrawn = false;
 
     // 1. 优先采样用户本地自定义图片或视频背景（纯前端本地持久化，绝不上云）
-    const customMedia = typeof document !== 'undefined' && document.querySelector('.custom-bg-media');
+    let customMedia = typeof document !== 'undefined' && document.querySelector('.custom-bg-media');
+    if (customMedia && customMedia.closest && customMedia.closest('.earth-orbit-media-layer:not(.is-active)')) {
+      customMedia = null;
+    }
     if (customMedia) {
       try {
         if (customMedia.tagName === 'VIDEO') {
@@ -2677,6 +2694,40 @@ var LiquidGlass = class _LiquidGlass {
               dh
             );
             backgroundDrawn = true;
+          } else {
+            if (!customMedia.__lg_attached) {
+              customMedia.__lg_attached = true;
+              customMedia.addEventListener('loadeddata', () => {
+                this.markChanged();
+              }, { once: true });
+              customMedia.addEventListener('play', () => {
+                this.markChanged();
+              });
+              customMedia.addEventListener('playing', () => {
+                this.markChanged();
+              });
+            }
+            // 视频尚未缓冲就绪，寻找同图层已就绪的高清海报图进行即时折射采撷
+            const fallbackPoster = typeof document !== 'undefined' && (
+              (customMedia.parentElement && customMedia.parentElement.querySelector('img.custom-bg-media')) ||
+              document.querySelector('img.earth-orbit-poster-fallback') ||
+              document.querySelector('img.custom-bg-media')
+            );
+            if (fallbackPoster && fallbackPoster.complete && fallbackPoster.naturalWidth > 0 && fallbackPoster.naturalHeight > 0) {
+              this._drawMediaFitted(
+                ctx,
+                fallbackPoster,
+                fallbackPoster.naturalWidth,
+                fallbackPoster.naturalHeight,
+                fallbackPoster,
+                { width: vw, height: vh },
+                dx,
+                dy,
+                dw,
+                dh
+              );
+              backgroundDrawn = true;
+            }
           }
         } else if (customMedia.tagName === 'IMG') {
           if (customMedia.complete && customMedia.naturalWidth > 0 && customMedia.naturalHeight > 0) {
@@ -2693,6 +2744,11 @@ var LiquidGlass = class _LiquidGlass {
               dh
             );
             backgroundDrawn = true;
+          } else if (!customMedia.__lg_attached) {
+            customMedia.__lg_attached = true;
+            customMedia.addEventListener('load', () => {
+              this.markChanged();
+            }, { once: true });
           }
         }
       } catch (e) {
@@ -2716,8 +2772,8 @@ var LiquidGlass = class _LiquidGlass {
 
     // 3. 采样静态云山日光背景
     if (!backgroundDrawn && typeof document !== 'undefined') {
-      const bgType = document.documentElement.getAttribute('data-bg-type') || document.documentElement.getAttribute('data-bg-style');
-      if (bgType === 'clouds-static') {
+      const bgTypeVal = document.documentElement.getAttribute('data-bg-type') || document.documentElement.getAttribute('data-bg-style');
+      if (bgTypeVal === 'clouds-static') {
         if (!this._cachedCloudsImg && typeof Image !== 'undefined') {
           this._cachedCloudsImg = new Image();
           this._cachedCloudsImg.onload = () => {
@@ -2745,27 +2801,26 @@ var LiquidGlass = class _LiquidGlass {
       }
     }
 
-    if (!backgroundDrawn) {
-      const g1 = ctx.createLinearGradient(
-        (0 - cardVpX) * dpr, 0,
-        (vw - cardVpX) * dpr, 0
-      );
-      g1.addColorStop(0, `rgba(${tintR}, ${tintG}, ${tintB}, 0.15)`);
-      g1.addColorStop(0.65, `rgba(${tintR}, ${tintG}, ${tintB}, 0.04)`);
-      g1.addColorStop(1, `rgba(${tintR}, ${tintG}, ${tintB}, 0.08)`);
-      ctx.fillStyle = g1;
-      ctx.fillRect(0, 0, sampleRect.w, sampleRect.h);
+    // 4. 精确叠加与真实 DOM .atmosphere-shade 完全同步的无色中性黑光照与氛围遮罩
+    // 零色偏：采用纯黑 (0, 0, 0) 遮罩，不改变壁纸与动态背景原本的任何色彩
+    // 亮暗联动：与 CSS 变量 --bg-dim 保持精确同步，液态玻璃亮暗与页面背景一体化协同，绝不穿帮
+    const dimFactor = doc
+      ? (parseFloat(getComputedStyle(doc).getPropertyValue('--bg-dim')) || 1.0)
+      : 1.0;
 
-      const g2 = ctx.createLinearGradient(
-        0, (vh - cardVpY) * dpr,
-        0, (0 - cardVpY) * dpr
-      );
-      g2.addColorStop(0, `rgba(${tintR}, ${tintG}, ${tintB}, 0.25)`);
-      g2.addColorStop(0.55, `rgba(${tintR}, ${tintG}, ${tintB}, 0.0)`);
-      g2.addColorStop(1.0, `rgba(${tintR}, ${tintG}, ${tintB}, 0.0)`);
-      ctx.fillStyle = g2;
-      ctx.fillRect(0, 0, sampleRect.w, sampleRect.h);
-    }
+    const g1 = ctx.createLinearGradient(dx, 0, dx + dw, 0);
+    g1.addColorStop(0, `rgba(0, 0, 0, ${(0.38 * dimFactor).toFixed(4)})`);
+    g1.addColorStop(0.65, `rgba(0, 0, 0, ${(0.06 * dimFactor).toFixed(4)})`);
+    g1.addColorStop(1, `rgba(0, 0, 0, ${(0.18 * dimFactor).toFixed(4)})`);
+    ctx.fillStyle = g1;
+    ctx.fillRect(0, 0, sampleRect.w, sampleRect.h);
+
+    const g2 = ctx.createLinearGradient(0, dy + dh, 0, dy);
+    g2.addColorStop(0, `rgba(0, 0, 0, ${(0.65 * dimFactor).toFixed(4)})`);
+    g2.addColorStop(0.55, `rgba(0, 0, 0, 0.0)`);
+    g2.addColorStop(1.0, `rgba(0, 0, 0, 0.0)`);
+    ctx.fillStyle = g2;
+    ctx.fillRect(0, 0, sampleRect.w, sampleRect.h);
   }
   _glassHasDynamicContributors(currentGlass, sampleRect, rootRect, dpr) {
     if (this._childHasDynamicContent(currentGlass)) return true;

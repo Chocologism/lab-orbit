@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   isTalkEmail,
   isConferenceEmail,
+  isNoticeEmail,
   detectScheduleType,
   parseTalkMetadataLocally,
   parseConferenceMetadataLocally,
@@ -10,11 +11,11 @@ import {
 } from './talkEmail'
 
 describe('isTalkEmail', () => {
-  it('identifies the youth forum announcement email', () => {
+  it('identifies the PMO youth forum announcement email', () => {
     const email = {
-      subject: '青年论坛第181期 时间2026年9月18日 上午10:30 地点5-516会议室',
-      snippet: '各位老师、同学： 青年论坛第181期将于2026年9月18日（周五）上午 10：30 在5-516 会议室举办...',
-      body_text: '各位老师、同学： 青年论坛第181期将于2026年9月18日（周五）上午 10：30 在5-516 会议室举办，本次邀请到国家天文台的陈云博士，做题为《Probing Dynamical Dark Energy: Evidence & Tensions》的报告。报告摘要与陈云博士的个人简介详见以下海报，欢迎各位老师和同学的参加！！！ 耿'
+      subject: '紫台青促会第181期青年论坛 时间2026年9月18日 上午10:30 地点5-516会议室',
+      snippet: '各位老师、同学： 紫台青年论坛第181期将于2026年9月18日（周五）上午 10：30 在紫台 5-516 会议室举办...',
+      body_text: '各位老师、同学： 紫台青年论坛第181期将于2026年9月18日（周五）上午 10：30 在紫台 5-516 会议室举办，本次邀请到中国科学院国家天文台的陈云博士，做题为《Probing Dynamical Dark Energy: Evidence & Tensions》的报告。报告摘要与陈云博士的个人简介详见以下海报，欢迎各位老师和同学的参加！！！ 耿'
     }
     expect(isTalkEmail(email)).toBe(true)
   })
@@ -46,8 +47,8 @@ describe('isTalkEmail', () => {
 
 describe('parseTalkMetadataLocally', () => {
   it('extracts all talk metadata correctly from the forum email', () => {
-    const subject = '青年论坛第181期 时间2026年9月18日 上午10:30 地点5-516会议室'
-    const body = '各位老师、同学： 青年论坛第181期将于2026年9月18日（周五）上午 10：30 在5-516 会议室举办，本次邀请到国家天文台的陈云博士，做题为《Probing Dynamical Dark Energy: Evidence & Tensions》的报告。报告摘要与陈云博士的个人简介详见以下海报，欢迎各位老师和同学的参加！！！ 耿'
+    const subject = '紫台青促会第181期青年论坛 时间2026年9月18日 上午10:30 地点5-516会议室'
+    const body = '各位老师、同学： 紫台青年论坛第181期将于2026年9月18日（周五）上午 10：30 在紫台 5-516 会议室举办，本次邀请到中国科学院国家天文台的陈云博士，做题为《Probing Dynamical Dark Energy: Evidence & Tensions》的报告。报告摘要与陈云博士的个人简介详见以下海报，欢迎各位老师和同学的参加！！！ 耿'
     const text = `${subject}\n${body}`
 
     const parsed = parseTalkMetadataLocally(text, subject)
@@ -55,17 +56,17 @@ describe('parseTalkMetadataLocally', () => {
     expect(parsed.date).toBe('2026-09-18')
     expect(parsed.time).toBe('10:30')
     expect(parsed.speaker).toBe('陈云 博士')
-    expect(parsed.location).toBe('5-516 会议室')
+    expect(parsed.location).toBe('紫台 5-516 会议室')
     expect(parsed.talks).toHaveLength(1)
     expect(parsed.talks[0].title).toBe('Probing Dynamical Dark Energy: Evidence & Tensions')
   })
 
   it('correctly identifies and extracts multiple talks with 报告一/报告二', () => {
-    const subject = '学术报告通知：两场学术前沿报告'
+    const subject = '紫台学术报告通知：两场学术前沿报告'
     const body = `各位老师同学：
-本周五在实验楼 5-516 会议室举办两场学术报告。
+本周五在紫台仙林园区 5-516 会议室举办两场学术报告。
 日期：2026年9月25日
-地点：实验楼 5-516 会议室
+地点：紫台仙林 5-516 会议室
 
 报告一：
 题目：FAST脉冲星偏振与磁层物理
@@ -89,14 +90,14 @@ describe('parseTalkMetadataLocally', () => {
     expect(parsed.talks[0].speaker).toBe('张伟 博士')
     expect(parsed.talks[0].time).toBe('14:00')
     expect(parsed.talks[0].date).toBe('2026-09-25')
-    expect(parsed.talks[0].location).toBe('实验楼 5-516 会议室')
+    expect(parsed.talks[0].location).toBe('紫台仙林 5-516 会议室')
 
     // Talk 2
     expect(parsed.talks[1].title).toBe('高红移尘埃连续谱与星系演化')
     expect(parsed.talks[1].speaker).toBe('王芳 教授')
     expect(parsed.talks[1].time).toBe('15:15')
     expect(parsed.talks[1].date).toBe('2026-09-25')
-    expect(parsed.talks[1].location).toBe('实验楼 5-516 会议室')
+    expect(parsed.talks[1].location).toBe('紫台仙林 5-516 会议室')
 
     // Top-level backwards compatibility matches talk 1
     expect(parsed.title).toBe('FAST脉冲星偏振与磁层物理')
@@ -200,13 +201,21 @@ describe('applyInstitutionLocationPrefix', () => {
     expect(applyInstitutionLocationPrefix('南大天文楼302会议室', context)).toBe('南大 天文楼302会议室')
   })
 
+  it('prefixes "紫台" for PMO talk without duplication', () => {
+    const context = '紫台青促会第181期青年论坛'
+    expect(applyInstitutionLocationPrefix('5-516会议室', context)).toBe('紫台5-516会议室')
+    expect(applyInstitutionLocationPrefix('紫台 5-516 会议室', context)).toBe('紫台 5-516 会议室')
+    expect(applyInstitutionLocationPrefix('紫台仙林 5-516 会议室', context)).toBe('紫台仙林 5-516 会议室')
+    expect(applyInstitutionLocationPrefix('紫金山天文台大平房', context)).toBe('紫台大平房')
+  })
+
   it('handles dual Chinese and English location and applies prefix', () => {
     const context = '南京大学天文与空间科学学院报告通知'
     const dualLoc = '天文楼302会议室 (Room 302, Astronomy Building)'
     expect(applyInstitutionLocationPrefix(dualLoc, context)).toBe('南大 天文楼302会议室')
   })
 
-  it('leaves non-NJU location unchanged', () => {
+  it('leaves non-NJU and non-PMO location unchanged', () => {
     const context = '清华大学物理系前沿论坛'
     expect(applyInstitutionLocationPrefix('理科楼郑裕彤讲堂', context)).toBe('理科楼郑裕彤讲堂')
   })
@@ -215,8 +224,8 @@ describe('applyInstitutionLocationPrefix', () => {
 describe('isConferenceEmail and detectScheduleType', () => {
   it('identifies annual meeting conference announcement', () => {
     const email = {
-      subject: '关于召开2026年现代天文学术年会会议的通知（第一轮）',
-      body_text: '由中国天文学会学术交流委员会主办的2026年现代天文学术年会定于2026年10月16日-19日在河南省开封市举行。会议入住开封大河希尔顿逸林酒店。摘要提交截止：2026年9月1日，早鸟优惠截止：2026年9月15日，报名截止时间：2026年9月30日。会议官网：https://astro2026.example.org 注册链接：https://astro2026.example.org/reg'
+      subject: '关于召开2026年引力透镜年会会议的通知（第一轮）',
+      body_text: '由中国天文学会引力透镜专业委员会主办的2026年引力透镜年会定于2026年10月16日-19日在河南省开封市举行。会议入住开封大河希尔顿逸林酒店。摘要提交截止：2026年9月1日，早鸟优惠截止：2026年9月15日，报名截止时间：2026年9月30日。会议官网：https://gl2026.example.org 注册链接：https://gl2026.example.org/reg'
     }
     expect(isConferenceEmail(email)).toBe(true)
     expect(detectScheduleType(email)).toBe('conference')
@@ -225,7 +234,7 @@ describe('isConferenceEmail and detectScheduleType', () => {
   it('identifies summer school announcement', () => {
     const email = {
       subject: '2026年高能天体物理暑期学校报名通知',
-      body_text: '为培养青年科研学者，研究所将于2026年7月10日至15日举办暑期学校...'
+      body_text: '为培养青年科研学者，紫金山天文台将于2026年7月10日至15日举办暑期学校...'
     }
     expect(isConferenceEmail(email)).toBe(true)
     expect(detectScheduleType(email)).toBe('conference')
@@ -243,28 +252,92 @@ describe('isConferenceEmail and detectScheduleType', () => {
 
 describe('parseConferenceMetadataLocally', () => {
   it('extracts conference metadata including dates, deadlines, city and urls', () => {
-    const subject = '【会议通知】2026年现代天文学术年会会议'
+    const subject = '【会议通知】2026年引力透镜年会会议'
     const body = `各位老师同学：
-由中国天文学会学术交流委员会主办的2026年现代天文学术年会定于2026年10月16日-19日在河南省开封市举行。
+由中国天文学会引力透镜专业委员会主办的2026年引力透镜年会定于2026年10月16日-19日在河南省开封市举行。
 入住酒店：开封大河希尔顿逸林酒店
 摘要提交截止：2026年09月01日
 早鸟优惠截止：2026年09月15日
 正式注册截止时间：2026年09月30日
-会议官网：https://astro2026.example.org
-报名入口：https://astro2026.example.org/register`
+会议官网：https://gl2026.example.org
+报名入口：https://gl2026.example.org/register`
 
     const parsed = parseConferenceMetadataLocally(body, subject)
-    expect(parsed.title).toBe('2026年现代天文学术年会会议')
+    expect(parsed.title).toBe('2026年引力透镜年会会议')
     expect(parsed.sub_type).toBe('年会')
     expect(parsed.date).toBe('2026-10-16')
     expect(parsed.end_date).toBe('2026-10-19')
     expect(parsed.city).toBe('开封')
     expect(parsed.location).toBe('开封大河希尔顿逸林酒店')
-    expect(parsed.organizer).toBe('中国天文学会学术交流委员会')
+    expect(parsed.organizer).toBe('中国天文学会引力透镜专业委员会')
     expect(parsed.abstract_deadline).toBe('2026-09-01')
     expect(parsed.early_bird_deadline).toBe('2026-09-15')
     expect(parsed.registration_deadline).toBe('2026-09-30')
-    expect(parsed.website_url).toBe('https://astro2026.example.org')
-    expect(parsed.registration_url).toBe('https://astro2026.example.org/register')
+    expect(parsed.website_url).toBe('https://gl2026.example.org')
+    expect(parsed.registration_url).toBe('https://gl2026.example.org/register')
+  })
+
+  it('extracts English international conference metadata with dates and abstract start/deadline', () => {
+    const text = `
+International Conference on Gravitational Lensing and Cosmology
+Dates: 11-15 January 2027
+Location: Tsung-Dao Lee Institute, Shanghai
+Key Dates:
+Call for abstracts - 2026, September 22
+Abstract submission deadline - 2026, November 15
+Registration deadline - 2026, December 20
+Website: https://web.gravity.sjtu.edu.cn/event/13/
+`
+    const parsed = parseConferenceMetadataLocally(text, 'International Conference on Gravitational Lensing and Cosmology')
+    expect(parsed.sub_type).toBe('国际会议')
+    expect(parsed.date).toBe('2027-01-11')
+    expect(parsed.end_date).toBe('2027-01-15')
+    expect(parsed.city).toBe('上海')
+    expect(parsed.abstract_start_date).toBe('2026-09-22')
+    expect(parsed.abstract_deadline).toBe('2026-11-15')
+    expect(parsed.registration_deadline).toBe('2026-12-20')
+  })
+
+  it('extracts Chinese conference abstract start and deadline', () => {
+    const text = `
+2026年黑洞与致密天体前沿研讨会
+会议时间：2026年11月10日至13日
+摘要提交开始：2026年9月1日
+摘要提交截止：2026年10月15日
+地点：南京大学天文楼
+`
+    const parsed = parseConferenceMetadataLocally(text)
+    expect(parsed.abstract_start_date).toBe('2026-09-01')
+    expect(parsed.abstract_deadline).toBe('2026-10-15')
   })
 })
+
+describe('isNoticeEmail', () => {
+  it('identifies graduate student department notices', () => {
+    const email = {
+      from: '紫台研究生部 <yjsb@pmo.ac.cn>',
+      subject: '关于《天文与空间科学学院硕士分流退出机制实施细则》的意见征集',
+      body_text: '各位导师、同学：现将《实施细则》征求意见稿予以公示...'
+    }
+    expect(isNoticeEmail(email)).toBe(true)
+  })
+
+  it('identifies university administrative and affairs notices', () => {
+    const email = {
+      from: '教务处 <jwc@nju.edu.cn>',
+      subject: '2026学年秋季学期选课与学籍注册通知',
+      body_text: '请各系所按时完成选课工作。'
+    }
+    expect(isNoticeEmail(email)).toBe(true)
+  })
+
+  it('does not falsely trigger on standard private emails without notice keywords', () => {
+    const email = {
+      from: 'Alice <alice@example.org>',
+      subject: 'Weekly project check-in',
+      body_text: 'Hi, here are the weekly updates.'
+    }
+    expect(isNoticeEmail(email)).toBe(false)
+  })
+})
+

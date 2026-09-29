@@ -10,20 +10,73 @@ export function extractArxivId(input: string): string | null {
   return null;
 }
 
+export function extractAllArxivIds(input: string): string[] {
+  if (!input) return [];
+  const clean = String(input).trim();
+  const ids: string[] = [];
+  const seen = new Set<string>();
+
+  const modernRegex = /(?:arxiv(?:\.org\/(?:abs|pdf)\/|:)|(?<=[^\w.]|^))(\d{4}\.\d{4,5}(?:v\d+)?)(?!\d)(?:\.pdf)?/gi;
+  for (const match of clean.matchAll(modernRegex)) {
+    const id = match[1];
+    if (!id) continue;
+    const base = id.replace(/v\d+$/, '').toLowerCase();
+    if (!seen.has(base)) {
+      seen.add(base);
+      ids.push(id);
+    }
+  }
+
+  const oldRegex = /(?:arxiv(?:\.org\/(?:abs|pdf)\/|:)|(?<=[^\w.]|^))([a-zA-Z\-]+(?:\.[a-zA-Z]+)?\/\d{7})(?:\.pdf)?/gi;
+  for (const match of clean.matchAll(oldRegex)) {
+    const id = match[1];
+    if (!id) continue;
+    const base = id.toLowerCase();
+    if (!seen.has(base)) {
+      seen.add(base);
+      ids.push(id);
+    }
+  }
+
+  return ids;
+}
+
 export function extractDoi(input: string): string | null {
   if (!input) return null;
   const match = input.match(/(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)/);
   return match ? match[1].replace(/[.,;)]+$/, '') : null;
 }
 
-function decodeHtmlEntities(str: string): string {
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x2F;/g, '/');
+export function decodeHtmlEntities(str: string): string {
+  if (!str) return '';
+  let res = String(str);
+  for (let i = 0; i < 2; i++) {
+    const prev = res;
+    res = res
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&ndash;/g, '–')
+      .replace(/&mdash;/g, '—')
+      .replace(/&lsquo;/g, '‘')
+      .replace(/&rsquo;/g, '’')
+      .replace(/&ldquo;/g, '“')
+      .replace(/&rdquo;/g, '”')
+      .replace(/&hellip;/g, '…')
+      .replace(/&prime;/g, '′')
+      .replace(/&Prime;/g, '″')
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+        try { return String.fromCodePoint(parseInt(hex, 16)); } catch { return _; }
+      })
+      .replace(/&#([0-9]+);/g, (_, dec) => {
+        try { return String.fromCodePoint(parseInt(dec, 10)); } catch { return _; }
+      })
+      .replace(/&amp;/g, '&');
+    if (res === prev) break;
+  }
+  return res;
 }
 
 export function parseArxivAbsHtml(html: string, arxivId: string) {
@@ -123,37 +176,40 @@ export async function fetchArxivMetadata(arxivId: string) {
         return meta;
       }
     }
-  } catch (err) {
-    console.warn(`Direct arXiv abs HTML fetch failed for ${cleanId}, falling back to API:`, err);
+  } catch (e) {
+    console.warn('Scraping arxiv abs failed, falling back to API query:', e);
   }
 
-  // 2. 回退机制：从 export.arxiv.org API 查询
-  const url = `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(cleanId)}`;
-  const res = await fetch(url, { headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@lab.edu)' } });
-  if (!res.ok) throw new Error(`arXiv API 返回 HTTP ${res.status}`);
+  // 2. 回退机制：使用 arXiv 官方 export API
+  const url = `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(cleanId)}&max_results=1`;
+  const res = await fetch(url, { headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@pmo.ac.cn)' } });
+  if (!res.ok) {
+    if (res.status === 429) {
+      throw new Error('arXiv 服务器访问频次受限 (HTTP 429)，请稍候片刻重试');
+    }
+    throw new Error(`arXiv API 返回 HTTP ${res.status}`);
+  }
   const text = await res.text();
 
-  const titleMatch = text.match(/<title>([\s\S]*?)<\/title>/g);
-  const title = titleMatch && titleMatch[1] ? decodeHtmlEntities(titleMatch[1].replace(/<\/?title>/g, '').replace(/\s+/g, ' ').trim()) : `arXiv:${arxivId}`;
-
-  const summaryMatch = text.match(/<summary>([\s\S]*?)<\/summary>/);
-  const abstract = summaryMatch ? decodeHtmlEntities(summaryMatch[1].replace(/\s+/g, ' ').trim()) : '';
-
-  const publishedMatch = text.match(/<published>([\s\S]*?)<\/published>/);
-  const publishedDate = publishedMatch ? publishedMatch[1].slice(0, 10) : '';
-
-  const categoryMatch = text.match(/<arxiv:primary_category[\s\S]*?term="([^"]+)"/);
-  const primaryCategory = categoryMatch ? categoryMatch[1].trim() : '';
+  const titleMatch = text.match(/<entry>[\s\S]*?<title>([\s\S]*?)<\/title>/);
+  const summaryMatch = text.match(/<entry>[\s\S]*?<summary>([\s\S]*?)<\/summary>/);
+  const publishedMatch = text.match(/<entry>[\s\S]*?<published>([\s\S]*?)<\/published>/);
+  const categoryMatch = text.match(/<entry>[\s\S]*?<arxiv:primary_category[\s\S]*?term="([^"]+)"/);
 
   const authorMatches = Array.from(text.matchAll(/<author>\s*<name>([\s\S]*?)<\/name>/g));
-  const authors = authorMatches.map(m => decodeHtmlEntities(m[1].trim()));
+  const authors = authorMatches.map(m => m[1].trim());
+
+  let title = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : `arXiv:${arxivId}`;
+  let abstract = summaryMatch ? summaryMatch[1].replace(/\s+/g, ' ').trim() : '';
+  let published = publishedMatch ? publishedMatch[1].slice(0, 10) : '';
+  let primaryCategory = categoryMatch ? categoryMatch[1] : 'astro-ph';
 
   return {
     arxiv_id: arxivId,
     title,
     authors,
     abstract,
-    published_date: publishedDate,
+    published_date: published,
     primary_category: primaryCategory,
     pdf_url: `https://arxiv.org/pdf/${arxivId}.pdf`,
     source_url: `https://arxiv.org/abs/${arxivId}`,
@@ -168,7 +224,7 @@ export async function fetchDoiMetadata(doi: string) {
   // 若匹配到对应 arXiv 预印本，则能直接获得标准 arXiv 编号、摘要、主分类及免翻墙的 open-access PDF 链接
   try {
     const arxivUrl = `https://export.arxiv.org/api/query?search_query=doi:${encodeURIComponent(cleanDoi)}&max_results=1`;
-    const res = await fetch(arxivUrl, { headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@lab.edu)' } });
+    const res = await fetch(arxivUrl, { headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@pmo.ac.cn)' } });
     if (res.ok) {
       const text = await res.text();
       const entryMatch = text.match(/<entry>[\s\S]*?<\/entry>/);
@@ -193,7 +249,7 @@ export async function fetchDoiMetadata(doi: string) {
             let journal = '';
             try {
               const crossrefRes = await fetch(`https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}`, {
-                headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@lab.edu)' }
+                headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@pmo.ac.cn)' }
               });
               if (crossrefRes.ok) {
                 const crData: any = await crossrefRes.json();
@@ -223,7 +279,7 @@ export async function fetchDoiMetadata(doi: string) {
 
   // 2. 回退机制：从 Crossref 抓取基础元数据
   const url = `https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}`;
-  const res = await fetch(url, { headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@lab.edu)' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'LabOrbit/1.0 (mailto:admin@pmo.ac.cn)' } });
   if (!res.ok) throw new Error(`Crossref API 返回 HTTP ${res.status}`);
   const data: any = await res.json();
   const msg = data.message || {};
@@ -550,6 +606,33 @@ export async function ensureArxivSeminarIdColumn(db: D1Database): Promise<void> 
   }
 }
 
+export async function ensureArxivTranslationColumns(db: D1Database): Promise<void> {
+  try {
+    await db.prepare("ALTER TABLE arxiv_papers ADD COLUMN title_zh TEXT DEFAULT ''").run();
+  } catch (e) {}
+  try {
+    await db.prepare("ALTER TABLE arxiv_papers ADD COLUMN abstract_zh TEXT DEFAULT ''").run();
+  } catch (e) {}
+  try {
+    await db.prepare('ALTER TABLE arxiv_papers ADD COLUMN translated_by_id INTEGER').run();
+  } catch (e) {}
+  try {
+    await db.prepare('ALTER TABLE arxiv_papers ADD COLUMN translated_at DATETIME').run();
+  } catch (e) {}
+}
+
+export async function ensureUserZoteroColumns(db: D1Database): Promise<void> {
+  try {
+    await db.prepare("ALTER TABLE users ADD COLUMN zotero_user_id TEXT DEFAULT ''").run();
+  } catch (e) {}
+  try {
+    await db.prepare("ALTER TABLE users ADD COLUMN zotero_api_key TEXT DEFAULT ''").run();
+  } catch (e) {}
+  try {
+    await db.prepare("ALTER TABLE users ADD COLUMN zotero_default_collection TEXT DEFAULT ''").run();
+  } catch (e) {}
+}
+
 /**
  * 归档组会 arXiv 分享文献至文献库 (library_papers) 与文献推荐流 (arxiv_papers)：
  * 1. 自动确保 library_papers.seminar_id 与 arxiv_papers.seminar_id 字段存在；
@@ -572,10 +655,9 @@ export async function archiveSeminarPresentationArxiv(
   await ensureLibrarySeminarIdColumn(db);
   await ensureArxivSeminarIdColumn(db);
 
-  const arxivId = extractArxivId(inputStr);
-  if (!arxivId) return null;
-
-  const cleanId = arxivId.replace(/v\d+$/, '');
+  const rawIds = extractAllArxivIds(inputStr);
+  const arxivIds = rawIds.length > 0 ? rawIds : [extractArxivId(inputStr)].filter(Boolean) as string[];
+  if (!arxivIds.length) return null;
 
   // 解析实际推荐人/分享人 ID
   let recommenderId = presenterId ? Number(presenterId) : 0;
@@ -591,135 +673,332 @@ export async function archiveSeminarPresentationArxiv(
     recommenderId = firstUser?.id || 1;
   }
 
-  // 查重：检索文献库中是否已有此条目
-  const existingLib = await db.prepare(
-    `SELECT id, arxiv_id, seminar_id, from_seminar FROM library_papers
-     WHERE arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ? LIMIT 1`
-  ).bind(cleanId, arxivId, `arXiv:${cleanId}`).first<{ id: number; arxiv_id: string; seminar_id: number | null; from_seminar: number }>();
+  let firstLibId = 0;
+  for (const arxivId of arxivIds) {
+    const cleanId = arxivId.replace(/v\d+$/, '');
 
-  let libPaperId: number;
-  if (existingLib) {
-    await db.prepare(
-      `UPDATE library_papers
-       SET from_seminar = 1, seminar_id = COALESCE(seminar_id, ?)
-       WHERE id = ?`
-    ).bind(seminarId, existingLib.id).run();
-    libPaperId = existingLib.id;
-  } else {
-    libPaperId = 0;
-  }
+    // 查重：检索文献库中是否已有此条目
+    const existingLib = await db.prepare(
+      `SELECT id, arxiv_id, seminar_id, from_seminar FROM library_papers
+       WHERE arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ? LIMIT 1`
+    ).bind(cleanId, arxivId, `arXiv:${cleanId}`).first<{ id: number; arxiv_id: string; seminar_id: number | null; from_seminar: number }>();
 
-  // 检索 arxiv_papers 是否已有缓存
-  const existingArxiv = await db.prepare(
-    `SELECT id, arxiv_id, seminar_id, recommend_comment, title, authors, abstract, primary_category, published_date, pdf_url, journal, source_url
-     FROM arxiv_papers WHERE arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ? LIMIT 1`
-  ).bind(cleanId, arxivId, `arXiv:${cleanId}`).first<any>();
-
-  let meta: any = null;
-  if (existingArxiv) {
-    let authorsList: string[] = [];
-    try {
-      authorsList = typeof existingArxiv.authors === 'string' ? JSON.parse(existingArxiv.authors) : existingArxiv.authors;
-    } catch {
-      authorsList = [existingArxiv.authors || ''];
+    let libPaperId: number;
+    if (existingLib) {
+      await db.prepare(
+        `UPDATE library_papers
+         SET from_seminar = 1, seminar_id = COALESCE(seminar_id, ?)
+         WHERE id = ?`
+      ).bind(seminarId, existingLib.id).run();
+      libPaperId = existingLib.id;
+    } else {
+      libPaperId = 0;
     }
-    meta = {
-      arxiv_id: cleanId,
-      title: existingArxiv.title,
-      authors: authorsList,
-      abstract: existingArxiv.abstract || '',
-      primary_category: existingArxiv.primary_category || 'astro-ph',
-      published_date: existingArxiv.published_date || '',
-      pdf_url: existingArxiv.pdf_url || `https://arxiv.org/pdf/${cleanId}.pdf`,
-      source_url: existingArxiv.source_url || `https://arxiv.org/abs/${cleanId}`,
-      journal: existingArxiv.journal || ''
-    };
-  } else {
-    try {
-      meta = await fetchArxivMetadata(cleanId);
-    } catch (err) {
-      console.warn('fetchArxivMetadata failed for presentation share, creating pending record:', err);
+
+    // 检索 arxiv_papers 是否已有缓存
+    const existingArxiv = await db.prepare(
+      `SELECT id, arxiv_id, seminar_id, recommend_comment, title, authors, abstract, primary_category, published_date, pdf_url, journal, source_url
+       FROM arxiv_papers WHERE arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ? LIMIT 1`
+    ).bind(cleanId, arxivId, `arXiv:${cleanId}`).first<any>();
+
+    let meta: any = null;
+    if (existingArxiv) {
+      let authorsList: string[] = [];
+      try {
+        authorsList = typeof existingArxiv.authors === 'string' ? JSON.parse(existingArxiv.authors) : existingArxiv.authors;
+      } catch {
+        authorsList = [existingArxiv.authors || ''];
+      }
       meta = {
         arxiv_id: cleanId,
-        title: `arXiv:${cleanId}`,
-        authors: [],
-        abstract: '',
-        primary_category: 'astro-ph',
-        published_date: '',
-        pdf_url: `https://arxiv.org/pdf/${cleanId}.pdf`,
-        source_url: `https://arxiv.org/abs/${cleanId}`,
-        journal: '',
-        metadata_status: 'pending'
+        title: existingArxiv.title,
+        authors: authorsList,
+        abstract: existingArxiv.abstract || '',
+        primary_category: existingArxiv.primary_category || 'astro-ph',
+        published_date: existingArxiv.published_date || '',
+        pdf_url: existingArxiv.pdf_url || `https://arxiv.org/pdf/${cleanId}.pdf`,
+        source_url: existingArxiv.source_url || `https://arxiv.org/abs/${cleanId}`,
+        journal: existingArxiv.journal || ''
       };
+    } else {
+      try {
+        meta = await fetchArxivMetadata(cleanId);
+      } catch (err) {
+        console.warn('fetchArxivMetadata failed for presentation share, creating pending record:', err);
+        meta = {
+          arxiv_id: cleanId,
+          title: `arXiv:${cleanId}`,
+          authors: [],
+          abstract: '',
+          primary_category: 'astro-ph',
+          published_date: '',
+          pdf_url: `https://arxiv.org/pdf/${cleanId}.pdf`,
+          source_url: `https://arxiv.org/abs/${cleanId}`,
+          journal: '',
+          metadata_status: 'pending'
+        };
+      }
+    }
+
+    const authorsJson = JSON.stringify(meta.authors || []);
+    const status = meta.metadata_status || 'ready';
+
+    if (!existingLib) {
+      const insLib = await db.prepare(
+        `INSERT INTO library_papers
+         (arxiv_id, title, authors, abstract, primary_category, published_date, pdf_url, source_url, journal, metadata_status, from_recommendation, from_seminar, seminar_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, datetime('now'))`
+      ).bind(
+        cleanId,
+        meta.title,
+        authorsJson,
+        meta.abstract || '',
+        meta.primary_category || 'astro-ph',
+        meta.published_date || '',
+        meta.pdf_url || `https://arxiv.org/pdf/${cleanId}.pdf`,
+        meta.source_url || `https://arxiv.org/abs/${cleanId}`,
+        meta.journal || '',
+        status,
+        seminarId
+      ).run();
+      libPaperId = insLib.meta.last_row_id as number;
+    }
+
+    if (!firstLibId) firstLibId = libPaperId;
+
+    // 同步更新或新增至 arxiv_papers 推荐流
+    if (existingArxiv) {
+      await db.prepare(
+        `UPDATE arxiv_papers
+         SET seminar_id = ?,
+             recommend_comment = CASE 
+               WHEN recommend_comment IS NULL OR TRIM(recommend_comment) = '' THEN '组会 arXiv 分享'
+               ELSE recommend_comment
+             END,
+             recommended_by_id = CASE
+               WHEN recommended_by_id IS NULL OR recommended_by_id <= 0 THEN ?
+               ELSE recommended_by_id
+             END
+         WHERE id = ?`
+      ).bind(seminarId, recommenderId, existingArxiv.id).run();
+    } else {
+      await db.prepare(
+        `INSERT OR IGNORE INTO arxiv_papers
+         (arxiv_id, title, journal, source_url, authors, abstract, primary_category, published_date, pdf_url, recommended_by_id, recommend_comment, is_pinned, seminar_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '组会 arXiv 分享', 0, ?, datetime('now'))`
+      ).bind(
+        cleanId,
+        meta.title,
+        meta.journal || '',
+        meta.source_url || `https://arxiv.org/abs/${cleanId}`,
+        authorsJson,
+        meta.abstract || '',
+        meta.primary_category || 'astro-ph',
+        meta.published_date || '',
+        meta.pdf_url || `https://arxiv.org/pdf/${cleanId}.pdf`,
+        recommenderId,
+        seminarId
+      ).run().catch(() => {});
+
+      // 补充兜底更新 seminar_id
+      await db.prepare(
+        `UPDATE arxiv_papers
+         SET seminar_id = ?
+         WHERE (arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ?) AND seminar_id IS NULL`
+      ).bind(seminarId, cleanId, arxivId, `arXiv:${cleanId}`).run().catch(() => {});
     }
   }
 
-  const authorsJson = JSON.stringify(meta.authors || []);
-  const status = meta.metadata_status || 'ready';
-
-  if (!existingLib) {
-    const insLib = await db.prepare(
-      `INSERT INTO library_papers
-       (arxiv_id, title, authors, abstract, primary_category, published_date, pdf_url, source_url, journal, metadata_status, from_recommendation, from_seminar, seminar_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, datetime('now'))`
-    ).bind(
-      cleanId,
-      meta.title,
-      authorsJson,
-      meta.abstract || '',
-      meta.primary_category || 'astro-ph',
-      meta.published_date || '',
-      meta.pdf_url || `https://arxiv.org/pdf/${cleanId}.pdf`,
-      meta.source_url || `https://arxiv.org/abs/${cleanId}`,
-      meta.journal || '',
-      status,
-      seminarId
-    ).run();
-    libPaperId = insLib.meta.last_row_id as number;
-  }
-
-  // 同步更新或新增至 arxiv_papers 推荐流
-  if (existingArxiv) {
-    await db.prepare(
-      `UPDATE arxiv_papers
-       SET seminar_id = ?,
-           recommend_comment = CASE 
-             WHEN recommend_comment IS NULL OR TRIM(recommend_comment) = '' THEN '组会 arXiv 分享'
-             ELSE recommend_comment
-           END,
-           recommended_by_id = CASE
-             WHEN recommended_by_id IS NULL OR recommended_by_id <= 0 THEN ?
-             ELSE recommended_by_id
-           END
-       WHERE id = ?`
-    ).bind(seminarId, recommenderId, existingArxiv.id).run();
-  } else {
-    await db.prepare(
-      `INSERT OR IGNORE INTO arxiv_papers
-       (arxiv_id, title, journal, source_url, authors, abstract, primary_category, published_date, pdf_url, recommended_by_id, recommend_comment, is_pinned, seminar_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '组会 arXiv 分享', 0, ?, datetime('now'))`
-    ).bind(
-      cleanId,
-      meta.title,
-      meta.journal || '',
-      meta.source_url || `https://arxiv.org/abs/${cleanId}`,
-      authorsJson,
-      meta.abstract || '',
-      meta.primary_category || 'astro-ph',
-      meta.published_date || '',
-      meta.pdf_url || `https://arxiv.org/pdf/${cleanId}.pdf`,
-      recommenderId,
-      seminarId
-    ).run().catch(() => {});
-
-    // 补充兜底更新 seminar_id
-    await db.prepare(
-      `UPDATE arxiv_papers
-       SET seminar_id = ?
-       WHERE (arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ?) AND seminar_id IS NULL`
-    ).bind(seminarId, cleanId, arxivId, `arXiv:${cleanId}`).run().catch(() => {});
-  }
-
-  return { id: libPaperId, arxiv_id: cleanId };
+  return { id: firstLibId, arxiv_id: arxivIds.join(', ') };
 }
 
+/**
+ * 组会 arXiv 分享删除或更换时，同步从文献推荐流 (arxiv_papers) 与文献库 (library_papers) 中删除或解绑关联文献：
+ * 1. 规范化提取待清理的 arXiv IDs；
+ * 2. 检查本场组会是否仍有其他 presentation 使用该文献，若有则跳过；
+ * 3. 检查是否有其他组会使用该文献，若有则将关联转交给其他组会，保留文献；
+ * 4. 对于 arxiv_papers：
+ *    - 若属于组会自动生成的推荐（推荐理由为空或为“组会 arXiv 分享”/“组会关联文献”，且无独立推荐库源绑定），彻底物理级联删除；
+ *    - 若属于组员独立推荐的文献，则保留推荐条目，仅将 seminar_id 置空；
+ * 5. 对于 library_papers：
+ *    - 若仅由组会归档生成（from_recommendation 为 0 且无独立推荐源绑定），彻底物理级联删除；
+ *    - 若同时属于文献库独立推荐（from_recommendation 为 1），则保留文献，仅将 from_seminar 置为 0 并将 seminar_id 置空；
+ * 6. 若文献在推荐流与文献库中均已被完全删除，同步清理 favorites 中的对应书签。
+ */
+export async function unarchiveSeminarPresentationArxiv(
+  db: D1Database,
+  removedArxivStrOrIds: string | string[] | null | undefined,
+  seminarId: number
+): Promise<void> {
+  if (!removedArxivStrOrIds) return;
+
+  await ensureLibrarySeminarIdColumn(db);
+  await ensureArxivSeminarIdColumn(db);
+
+  const rawList = Array.isArray(removedArxivStrOrIds) ? removedArxivStrOrIds : [removedArxivStrOrIds];
+  const targetIds: string[] = [];
+  const seenTargets = new Set<string>();
+
+  for (const item of rawList) {
+    if (!item) continue;
+    const str = String(item).trim();
+    if (!str) continue;
+    const extracted = extractAllArxivIds(str);
+    const ids = extracted.length > 0 ? extracted : [extractArxivId(str) || str].filter(Boolean);
+    for (const id of ids) {
+      const clean = id.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase();
+      if (clean && !seenTargets.has(clean)) {
+        seenTargets.add(clean);
+        targetIds.push(id.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim());
+      }
+    }
+  }
+
+  if (targetIds.length === 0) return;
+
+  // 1. 获取本场组会中现存的所有 arXiv ID
+  const { results: currentSeminarPres } = await db.prepare(
+    'SELECT arxiv_id FROM seminar_presentations WHERE seminar_id = ?'
+  ).bind(seminarId).all<{ arxiv_id: string }>();
+
+  const currentSeminarIds = new Set<string>();
+  for (const p of (currentSeminarPres || [])) {
+    if (p.arxiv_id) {
+      const extracted = extractAllArxivIds(p.arxiv_id);
+      const ids = extracted.length > 0 ? extracted : [extractArxivId(p.arxiv_id) || p.arxiv_id].filter(Boolean);
+      for (const id of ids) {
+        currentSeminarIds.add(id.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase());
+      }
+    }
+  }
+
+  // 2. 获取其他组会中现存的所有 arXiv ID 映射
+  const { results: otherSeminarPres } = await db.prepare(
+    `SELECT seminar_id, arxiv_id FROM seminar_presentations 
+     WHERE seminar_id != ? AND arxiv_id IS NOT NULL AND arxiv_id != ''`
+  ).bind(seminarId).all<{ seminar_id: number; arxiv_id: string }>();
+
+  const otherSeminarMap = new Map<string, number>();
+  for (const p of (otherSeminarPres || [])) {
+    if (p.arxiv_id) {
+      const extracted = extractAllArxivIds(p.arxiv_id);
+      const ids = extracted.length > 0 ? extracted : [extractArxivId(p.arxiv_id) || p.arxiv_id].filter(Boolean);
+      for (const id of ids) {
+        const clean = id.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase();
+        if (clean && !otherSeminarMap.has(clean)) {
+          otherSeminarMap.set(clean, p.seminar_id);
+        }
+      }
+    }
+  }
+
+  for (const cleanId of targetIds) {
+    const cleanLower = cleanId.toLowerCase();
+
+    // 若本场组会其他 presentation 仍在分享该文献，保留
+    if (currentSeminarIds.has(cleanLower)) {
+      continue;
+    }
+
+    const otherSeminarId = otherSeminarMap.get(cleanLower);
+
+    // 若其他组会仍在分享该文献，更新其 seminar_id，不删除
+    if (otherSeminarId) {
+      await db.prepare(
+        `UPDATE arxiv_papers 
+         SET seminar_id = ? 
+         WHERE (arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ? OR arxiv_id LIKE ?) AND seminar_id = ?`
+      ).bind(otherSeminarId, cleanId, `arXiv:${cleanId}`, cleanLower, `${cleanId}v%`, seminarId).run().catch(() => {});
+
+      await db.prepare(
+        `UPDATE library_papers 
+         SET seminar_id = ? 
+         WHERE (arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ? OR arxiv_id LIKE ?) AND seminar_id = ?`
+      ).bind(otherSeminarId, cleanId, `arXiv:${cleanId}`, cleanLower, `${cleanId}v%`, seminarId).run().catch(() => {});
+
+      continue;
+    }
+
+    // 检查并处理 arxiv_papers 推荐流
+    const { results: matchedArxiv } = await db.prepare(
+      `SELECT id, seminar_id, recommend_comment, recommended_by_id 
+       FROM arxiv_papers 
+       WHERE arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ? OR arxiv_id LIKE ?`
+    ).bind(cleanId, `arXiv:${cleanId}`, cleanLower, `${cleanId}v%`).all<any>();
+
+    let deletedArxivCount = 0;
+    for (const paper of (matchedArxiv || [])) {
+      const comment = (paper.recommend_comment || '').trim();
+      const isSeminarComment = !comment || comment === '组会 arXiv 分享' || comment === '组会关联文献';
+      const recSource = await db.prepare(
+        'SELECT id FROM library_recommendation_sources WHERE recommendation_id = ? LIMIT 1'
+      ).bind(paper.id).first();
+
+      if (isSeminarComment && !recSource && (paper.seminar_id === seminarId || paper.seminar_id === null)) {
+        await db.prepare('DELETE FROM paper_comments WHERE paper_id = ?').bind(paper.id).run().catch(() => {});
+        await db.prepare('DELETE FROM paper_likes WHERE paper_id = ?').bind(paper.id).run().catch(() => {});
+        await db.prepare('DELETE FROM paper_read_marks WHERE paper_id = ?').bind(paper.id).run().catch(() => {});
+        await db.prepare('DELETE FROM recommendation_recipients WHERE paper_id = ?').bind(paper.id).run().catch(() => {});
+        await db.prepare('DELETE FROM recommendation_audiences WHERE paper_id = ?').bind(paper.id).run().catch(() => {});
+        await db.prepare('DELETE FROM library_recommendation_sources WHERE recommendation_id = ?').bind(paper.id).run().catch(() => {});
+        await db.prepare('UPDATE seminar_schedules SET paper_id = NULL WHERE paper_id = ?').bind(paper.id).run().catch(() => {});
+        await db.prepare('DELETE FROM arxiv_papers WHERE id = ?').bind(paper.id).run();
+        deletedArxivCount++;
+      } else if (paper.seminar_id === seminarId) {
+        await db.prepare('UPDATE arxiv_papers SET seminar_id = NULL WHERE id = ?').bind(paper.id).run();
+      }
+    }
+
+    // 检查并处理 library_papers 文献库
+    const { results: matchedLibrary } = await db.prepare(
+      `SELECT id, seminar_id, from_recommendation, from_seminar 
+       FROM library_papers 
+       WHERE arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ? OR arxiv_id LIKE ?`
+    ).bind(cleanId, `arXiv:${cleanId}`, cleanLower, `${cleanId}v%`).all<any>();
+
+    let deletedLibraryCount = 0;
+    for (const lib of (matchedLibrary || [])) {
+      const recSourceCount = await db.prepare(
+        'SELECT COUNT(*) as cnt FROM library_recommendation_sources WHERE library_id = ?'
+      ).bind(lib.id).first<{ cnt: number }>();
+      const hasRecSources = (recSourceCount?.cnt || 0) > 0;
+      const isOnlyFromSeminar = (!lib.from_recommendation || lib.from_recommendation === 0) && !hasRecSources && (lib.seminar_id === seminarId || lib.seminar_id === null);
+
+      if (isOnlyFromSeminar) {
+        await db.prepare('DELETE FROM library_aliases WHERE library_id = ?').bind(lib.id).run().catch(() => {});
+        await db.prepare('DELETE FROM library_access WHERE paper_id = ?').bind(lib.id).run().catch(() => {});
+        await db.prepare('DELETE FROM library_recommendation_sources WHERE library_id = ?').bind(lib.id).run().catch(() => {});
+        await db.prepare('DELETE FROM library_papers WHERE id = ?').bind(lib.id).run();
+        deletedLibraryCount++;
+      } else if (lib.seminar_id === seminarId || lib.from_seminar === 1) {
+        await db.prepare('UPDATE library_papers SET from_seminar = 0, seminar_id = NULL WHERE id = ?').bind(lib.id).run();
+      }
+    }
+
+    // 若文献已从两表中彻底删除，清理收藏夹
+    if (deletedArxivCount > 0 || deletedLibraryCount > 0) {
+      const remainArxiv = await db.prepare(
+        'SELECT id FROM arxiv_papers WHERE arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ? LIMIT 1'
+      ).bind(cleanId, `arXiv:${cleanId}`, cleanLower).first();
+      const remainLib = await db.prepare(
+        'SELECT id FROM library_papers WHERE arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ? LIMIT 1'
+      ).bind(cleanId, `arXiv:${cleanId}`, cleanLower).first();
+
+      if (!remainArxiv && !remainLib) {
+        await db.prepare(
+          `DELETE FROM favorites WHERE kind = 'paper' AND (target = ? OR target = ? OR target = ?)`
+        ).bind(cleanId, `arXiv:${cleanId}`, cleanLower).run().catch(() => {});
+      }
+    }
+  }
+}
+
+export async function ensureArxivFeedViewsTable(db: D1Database): Promise<void> {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS arxiv_feed_views (
+      user_id INTEGER PRIMARY KEY,
+      last_paper_id INTEGER DEFAULT 0,
+      last_viewed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run().catch(() => {});
+}

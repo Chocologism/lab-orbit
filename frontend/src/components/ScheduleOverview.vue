@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { addDays, monday, shanghaiToday, seminarTime, sortSeminars, statusLabel, getSemester, currentSemester, extractSemesters, weekScheduleIcs, filterScheduleEvents } from '../utils/schedule'
+import { addDays, monday, shanghaiToday, seminarTime, sortSeminars, statusLabel, isSeminarCompleted, effectiveSeminarStatus, getSemester, currentSemester, extractSemesters, weekScheduleIcs, filterScheduleEvents } from '../utils/schedule'
 import { getHoliday } from '../utils/holidays'
 import { notify } from '../composables/feedback'
 import { renderLatex } from '../utils/latex'
@@ -8,6 +8,8 @@ import AppIcon from './AppIcon.vue'
 import BaseDialog from './BaseDialog.vue'
 import SeminarCarousel3D from './SeminarCarousel3D.vue'
 import PopularPumaLikeButton from './PopularPumaLikeButton.vue'
+import SlidingSegmented from './SlidingSegmented.vue'
+import ThinHoundCheckbox from './ThinHoundCheckbox.vue'
 import { useWeekDrag } from '../composables/useWeekDrag'
 import { seminarApi } from '../api/client'
 const props = defineProps({
@@ -45,7 +47,7 @@ watch(
 )
 
 function onDragStart(event, item) {
-  if (!props.canManage || item.status !== 'upcoming') {
+  if (!props.canManage || effectiveSeminarStatus(item) !== 'upcoming') {
     event.preventDefault()
     return
   }
@@ -56,7 +58,7 @@ function onDragStart(event, item) {
 
 function onDragOver(event, item) {
   if (!draggingSeminar.value) return
-  if (item.status !== 'upcoming' || item.id === draggingSeminar.value.id) return
+  if (effectiveSeminarStatus(item) !== 'upcoming' || item.id === draggingSeminar.value.id) return
   event.preventDefault()
   event.dataTransfer.dropEffect = 'move'
   dropTargetId.value = item.id
@@ -75,7 +77,7 @@ function onDrop(event, targetItem) {
   draggingSeminar.value = null
 
   if (!source || !targetItem || source.id === targetItem.id) return
-  if (source.status !== 'upcoming' || targetItem.status !== 'upcoming') return
+  if (effectiveSeminarStatus(source) !== 'upcoming' || effectiveSeminarStatus(targetItem) !== 'upcoming') return
 
   emit('swap-seminars', { itemA: source, itemB: targetItem })
 }
@@ -161,7 +163,7 @@ const ordered = computed(() => {
   if (selectedSemester.value === 'all') return list
   return list.filter(s => getSemester(s.date)?.id === selectedSemester.value)
 })
-const upcoming = computed(() => ordered.value.filter(s => s.status === 'upcoming' && seminarTime(s) >= Date.now()))
+const upcoming = computed(() => ordered.value.filter(s => effectiveSeminarStatus(s) === 'upcoming' && seminarTime(s) >= Date.now()))
 const past = computed(() => ordered.value.filter(s => seminarTime(s) < Date.now()))
 const nearestIndex = computed(() => {
   if (!ordered.value.length) return 0
@@ -333,14 +335,14 @@ function doExportCalendar() {
   try {
     const rangeStr = `${week.value[0]} 至 ${week.value[6]}`
     const suffix = exportScope.value === 'interested' ? ' (我的想听)' : ''
-    const calName = `学术周日程${suffix} (${rangeStr})`
+    const calName = `CSBD 周日程${suffix} (${rangeStr})`
     const icsContent = weekScheduleIcs(list, calName)
     const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
     const scopeTag = exportScope.value === 'interested' ? '-interested' : ''
-    link.download = `schedule-${week.value[0]}${scopeTag}.ics`
+    link.download = `csbd-schedule-${week.value[0]}${scopeTag}.ics`
     link.click()
     URL.revokeObjectURL(url)
     showExportDialog.value = false
@@ -396,11 +398,11 @@ function doExportCalendar() {
         :key="item.id" 
         class="history-entry" 
         :class="{ 
-          'draggable': canManage && item.status === 'upcoming',
+          'draggable': canManage && effectiveSeminarStatus(item) === 'upcoming',
           'is-dragging': draggingSeminar?.id === item.id,
           'drop-target-active': dropTargetId === item.id 
         }"
-        :draggable="canManage && item.status === 'upcoming'"
+        :draggable="canManage && effectiveSeminarStatus(item) === 'upcoming'"
         @dragstart="onDragStart($event, item)"
         @dragover="onDragOver($event, item)"
         @dragleave="onDragLeave($event, item)"
@@ -408,7 +410,7 @@ function doExportCalendar() {
         @dragend="onDragEnd"
         @click="$emit('select-seminar', item)"
       >
-        <div v-if="canManage && item.status === 'upcoming'" class="drag-cue" title="拖动以交换排期" @click.stop>
+        <div v-if="canManage && effectiveSeminarStatus(item) === 'upcoming'" class="drag-cue" title="拖动以交换排期" @click.stop>
           <AppIcon name="drag" :size="16" />
         </div>
         <time class="mono">{{ item.date }}<small>{{ item.time }}</small></time>
@@ -417,7 +419,7 @@ function doExportCalendar() {
           <p>主讲：{{ item.presenter_name }} · arXiv 分享：{{ item.presentations?.map(p => p.presenter_name).join('、') || '暂未安排' }}</p>
         </div>
         <span v-if="dropTargetId === item.id" class="drop-indicator-badge">释放交换排期</span>
-        <span v-else class="badge">{{ statusLabel(item) }}</span>
+        <span v-else :class="['badge', isSeminarCompleted(item) ? 'success' : 'cyan']">{{ statusLabel(item) }}</span>
       </div>
     </div>
   </section>
@@ -433,7 +435,7 @@ function doExportCalendar() {
           <button class="button small ghost" @click="goToThisWeek">本周</button>
           <button class="button small secondary" aria-label="下一周" @click="weekDrag.slideNext()">下周<AppIcon name="right" /></button>
         </div>
-        <button id="tour-week-export" class="button small ghost export-week-btn" title="导出本周日程到 macOS 系统日历 / iOS / Outlook" @click="openExportDialog">
+        <button class="button small ghost export-week-btn" title="导出本周日程到 macOS 系统日历 / iOS / Outlook" @click="openExportDialog">
           <AppIcon name="calendar" :size="14" />
           <span>导出到日历</span>
         </button>
@@ -479,7 +481,7 @@ function doExportCalendar() {
         class="week-slider-track"
         :style="weekDrag.trackStyle.value"
       >
-        <div id="tour-week-grid" class="week-grid">
+        <div class="week-grid">
           <section
             v-for="day in week"
             :id="'week-day-' + day"
@@ -552,7 +554,7 @@ function doExportCalendar() {
 
       <div class="export-section">
         <label class="export-label">导出范围</label>
-        <div class="segmented export-scope-segmented">
+        <SlidingSegmented class="segmented export-scope-segmented">
           <button
             type="button"
             :class="{ active: exportScope === 'all' }"
@@ -567,23 +569,21 @@ function doExportCalendar() {
           >
             仅当周「想听」的日程
           </button>
-        </div>
+        </SlidingSegmented>
       </div>
 
       <div class="export-section">
         <label class="export-label">日程分类过滤</label>
         <div class="export-checkbox-group">
-          <label class="checkbox-pill">
-            <input type="checkbox" v-model="includeSeminars" />
+          <ThinHoundCheckbox v-model="includeSeminars" :size="18" class="checkbox-pill-hound">
             <span>包含组会安排</span>
             <span class="badge cyan small">组会</span>
-          </label>
-          <label class="checkbox-pill">
-            <input type="checkbox" v-model="includeTalks" />
+          </ThinHoundCheckbox>
+          <ThinHoundCheckbox v-model="includeTalks" :size="18" class="checkbox-pill-hound">
             <span>包含报告与会议</span>
             <span class="badge amber small">报告</span>
             <span class="badge blue small">会议</span>
-          </label>
+          </ThinHoundCheckbox>
         </div>
       </div>
 
@@ -632,12 +632,12 @@ function doExportCalendar() {
 <style scoped>
 .adjacent-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; }
 .timeline-slot { display:flex; flex-direction:column; align-items:flex-start; padding:24px; border:1px solid var(--line); border-radius:16px; background:var(--panel); box-shadow: 0 1px 3px rgba(0,0,0,0.03); transition: all 0.2s ease; }
-.timeline-slot.nearest { border: 1.5px solid var(--accent); background: linear-gradient(135deg, var(--surface) 0%, var(--surface) 100%); box-shadow: 0 10px 25px -4px rgba(184, 155, 248, 0.15), 0 4px 10px -2px rgba(0, 0, 0, 0.04); }
+.timeline-slot.nearest { border: 1.5px solid var(--accent); background: linear-gradient(135deg, var(--surface) 0%, var(--surface) 100%); box-shadow: 0 10px 25px -4px color-mix(in srgb, var(--accent) 15%, transparent), 0 4px 10px -2px rgba(0, 0, 0, 0.04); }
 .timeline-slot.nearest .eyebrow { color: var(--accent); background: var(--raised); padding: 2px 10px; border-radius: 9999px; font-weight: 700; display: inline-block; margin-bottom: 10px; }
 .timeline-slot.nearest h2 { color: var(--text); font-size: 21px; font-weight: 700; line-height: 1.5; margin: 12px 0; }
 .timeline-slot.nearest p { color: var(--soft); font-size: 13px; }
 .timeline-slot.nearest .mono.accent { color: var(--accent); font-weight: 600; }
-.timeline-slot.nearest .button.secondary { background: var(--accent); color: var(--panel); border-color: var(--accent); font-weight: 600; box-shadow: 0 2px 8px rgba(184, 155, 248, 0.35); }
+.timeline-slot.nearest .button.secondary { background: var(--accent); color: var(--panel); border-color: var(--accent); font-weight: 600; box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent); }
 .timeline-slot.nearest .button.secondary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
 .timeline-slot h2 { font-size:21px; line-height:1.6; margin:12px 0; }
 .timeline-slot>p { font-size:13px; }
@@ -648,7 +648,7 @@ function doExportCalendar() {
 .empty-slot { padding:30px 0; }
 .history-toggle { margin-top:15px; }
 .history-list { display:grid; gap:10px; margin-top:14px; }
-.history-admin-tip { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(184, 155, 248, 0.12); border: 1px dashed rgba(184, 155, 248, 0.35); border-radius: 8px; font-size: 12px; color: var(--accent); }
+.history-admin-tip { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px dashed color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 8px; font-size: 12px; color: var(--accent); }
 .history-entry { width:100%; text-align:left; display:flex; align-items:center; gap:20px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px 18px; color:var(--text); transition: all 0.2s ease; cursor: pointer; }
 .history-entry.draggable { cursor: grab; }
 .history-entry.draggable:active { cursor: grabbing; }
@@ -733,6 +733,7 @@ function doExportCalendar() {
   font-size: 13px;
   font-weight: 600;
   backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   pointer-events: none;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   transition: border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
@@ -904,7 +905,8 @@ function doExportCalendar() {
   gap: 12px;
   flex-wrap: wrap;
 }
-.checkbox-pill {
+.checkbox-pill,
+.checkbox-pill-hound {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -915,12 +917,31 @@ function doExportCalendar() {
   cursor: pointer;
   font-size: 13px;
   color: var(--text);
-  user-select: none;
+  user-select: none !important;
+  -webkit-user-select: none !important;
   transition: all 0.18s ease;
 }
-.checkbox-pill:hover {
+.checkbox-pill *,
+.checkbox-pill-hound *,
+.checkbox-pill::selection,
+.checkbox-pill *::selection,
+.checkbox-pill-hound::selection,
+.checkbox-pill-hound *::selection {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  background: transparent !important;
+}
+.checkbox-pill:hover,
+.checkbox-pill-hound:hover {
   border-color: var(--accent);
   background: var(--raised);
+}
+.checkbox-pill-hound :deep(.label-text) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 13px;
 }
 .checkbox-pill input {
   accent-color: var(--accent);
@@ -1027,6 +1048,7 @@ function doExportCalendar() {
   border: 1px solid var(--line, rgba(184, 155, 248, 0.16));
   border-radius: 9999px;
   backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 .semester-pill {
   display: inline-flex;
@@ -1047,11 +1069,11 @@ function doExportCalendar() {
   background: rgba(255, 255, 255, 0.06);
 }
 .semester-pill.active {
-  background: rgba(184, 155, 248, 0.18);
-  border-color: rgba(184, 155, 248, 0.4);
+  background: color-mix(in srgb, var(--accent, #b89bf8) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent, #b89bf8) 40%, transparent);
   color: var(--accent, #b89bf8);
   font-weight: 600;
-  box-shadow: 0 0 12px rgba(184, 155, 248, 0.3);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent, #b89bf8) 30%, transparent);
 }
 .current-sem-dot {
   width: 6px;
@@ -1064,7 +1086,7 @@ function doExportCalendar() {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 9999px;
-  background: rgba(184, 155, 248, 0.2);
+  background: color-mix(in srgb, var(--accent, #b89bf8) 20%, transparent);
   color: var(--accent, #b89bf8);
   font-weight: 600;
 }

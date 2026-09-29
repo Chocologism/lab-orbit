@@ -54,4 +54,16 @@ describe('NoticesView component', () => {
     expect(facility).toHaveLength(1)
     expect(facility[0].title).toBe('东区电梯年检停运')
   })
+
+  it('integrates SlidingSegmented and NoticeRating in template and script', () => {
+    const parsed = parse(content)
+    const compiled = compileScript(parsed.descriptor, { id: 'test-notices-view-ratings' })
+    const bindings = compiled.bindings || {}
+
+    expect(bindings.onNoticeRated).toBeDefined()
+    expect(content).toContain('<SlidingSegmented class="segmented-control" role="tablist">')
+    expect(content).toContain('<NoticeRating')
+    expect(content).toContain('modal-footer-rating')
+    expect(content).toContain('card-footer-right')
+  })
 })

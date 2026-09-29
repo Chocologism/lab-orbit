@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { Env, UserRow } from '../types';
 import { authMiddleware, adminOnlyMiddleware, seminarManagerMiddleware } from '../middleware/auth';
-import { resolveOrCreateSeminarPaper, archiveSeminarPresentationArxiv, extractArxivId } from '../utils/papers';
+import { resolveOrCreateSeminarPaper, archiveSeminarPresentationArxiv, unarchiveSeminarPresentationArxiv, extractArxivId, extractAllArxivIds, fetchArxivMetadata, decodeHtmlEntities } from '../utils/papers';
 
 const app = new Hono<{ Bindings: Env; Variables: { user: UserRow } }>();
 
@@ -23,59 +23,66 @@ app.get('/check-arxiv-presented', async (c) => {
   const rawArxiv = c.req.query('arxiv_id') || '';
   const currentSeminarId = c.req.query('current_seminar_id') ? Number(c.req.query('current_seminar_id')) : null;
 
-  const arxivId = extractArxivId(rawArxiv);
-  if (!arxivId) {
+  const arxivIds = extractAllArxivIds(rawArxiv);
+  if (arxivIds.length === 0) {
+    const single = extractArxivId(rawArxiv);
+    if (single) arxivIds.push(single);
+  }
+
+  if (arxivIds.length === 0) {
     return c.json({ presented: false });
   }
 
-  const cleanId = arxivId.replace(/v\d+$/, '');
+  for (const arxivId of arxivIds) {
+    const cleanId = arxivId.replace(/v\d+$/, '');
 
-  // 1. 检索 library_papers 中 from_seminar = 1 的记录
-  const libPaper = await c.env.DB.prepare(
-    `SELECT id, arxiv_id, title, seminar_id FROM library_papers
-     WHERE from_seminar = 1 AND (
-       arxiv_id = ? OR arxiv_id = ? OR arxiv_id LIKE ? OR arxiv_id LIKE ?
-     ) LIMIT 1`
-  ).bind(cleanId, arxivId, `${cleanId}v%`, `arXiv:${cleanId}%`).first<any>();
+    // 1. 检索 library_papers 中 from_seminar = 1 的记录
+    const libPaper = await c.env.DB.prepare(
+      `SELECT id, arxiv_id, title, seminar_id FROM library_papers
+       WHERE from_seminar = 1 AND (
+         arxiv_id = ? OR arxiv_id = ? OR arxiv_id LIKE ? OR arxiv_id LIKE ?
+       ) LIMIT 1`
+    ).bind(cleanId, arxivId, `${cleanId}v%`, `arXiv:${cleanId}%`).first<any>();
 
-  if (libPaper) {
-    // 若匹配到的正是当前正在编辑的组会排期，则不报重复
-    if (currentSeminarId && libPaper.seminar_id && Number(libPaper.seminar_id) === Number(currentSeminarId)) {
-      return c.json({ presented: false });
-    }
-    return c.json({
-      presented: true,
-      paper: {
-        id: libPaper.id,
-        arxiv_id: libPaper.arxiv_id,
-        title: libPaper.title,
-        seminar_id: libPaper.seminar_id
+    if (libPaper) {
+      // 若匹配到的正是当前正在编辑的组会排期，则不报重复
+      if (currentSeminarId && libPaper.seminar_id && Number(libPaper.seminar_id) === Number(currentSeminarId)) {
+        continue;
       }
-    });
-  }
-
-  // 2. 检索 seminar_presentations 中已经填写的 arXiv 记录
-  const pres = await c.env.DB.prepare(
-    `SELECT sp.id, sp.seminar_id, sp.presenter_name, sp.arxiv_id
-     FROM seminar_presentations sp
-     WHERE sp.arxiv_id != '' AND (
-       sp.arxiv_id = ? OR sp.arxiv_id = ? OR sp.arxiv_id LIKE ? OR sp.arxiv_id LIKE ?
-     ) LIMIT 1`
-  ).bind(cleanId, arxivId, `${cleanId}v%`, `%${cleanId}%`).first<any>();
-
-  if (pres) {
-    if (currentSeminarId && pres.seminar_id && Number(pres.seminar_id) === Number(currentSeminarId)) {
-      return c.json({ presented: false });
+      return c.json({
+        presented: true,
+        paper: {
+          id: libPaper.id,
+          arxiv_id: libPaper.arxiv_id,
+          title: libPaper.title,
+          seminar_id: libPaper.seminar_id
+        }
+      });
     }
-    return c.json({
-      presented: true,
-      paper: {
-        id: pres.id,
-        arxiv_id: pres.arxiv_id,
-        title: `arXiv:${pres.arxiv_id}`,
-        seminar_id: pres.seminar_id
+
+    // 2. 检索 seminar_presentations 中已经填写的 arXiv 记录
+    const pres = await c.env.DB.prepare(
+      `SELECT sp.id, sp.seminar_id, sp.presenter_name, sp.arxiv_id
+       FROM seminar_presentations sp
+       WHERE sp.arxiv_id != '' AND (
+         sp.arxiv_id = ? OR sp.arxiv_id = ? OR sp.arxiv_id LIKE ? OR sp.arxiv_id LIKE ?
+       ) LIMIT 1`
+    ).bind(cleanId, arxivId, `${cleanId}v%`, `%${cleanId}%`).first<any>();
+
+    if (pres) {
+      if (currentSeminarId && pres.seminar_id && Number(pres.seminar_id) === Number(currentSeminarId)) {
+        continue;
       }
-    });
+      return c.json({
+        presented: true,
+        paper: {
+          id: pres.id,
+          arxiv_id: pres.arxiv_id,
+          title: `arXiv:${pres.arxiv_id}`,
+          seminar_id: pres.seminar_id
+        }
+      });
+    }
   }
 
   return c.json({ presented: false });
@@ -90,12 +97,12 @@ app.get('/mine/upcoming', async (c) => {
       .map(n => (n as string).trim().toLowerCase())
   );
 
-  const belongs = (presenterId: number | null, presenterName: string | null) => {
-    if (presenterId !== null && presenterId !== undefined) {
-      return presenterId === user.id;
+  const belongs = (presenterId: number | null | undefined, presenterName: string | null | undefined) => {
+    if (presenterId && presenterId === user.id) {
+      return true;
     }
-    if (presenterName) {
-      return userNames.has(presenterName.trim().toLowerCase());
+    if (presenterName && userNames.has(presenterName.trim().toLowerCase())) {
+      return true;
     }
     return false;
   };
@@ -140,6 +147,7 @@ app.get('/mine/upcoming', async (c) => {
     if (belongs(p.presenter_id as number, p.presenter_name as string)) {
       const daysUntil = getDaysDiff(p.date as string);
       if (daysUntil >= 0) {
+        const pList = extractAllArxivIds(p.arxiv_id as string);
         result.arxiv = {
           id: p.seminar_id,
           presentation_id: p.id,
@@ -148,7 +156,7 @@ app.get('/mine/upcoming', async (c) => {
           topic: p.topic,
           location: p.location,
           days_until: daysUntil,
-          papers: [p.arxiv_id || '']
+          papers: pList.length > 0 ? pList : [p.arxiv_id || '']
         };
         break;
       }
@@ -156,6 +164,61 @@ app.get('/mine/upcoming', async (c) => {
   }
 
   return c.json(result);
+});
+
+app.get('/mine/upcoming-presentations', async (c) => {
+  const user = c.get('user');
+  const today = getTodayString();
+  const isMgr = user.role === 'admin' || Boolean(user.is_seminar_manager);
+  const showAll = c.req.query('all') === '1' && isMgr;
+
+  const userNames = new Set(
+    [user.name, user.real_name, user.nickname]
+      .filter(Boolean)
+      .map(n => (n as string).trim().toLowerCase())
+  );
+
+  const belongs = (presenterId: number | null | undefined, presenterName: string | null | undefined) => {
+    if (presenterId && presenterId === user.id) {
+      return true;
+    }
+    if (presenterName && userNames.has(presenterName.trim().toLowerCase())) {
+      return true;
+    }
+    return false;
+  };
+
+  const { results: presentations } = await c.env.DB.prepare(
+    `SELECT p.*, s.date, s.time, s.topic, s.location, s.status
+     FROM seminar_presentations p
+     JOIN seminar_schedules s ON s.id = p.seminar_id
+     WHERE s.date >= ? AND s.status != 'cancelled'
+     ORDER BY s.date ASC, s.time ASC, p.position ASC, p.id ASC`
+  ).bind(today).all();
+
+  const list = [];
+  for (const p of (presentations || [])) {
+    if (showAll || belongs(p.presenter_id as number, p.presenter_name as string)) {
+      const daysUntil = getDaysDiff(p.date as string);
+      if (daysUntil >= 0) {
+        const pList = extractAllArxivIds(p.arxiv_id as string);
+        list.push({
+          seminar_id: p.seminar_id,
+          presentation_id: p.id,
+          date: p.date,
+          time: p.time || '14:30',
+          topic: p.topic,
+          location: p.location,
+          presenter_name: p.presenter_name || user.real_name || user.name,
+          days_until: daysUntil,
+          arxiv_id: p.arxiv_id || '',
+          papers: pList.length > 0 ? pList : [p.arxiv_id || ''].filter(Boolean),
+        });
+      }
+    }
+  }
+
+  return c.json(list);
 });
 
 app.get('/reminders', async (c) => {
@@ -167,12 +230,12 @@ app.get('/reminders', async (c) => {
       .map(n => (n as string).trim().toLowerCase())
   );
 
-  const belongs = (presenterId: number | null, presenterName: string | null) => {
-    if (presenterId !== null && presenterId !== undefined) {
-      return presenterId === user.id;
+  const belongs = (presenterId: number | null | undefined, presenterName: string | null | undefined) => {
+    if (presenterId && presenterId === user.id) {
+      return true;
     }
-    if (presenterName) {
-      return userNames.has(presenterName.trim().toLowerCase());
+    if (presenterName && userNames.has(presenterName.trim().toLowerCase())) {
+      return true;
     }
     return false;
   };
@@ -563,13 +626,24 @@ app.post('/interest-toggle', async (c) => {
 
 app.get('', async (c) => {
   const user = c.get('user');
+  const today = getTodayString();
   await ensureInterestsTable(c.env.DB);
 
+  // 自动将过去的待举行组会标记为已完成
+  c.executionCtx?.waitUntil?.(
+    c.env.DB.prepare("UPDATE seminar_schedules SET status = 'completed' WHERE date < ? AND status = 'upcoming'")
+      .bind(today)
+      .run()
+      .catch(() => {})
+  );
+
   // 批量并发查询：组会、分享列表、论文元数据、感兴趣统计以及注册用户（支持自动姓名关联）
-  const [seminarsRes, presentationsRes, papersRes, interestsRes, usersRes] = await Promise.all([
+  const [seminarsRes, presentationsRes, papersRes, audiencesRes, recipientsRes, interestsRes, usersRes] = await Promise.all([
     c.env.DB.prepare('SELECT * FROM seminar_schedules ORDER BY date ASC, time ASC').all(),
     c.env.DB.prepare('SELECT * FROM seminar_presentations ORDER BY seminar_id ASC, position ASC, id ASC').all(),
-    c.env.DB.prepare('SELECT id, arxiv_id, title, authors, journal, primary_category, published_date, pdf_url, source_url FROM arxiv_papers').all(),
+    c.env.DB.prepare('SELECT id, arxiv_id, title, authors, journal, primary_category, published_date, pdf_url, source_url, recommended_by_id FROM arxiv_papers').all(),
+    c.env.DB.prepare('SELECT paper_id FROM recommendation_audiences').all().catch(() => ({ results: [] })),
+    c.env.DB.prepare('SELECT paper_id, user_id FROM recommendation_recipients').all().catch(() => ({ results: [] })),
     c.env.DB.prepare(`
       SELECT item_id, COUNT(*) as count,
              MAX(CASE WHEN user_id = ? THEN 1 ELSE 0 END) as user_interested
@@ -602,8 +676,20 @@ app.get('', async (c) => {
     presentationsMap.get(sid)!.push({ ...p, presenter_id: pid });
   }
 
+  const directAudienceSet = new Set(((audiencesRes?.results || []) as any[]).map(r => r.paper_id));
+  const directRecipientsMap = new Map<number, Set<number>>();
+  for (const r of ((recipientsRes?.results || []) as any[])) {
+    if (!directRecipientsMap.has(r.paper_id)) directRecipientsMap.set(r.paper_id, new Set());
+    directRecipientsMap.get(r.paper_id)!.add(r.user_id);
+  }
+
   const papersMap = new Map<number, any>();
   for (const p of ((papersRes.results || []) as any[])) {
+    if (directAudienceSet.has(p.id)) {
+      const isOwner = p.recommended_by_id === user?.id;
+      const isRecipient = directRecipientsMap.get(p.id)?.has(user?.id);
+      if (!isOwner && !isRecipient) continue;
+    }
     papersMap.set(p.id, p);
   }
 
@@ -622,8 +708,11 @@ app.get('', async (c) => {
       const clean = s.presenter_name.trim().toLowerCase();
       if (userByName.has(clean)) pid = userByName.get(clean);
     }
+    const isPast = Boolean(s.date && s.date < today);
+    const effectiveStatus = (s.status === 'upcoming' && isPast) ? 'completed' : s.status;
     return {
       ...s,
+      status: effectiveStatus,
       presenter_id: pid,
       paper: s.paper_id ? (papersMap.get(s.paper_id) || null) : null,
       presentations: presentationsMap.get(s.id) || [],
@@ -671,7 +760,9 @@ app.post('', seminarManagerMiddleware, async (c) => {
     for (let i = 0; i < body.presentations.length; i++) {
       const p = body.presentations[i];
       const pName = (p.presenter_name || '').trim();
-      const pArxiv = (p.arxiv_id || '').trim();
+      const rawArxiv = (p.arxiv_id || '').trim();
+      const extracted = extractAllArxivIds(rawArxiv);
+      const pArxiv = extracted.length > 0 ? extracted.join(', ') : rawArxiv;
       const pSlides = p.slides_url || '';
       const pUser = await c.env.DB.prepare('SELECT id FROM users WHERE name = ? OR real_name = ?').bind(pName, pName).first<{ id: number }>();
       const pId = p.presenter_id || pUser?.id || null;
@@ -742,11 +833,26 @@ app.put('/:id', async (c) => {
   ).bind(date, time, location, presenter_id, presenter_name, topic, paper_id, slides_url, notes, status, abstract, id).run();
 
   if (Array.isArray(body.presentations)) {
+    const { results: oldPres } = await c.env.DB.prepare(
+      'SELECT arxiv_id FROM seminar_presentations WHERE seminar_id = ?'
+    ).bind(id).all<{ arxiv_id: string }>();
+
+    const oldIds: string[] = [];
+    for (const op of (oldPres || [])) {
+      if (op.arxiv_id) {
+        const ext = extractAllArxivIds(op.arxiv_id);
+        const list = ext.length > 0 ? ext : [extractArxivId(op.arxiv_id) || op.arxiv_id].filter(Boolean);
+        oldIds.push(...list);
+      }
+    }
+
     await c.env.DB.prepare('DELETE FROM seminar_presentations WHERE seminar_id = ?').bind(id).run();
     for (let i = 0; i < body.presentations.length; i++) {
       const p = body.presentations[i];
       const pName = (p.presenter_name || '').trim();
-      const pArxiv = (p.arxiv_id || '').trim();
+      const rawArxiv = (p.arxiv_id || '').trim();
+      const extracted = extractAllArxivIds(rawArxiv);
+      const pArxiv = extracted.length > 0 ? extracted.join(', ') : rawArxiv;
       const pSlides = p.slides_url || '';
       const pUser = await c.env.DB.prepare('SELECT id FROM users WHERE name = ? OR real_name = ?').bind(pName, pName).first<{ id: number }>();
       const pId = p.presenter_id || pUser?.id || null;
@@ -759,13 +865,32 @@ app.put('/:id', async (c) => {
         await archiveSeminarPresentationArxiv(c.env.DB, pArxiv, id, pId, pName);
       }
     }
+
+    const newIds: string[] = [];
+    for (const p of body.presentations) {
+      if (p.arxiv_id) {
+        const ext = extractAllArxivIds(p.arxiv_id);
+        const list = ext.length > 0 ? ext : [extractArxivId(p.arxiv_id) || p.arxiv_id].filter(Boolean);
+        newIds.push(...list);
+      }
+    }
+    const newSet = new Set(newIds.map(x => x.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase()));
+    const removedIds = oldIds.filter(x => !newSet.has(x.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase()));
+
+    if (removedIds.length > 0) {
+      await unarchiveSeminarPresentationArxiv(c.env.DB, removedIds, id);
+    }
   }
 
   const updated = await c.env.DB.prepare('SELECT * FROM seminar_schedules WHERE id = ?').bind(id).first<any>();
   const { results: presentations } = await c.env.DB.prepare('SELECT * FROM seminar_presentations WHERE seminar_id = ? ORDER BY position ASC').bind(id).all();
   const paper = updated?.paper_id ? await c.env.DB.prepare('SELECT id, arxiv_id, title, authors, journal, primary_category, published_date, pdf_url, source_url FROM arxiv_papers WHERE id = ?').bind(updated.paper_id).first() : null;
 
-  return c.json({ ...updated, paper, presentations: presentations || [] });
+  const today = getTodayString();
+  const isPast = Boolean(updated?.date && updated.date < today);
+  const effectiveStatus = (updated?.status === 'upcoming' && isPast) ? 'completed' : updated?.status;
+
+  return c.json({ ...updated, status: effectiveStatus, paper, presentations: presentations || [] });
 });
 
 async function handlePresentationShare(c: any) {
@@ -817,12 +942,29 @@ async function handlePresentationShare(c: any) {
     return c.json({ detail: '只有该文献分享人本人或管理员可以修改分享内容' }, 403);
   }
 
-  const arxivId = body.arxiv_id !== undefined ? String(body.arxiv_id).trim() : (targetPres.arxiv_id || '');
+  const rawArxiv = body.arxiv_id !== undefined ? String(body.arxiv_id).trim() : (targetPres.arxiv_id || '');
+  const extracted = extractAllArxivIds(rawArxiv);
+  const arxivId = extracted.length > 0 ? extracted.join(', ') : rawArxiv;
   const slidesUrl = body.slides_url !== undefined ? String(body.slides_url).trim() : (targetPres.slides_url || '');
+
+  // 计算本次更新被移除的原 arXiv 文献
+  const oldRaw = (targetPres.arxiv_id || '').trim();
+  const oldExtracted = extractAllArxivIds(oldRaw);
+  const oldIds = oldExtracted.length > 0 ? oldExtracted : [extractArxivId(oldRaw) || oldRaw].filter(Boolean);
+  const newSet = new Set(extracted.map(x => x.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase()));
+  if (arxivId && extracted.length === 0) {
+    const single = extractArxivId(arxivId) || arxivId;
+    if (single) newSet.add(single.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase());
+  }
+  const removedIds = oldIds.filter(x => !newSet.has(x.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase()));
 
   await c.env.DB.prepare(
     'UPDATE seminar_presentations SET arxiv_id = ?, slides_url = ?, presenter_id = COALESCE(presenter_id, ?) WHERE id = ?'
   ).bind(arxivId, slidesUrl, user?.id || null, targetPres.id).run();
+
+  if (removedIds.length > 0) {
+    await unarchiveSeminarPresentationArxiv(c.env.DB, removedIds, seminarId);
+  }
 
   // 若填写了 arXiv 编号，自动归档至文献库 library_papers 并绑定 seminar_id
   if (arxivId) {
@@ -839,13 +981,208 @@ async function handlePresentationShare(c: any) {
   return c.json({ ...updated, presentations: updatedPres || [] });
 }
 
+app.post('/link-presentation-paper', async (c) => {
+  const user = c.get('user');
+  const body = await c.req.json().catch(() => ({}));
+  const seminarId = Number(body.seminar_id);
+  const presentationId = Number(body.presentation_id);
+  const rawArxiv = String(body.arxiv_id || '').trim();
+  const mode = body.mode === 'replace' ? 'replace' : 'append';
+  const shareToFeed = body.share_to_feed !== false;
+  const recommendComment = typeof body.recommend_comment === 'string' ? body.recommend_comment.trim() : '';
+
+  if (!seminarId || !presentationId || !rawArxiv) {
+    return c.json({ detail: '请提供有效的组会ID、分享槽位ID以及 arXiv 编号' }, 400);
+  }
+
+  const targetPres = await c.env.DB.prepare(
+    'SELECT * FROM seminar_presentations WHERE id = ? AND seminar_id = ?'
+  ).bind(presentationId, seminarId).first<any>();
+
+  if (!targetPres) {
+    return c.json({ detail: '未找到对应的组会分享排期' }, 404);
+  }
+
+  const userNames = new Set(
+    [user.name, user.real_name, user.nickname]
+      .filter(Boolean)
+      .map(n => (n as string).trim().toLowerCase())
+  );
+  const isMgr = user.role === 'admin' || Boolean(user.is_seminar_manager);
+  const isOwner = (targetPres.presenter_id && targetPres.presenter_id === user.id) ||
+    (targetPres.presenter_name && userNames.has(targetPres.presenter_name.trim().toLowerCase()));
+
+  if (!isMgr && !isOwner) {
+    return c.json({ detail: '只有该文献分享人本人或管理员可以将文献链接到此组会' }, 403);
+  }
+
+  const extracted = extractAllArxivIds(rawArxiv);
+  const newArxivIds = extracted.length > 0 ? extracted : [extractArxivId(rawArxiv) || rawArxiv].filter(Boolean) as string[];
+  if (!newArxivIds.length) {
+    return c.json({ detail: '未能识别出有效的 arXiv 编号' }, 400);
+  }
+
+  // 计算原有的 arXiv 列表
+  const oldRaw = (targetPres.arxiv_id || '').trim();
+  const oldExtracted = extractAllArxivIds(oldRaw);
+  const oldIds = oldExtracted.length > 0 ? oldExtracted : [extractArxivId(oldRaw) || oldRaw].filter(Boolean) as string[];
+
+  let finalArxivIds: string[] = [];
+  let removedIds: string[] = [];
+
+  if (mode === 'append') {
+    const existingCleanSet = new Set(oldIds.map(x => x.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase()));
+    finalArxivIds = [...oldIds];
+    for (const nid of newArxivIds) {
+      const clean = nid.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase();
+      if (!existingCleanSet.has(clean)) {
+        finalArxivIds.push(nid);
+        existingCleanSet.add(clean);
+      }
+    }
+  } else {
+    // replace 模式
+    finalArxivIds = [...newArxivIds];
+    const newCleanSet = new Set(newArxivIds.map(x => x.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase()));
+    removedIds = oldIds.filter(x => !newCleanSet.has(x.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim().toLowerCase()));
+  }
+
+  const finalArxivStr = finalArxivIds.join(', ');
+
+  // 更新 seminar_presentations
+  await c.env.DB.prepare(
+    'UPDATE seminar_presentations SET arxiv_id = ?, presenter_id = COALESCE(presenter_id, ?) WHERE id = ?'
+  ).bind(finalArxivStr, user.id, targetPres.id).run();
+
+  // 若有被替换移除的旧文献，解除关联
+  if (removedIds.length > 0) {
+    await unarchiveSeminarPresentationArxiv(c.env.DB, removedIds, seminarId);
+  }
+
+  // 归档新关联文献至 library_papers 与组会关联
+  const sharerId = targetPres.presenter_id || user.id;
+  const sharerName = targetPres.presenter_name || user.real_name || user.name;
+  await archiveSeminarPresentationArxiv(c.env.DB, finalArxivStr, seminarId, sharerId, sharerName);
+
+  // 若勾选了在推荐流中额外发送一次分享
+  if (shareToFeed) {
+    const semSchedule = await c.env.DB.prepare('SELECT date, topic FROM seminar_schedules WHERE id = ?').bind(seminarId).first<any>();
+    const semDate = semSchedule?.date || '';
+    const defaultComment = semDate ? `预定于 ${semDate} 组会进行文献分享汇报` : '组会文献分享汇报';
+    const finalComment = recommendComment || defaultComment;
+
+    for (const paperIdToShare of newArxivIds) {
+      const cleanId = paperIdToShare.replace(/^arXiv:/i, '').replace(/v\d+$/, '').trim();
+
+      const existingPaper = await c.env.DB.prepare(
+        `SELECT title, journal, source_url, authors, abstract, primary_category, published_date, pdf_url, title_zh, abstract_zh
+         FROM arxiv_papers WHERE arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ? ORDER BY id DESC LIMIT 1`
+      ).bind(cleanId, paperIdToShare, `arXiv:${cleanId}`).first<any>() || await c.env.DB.prepare(
+        `SELECT title, journal, source_url, authors, abstract, primary_category, published_date, pdf_url, title_zh, abstract_zh
+         FROM library_papers WHERE arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ? ORDER BY id DESC LIMIT 1`
+      ).bind(cleanId, paperIdToShare, `arXiv:${cleanId}`).first<any>();
+
+      let meta = existingPaper;
+      if (!meta) {
+        try {
+          meta = await fetchArxivMetadata(cleanId);
+        } catch {
+          meta = {
+            arxiv_id: cleanId,
+            title: `arXiv:${cleanId}`,
+            authors: [],
+            abstract: '',
+            primary_category: 'astro-ph',
+            published_date: '',
+            pdf_url: `https://arxiv.org/pdf/${cleanId}.pdf`,
+            source_url: `https://arxiv.org/abs/${cleanId}`,
+            journal: ''
+          };
+        }
+      }
+
+      const authorsJson = typeof meta.authors === 'string' ? meta.authors : JSON.stringify(meta.authors || []);
+      const titleClean = decodeHtmlEntities(meta.title || `arXiv:${cleanId}`);
+      const abstractClean = decodeHtmlEntities(meta.abstract || '');
+
+      const insRes = await c.env.DB.prepare(
+        `INSERT INTO arxiv_papers 
+         (arxiv_id, title, journal, source_url, authors, abstract, primary_category, published_date, pdf_url, recommended_by_id, recommend_comment, is_pinned, seminar_id, title_zh, abstract_zh, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, datetime('now'))`
+      ).bind(
+        cleanId,
+        titleClean,
+        meta.journal || '',
+        meta.source_url || `https://arxiv.org/abs/${cleanId}`,
+        authorsJson,
+        abstractClean,
+        meta.primary_category || 'astro-ph',
+        meta.published_date || '',
+        meta.pdf_url || `https://arxiv.org/pdf/${cleanId}.pdf`,
+        user.id,
+        finalComment,
+        seminarId,
+        meta.title_zh || null,
+        meta.abstract_zh || null
+      ).run();
+
+      const newPaperId = insRes.meta.last_row_id as number;
+
+      if (newPaperId) {
+        const libRow = await c.env.DB.prepare(
+          'SELECT id FROM library_papers WHERE arxiv_id = ? OR arxiv_id = ? OR arxiv_id = ? LIMIT 1'
+        ).bind(cleanId, paperIdToShare, `arXiv:${cleanId}`).first<any>();
+        if (libRow?.id) {
+          await c.env.DB.prepare(
+            `INSERT OR IGNORE INTO library_recommendation_sources (library_paper_id, arxiv_paper_id, recommended_by_id, created_at)
+             VALUES (?, ?, ?, datetime('now'))`
+          ).bind(libRow.id, newPaperId, user.id).run().catch(() => {});
+        }
+      }
+    }
+
+    // 更新当前用户的推荐流已读进度
+    await c.env.DB.prepare(
+      `INSERT INTO arxiv_feed_views (user_id, last_viewed_at, updated_at)
+       VALUES (?, datetime('now'), datetime('now'))
+       ON CONFLICT(user_id) DO UPDATE SET last_viewed_at = datetime('now'), updated_at = datetime('now')`
+    ).bind(user.id).run().catch(() => {});
+  }
+
+  return c.json({
+    ok: true,
+    seminar_id: seminarId,
+    presentation_id: presentationId,
+    arxiv_id: finalArxivStr,
+    share_to_feed: shareToFeed
+  });
+});
+
 app.put('/:id/presentation-share', async (c) => handlePresentationShare(c));
 app.put('/:id/presentation-arxiv', async (c) => handlePresentationShare(c));
 
 app.delete('/:id', seminarManagerMiddleware, async (c) => {
   const id = parseInt(c.req.param('id'), 10);
+  const { results: pres } = await c.env.DB.prepare(
+    'SELECT arxiv_id FROM seminar_presentations WHERE seminar_id = ?'
+  ).bind(id).all<{ arxiv_id: string }>();
+
+  const allArxivIds: string[] = [];
+  for (const p of (pres || [])) {
+    if (p.arxiv_id) {
+      const ext = extractAllArxivIds(p.arxiv_id);
+      const list = ext.length > 0 ? ext : [extractArxivId(p.arxiv_id) || p.arxiv_id].filter(Boolean);
+      allArxivIds.push(...list);
+    }
+  }
+
   await c.env.DB.prepare('DELETE FROM seminar_presentations WHERE seminar_id = ?').bind(id).run();
   await c.env.DB.prepare('DELETE FROM seminar_schedules WHERE id = ?').bind(id).run();
+
+  if (allArxivIds.length > 0) {
+    await unarchiveSeminarPresentationArxiv(c.env.DB, allArxivIds, id);
+  }
+
   return c.json({ message: '组会已成功删除' });
 });
 

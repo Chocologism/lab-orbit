@@ -1,7 +1,7 @@
 import { Context, Next } from 'hono';
 import { Env, UserRow, JWTPayload } from '../types';
 
-const DEFAULT_SECRET = 'labhub-secure-secret-key-2026';
+const DEFAULT_SECRET = 'cssbd-hub-secure-secret-key-2026';
 
 function base64UrlEncode(str: string | Uint8Array): string {
   let binary = '';

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <title>文献推荐</title>
+  <desc>圆角文献纸张内融入消息气泡，表达文献推荐与交流。</desc>
+  <g stroke="#203E76" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="10" y="4" width="44" height="56" rx="5"/>
+    <path d="M32 13C24.27 13 18 17.25 18 22.5C18 25.77 20.44 28.66 24.18 30.37L22.5 35L30.25 31.93C30.82 31.98 31.41 32 32 32C39.73 32 46 27.75 46 22.5C46 17.25 39.73 13 32 13Z"/>
+    <path d="M27 20H37M27 25.5H34" stroke-width="2.75"/>
+    <path d="M21 43H43M21 50H37"/>
+  </g>
+</svg>

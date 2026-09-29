@@ -1,6 +1,18 @@
 import { ref } from 'vue'
 
+export const DEFAULT_COLOR_SCHEME = 'obsidian-gray'
+export const DEFAULT_BG_TYPE = 'earth-orbit'
+
 export const COLOR_SCHEMES = [
+  {
+    id: 'obsidian-gray',
+    name: '曜石碳灰',
+    subtitle: '高级冷灰高光 · 纯粹石墨基底',
+    colors: ['#090d16', '#94a3b8', '#161e2e'], // Base, Primary Accent, Secondary Surface
+    primaryColor: '#94a3b8',
+    baseColor: '#090d16',
+    surfaceColor: '#161e2e'
+  },
   {
     id: 'classic-cyan',
     name: '经典冷青与玄青',
@@ -23,6 +35,18 @@ export const COLOR_SCHEMES = [
 
 export const BG_OPTIONS = [
   {
+    id: 'earth-orbit',
+    name: '地球深空（动态）',
+    subtitle: '超清深空轨道视频 · 晨曦与地球大气',
+    type: 'video'
+  },
+  {
+    id: 'clouds-static',
+    name: '云山日光（静态）',
+    subtitle: '静态日光云海 · 静谧清晰',
+    type: 'static'
+  },
+  {
     id: 'galaxy',
     name: '星际穿越（动态）',
     subtitle: '动态宇宙星空 · WebGL 粒子与引力交互',
@@ -35,12 +59,6 @@ export const BG_OPTIONS = [
     type: 'dynamic'
   },
   {
-    id: 'clouds-static',
-    name: '云山日光（静态）',
-    subtitle: '静态日光云海 · 静谧清晰',
-    type: 'static'
-  },
-  {
     id: 'custom-local',
     name: '自定义本地背景',
     subtitle: '支持本地高清图片与静音视频 · 纯本地加载不上云',
@@ -50,6 +68,14 @@ export const BG_OPTIONS = [
 
 // 兼容旧版 THEME_STYLES 导出
 export const THEME_STYLES = [
+  {
+    id: 'earth-orbit',
+    name: '地球深空（动态）',
+    subtitle: '曜石碳灰 · 地球深空',
+    colors: ['#090d16', '#94a3b8', '#161e2e'],
+    primaryColor: '#94a3b8',
+    bgPreview: '#090d16'
+  },
   {
     id: 'galaxy',
     name: '星际穿越（动态）',
@@ -76,10 +102,140 @@ export const THEME_STYLES = [
   }
 ]
 
-const COLOR_SCHEME_KEY = 'labhub_color_scheme'
-const BG_TYPE_KEY = 'labhub_bg_type'
-const LEGACY_STORAGE_KEY = 'labhub_theme_style'
-export const CUSTOM_COLOR_SCHEME_KEY = 'labhub_custom_color_scheme'
+const COLOR_SCHEME_KEY = 'cssbd_color_scheme'
+const BG_TYPE_KEY = 'cssbd_bg_type'
+const LEGACY_STORAGE_KEY = 'cssbd_theme_style'
+export const DEFAULT_MIGRATION_KEY = 'cssbd_default_v20260925'
+export const CUSTOM_COLOR_SCHEME_KEY = 'cssbd_custom_color_scheme'
+export const GLASS_STYLE_KEY = 'cssbd_glass_style'
+export const BG_DIM_KEY = 'cssbd_bg_dim_percent_v2'
+export const DEFAULT_BG_DIM = 100
+
+export function migratePreviousDefaultUsers() {
+  if (typeof window === 'undefined') return
+  try {
+    if (localStorage.getItem(DEFAULT_MIGRATION_KEY)) return
+    const savedScheme = localStorage.getItem(COLOR_SCHEME_KEY)
+    const savedBg = localStorage.getItem(BG_TYPE_KEY)
+    const savedLegacy = localStorage.getItem(LEGACY_STORAGE_KEY)
+
+    const isOldDefaultScheme = !savedScheme || savedScheme === 'classic-cyan' || savedScheme === 'nebula-purple'
+    const isOldDefaultBg = !savedBg || savedBg === 'clouds-static' || savedBg === 'galaxy'
+    const isOldLegacy = savedLegacy === 'clouds-static' || savedLegacy === 'galaxy' || savedLegacy === 'vanta-fog'
+
+    if (savedScheme !== 'custom' && savedBg !== 'custom-local' && (isOldDefaultScheme || isOldDefaultBg || isOldLegacy)) {
+      localStorage.setItem(COLOR_SCHEME_KEY, DEFAULT_COLOR_SCHEME)
+      localStorage.setItem(BG_TYPE_KEY, DEFAULT_BG_TYPE)
+      localStorage.setItem(LEGACY_STORAGE_KEY, 'earth-orbit')
+    }
+    localStorage.setItem(DEFAULT_MIGRATION_KEY, '1')
+  } catch (e) {
+    console.warn('Failed to migrate default theme:', e)
+  }
+}
+
+migratePreviousDefaultUsers()
+
+function getInitialBgDim() {
+  if (typeof window === 'undefined') return DEFAULT_BG_DIM
+  try {
+    const saved = localStorage.getItem(BG_DIM_KEY)
+    if (saved !== null) {
+      const num = parseInt(saved, 10)
+      if (!isNaN(num) && num >= 0 && num <= 100) {
+        return num
+      }
+    }
+    const oldSaved = localStorage.getItem('cssbd_bg_dim_percent')
+    if (oldSaved !== null) {
+      const oldNum = parseInt(oldSaved, 10)
+      if (!isNaN(oldNum) && oldNum >= 0 && oldNum <= 100 && oldNum !== 60) {
+        localStorage.setItem(BG_DIM_KEY, String(oldNum))
+        return oldNum
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to read bg dim from localStorage:', e)
+  }
+  return DEFAULT_BG_DIM
+}
+
+export const currentBgDim = ref(getInitialBgDim())
+
+export function setBgDim(val) {
+  const clamped = Math.max(0, Math.min(100, Math.round(Number(val) || 0)))
+  currentBgDim.value = clamped
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(BG_DIM_KEY, String(clamped))
+    } catch (e) {}
+  }
+  if (typeof document !== 'undefined' && document.documentElement) {
+    document.documentElement.style.setProperty('--bg-dim', (clamped / 100).toFixed(2))
+  }
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    try {
+      const evt = typeof CustomEvent === 'function'
+        ? new CustomEvent('bg-dim-changed', { detail: { percent: clamped, factor: clamped / 100 } })
+        : { type: 'bg-dim-changed', detail: { percent: clamped, factor: clamped / 100 } }
+      window.dispatchEvent(evt)
+    } catch (e) {}
+  }
+  return clamped
+}
+
+export const GLASS_OPTIONS = [
+  {
+    id: 'liquid',
+    name: '液态玻璃设计',
+    subtitle: '原版晶莹 · WebGL 拟真光感折射与液态质感',
+    description: '原封还原基于 ybouane/liquidglass 调试完美的 WebGL 实时光学折射、菲涅尔高光与微光质感，晶莹通透，极具未来感。',
+    tag: '默认推荐'
+  },
+  {
+    id: 'frosted',
+    name: '经典毛玻璃',
+    subtitle: '清透半透明 · CSS 晶莹微光面板',
+    description: '采用轻量清透的 CSS 半透明面板与微光边框，不启用实时 WebGL 光学运算，沉稳通透，兼顾发热与续航。',
+    tag: '轻量清透'
+  }
+]
+
+function getInitialGlassStyle() {
+  if (typeof window === 'undefined') return 'liquid'
+  try {
+    const saved = localStorage.getItem(GLASS_STYLE_KEY)
+    if (saved === 'liquid' || saved === 'frosted') {
+      return saved
+    }
+  } catch (e) {
+    console.warn('Failed to read glass style from localStorage:', e)
+  }
+  return 'liquid'
+}
+
+export const currentGlassStyle = ref(getInitialGlassStyle())
+
+export function setGlassStyle(styleId) {
+  const actualStyle = styleId === 'frosted' ? 'frosted' : 'liquid'
+  currentGlassStyle.value = actualStyle
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(GLASS_STYLE_KEY, actualStyle)
+  }
+  if (typeof document !== 'undefined' && document.documentElement) {
+    document.documentElement.setAttribute('data-glass-style', actualStyle)
+  }
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    try {
+      const evt = typeof CustomEvent === 'function'
+        ? new CustomEvent('glass-style-changed', { detail: { style: actualStyle } })
+        : { type: 'glass-style-changed', detail: { style: actualStyle } }
+      window.dispatchEvent(evt)
+    } catch (e) {
+      console.warn('Failed to dispatch glass-style-changed event:', e)
+    }
+  }
+}
 
 export const DEFAULT_CUSTOM_COLOR_SCHEME = {
   id: 'custom',
@@ -91,6 +247,8 @@ export const DEFAULT_CUSTOM_COLOR_SCHEME = {
   surfaceColor: 'rgba(8, 22, 42, 0.75)',
   accentInk: '#041019',
   accentStrong: '#7dd3fc',
+  soft: '#c9dce4',
+  muted: '#8ba6b2',
   lineColor: 'rgba(56, 189, 248, 0.20)',
   raised: 'rgba(56, 189, 248, 0.12)',
   glass: 'rgba(13, 32, 61, 0.50)',
@@ -232,6 +390,17 @@ export function deriveThemePalette(primaryHex, baseHex, customPanelHex = null) {
   const raisedColor = `rgba(${p.r}, ${p.g}, ${p.b}, 0.12)`
   const glassColor = `rgba(${p.r}, ${p.g}, ${p.b}, 0.25)`
 
+  // 智能计算与主色调谐的 soft (次级文本) 与 muted (弱化文本/占位色)，彻底杜绝冷调紫/蓝灰突兀
+  const softR = Math.round(225 * 0.86 + p.r * 0.14)
+  const softG = Math.round(225 * 0.86 + p.g * 0.14)
+  const softB = Math.round(225 * 0.86 + p.b * 0.14)
+  const soft = rgbToHex(softR, softG, softB)
+
+  const mutedR = Math.round(160 * 0.80 + p.r * 0.20)
+  const mutedG = Math.round(160 * 0.80 + p.g * 0.20)
+  const mutedB = Math.round(160 * 0.80 + p.b * 0.20)
+  const muted = rgbToHex(mutedR, mutedG, mutedB)
+
   return {
     id: 'custom',
     name: '自定义配色',
@@ -242,6 +411,8 @@ export function deriveThemePalette(primaryHex, baseHex, customPanelHex = null) {
     surfaceColor,
     accentInk,
     accentStrong,
+    soft,
+    muted,
     lineColor,
     raised: raisedColor,
     glass: glassColor
@@ -310,37 +481,39 @@ export function saveCustomColorScheme(palette) {
 }
 
 function getInitialColorScheme() {
-  if (typeof window === 'undefined') return 'classic-cyan'
+  if (typeof window === 'undefined') return DEFAULT_COLOR_SCHEME
   try {
     const saved = localStorage.getItem(COLOR_SCHEME_KEY)
-    if (saved === 'classic-cyan' || saved === 'nebula-purple' || saved === 'custom') {
+    if (saved === 'obsidian-gray' || saved === 'classic-cyan' || saved === 'nebula-purple' || saved === 'custom') {
       return saved
     }
     // 从旧版兼容器迁移
     const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
+    if (legacy === 'earth-orbit') return 'obsidian-gray'
     if (legacy === 'galaxy') return 'nebula-purple'
+    if (legacy === 'vanta-fog' || legacy === 'clouds-static') return 'classic-cyan'
   } catch (e) {
     console.warn('Failed to read color scheme from localStorage:', e)
   }
-  return 'classic-cyan'
+  return DEFAULT_COLOR_SCHEME
 }
 
 function getInitialBgType() {
-  if (typeof window === 'undefined') return 'clouds-static'
+  if (typeof window === 'undefined') return DEFAULT_BG_TYPE
   try {
     const saved = localStorage.getItem(BG_TYPE_KEY)
-    if (saved === 'galaxy' || saved === 'vanta-fog' || saved === 'clouds-static' || saved === 'custom-local') {
+    if (saved === 'earth-orbit' || saved === 'galaxy' || saved === 'vanta-fog' || saved === 'clouds-static' || saved === 'custom-local') {
       return saved
     }
     // 从旧版兼容器迁移
     const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
-    if (legacy === 'galaxy' || legacy === 'vanta-fog' || legacy === 'clouds-static') {
+    if (legacy === 'earth-orbit' || legacy === 'galaxy' || legacy === 'vanta-fog' || legacy === 'clouds-static') {
       return legacy
     }
   } catch (e) {
     console.warn('Failed to read bg type from localStorage:', e)
   }
-  return 'clouds-static'
+  return DEFAULT_BG_TYPE
 }
 
 export const currentColorScheme = ref(getInitialColorScheme())
@@ -348,9 +521,11 @@ export const currentBgType = ref(getInitialBgType())
 
 // 兼容器：保留 currentThemeStyle 响应式对象
 function resolveLegacyTheme(scheme, bg) {
+  if (scheme === 'obsidian-gray') return 'earth-orbit'
   if (scheme === 'nebula-purple') return 'galaxy'
   if (scheme === 'custom') return 'custom'
   if (bg === 'vanta-fog') return 'vanta-fog'
+  if (bg === 'earth-orbit') return 'earth-orbit'
   return 'clouds-static'
 }
 
@@ -377,10 +552,13 @@ export function applyThemeToDOM(scheme = currentColorScheme.value, bg = currentB
   if (typeof document === 'undefined' || !document.documentElement) return
   const doc = document.documentElement
 
-  // 如果传入的是旧版风格名称（如 'galaxy' / 'vanta-fog' / 'clouds-static'），智能解构为对应的配色与背景
+  // 如果传入的是旧版风格名称（如 'earth-orbit' / 'galaxy' / 'vanta-fog' / 'clouds-static'），智能解构为对应的配色与背景
   let actualScheme = scheme
   let actualBg = bg
-  if (scheme === 'galaxy') {
+  if (scheme === 'earth-orbit') {
+    actualScheme = 'obsidian-gray'
+    if (!bg || bg === 'earth-orbit') actualBg = currentBgType.value || 'earth-orbit'
+  } else if (scheme === 'galaxy') {
     actualScheme = 'nebula-purple'
     if (!bg || bg === 'galaxy') actualBg = currentBgType.value || 'galaxy'
   } else if (scheme === 'vanta-fog') {
@@ -391,19 +569,20 @@ export function applyThemeToDOM(scheme = currentColorScheme.value, bg = currentB
     if (!bg || bg === 'clouds-static') actualBg = currentBgType.value || 'clouds-static'
   }
 
-  if (actualScheme !== 'nebula-purple' && actualScheme !== 'custom') {
-    actualScheme = 'classic-cyan'
+  if (actualScheme !== 'obsidian-gray' && actualScheme !== 'classic-cyan' && actualScheme !== 'nebula-purple' && actualScheme !== 'custom') {
+    actualScheme = DEFAULT_COLOR_SCHEME
   }
 
-  actualBg = (actualBg === 'galaxy' || actualBg === 'vanta-fog' || actualBg === 'clouds-static' || actualBg === 'custom-local')
+  actualBg = (actualBg === 'earth-orbit' || actualBg === 'galaxy' || actualBg === 'vanta-fog' || actualBg === 'clouds-static' || actualBg === 'custom-local')
     ? actualBg
-    : (currentBgType.value || 'clouds-static')
+    : (currentBgType.value || DEFAULT_BG_TYPE)
 
-  const legacyTheme = actualScheme === 'nebula-purple' ? 'galaxy' : (actualScheme === 'custom' ? 'custom' : 'vanta-fog')
+  const legacyTheme = actualScheme === 'obsidian-gray' ? 'earth-orbit' : (actualScheme === 'nebula-purple' ? 'galaxy' : (actualScheme === 'custom' ? 'custom' : 'vanta-fog'))
 
   // 1. 设置解耦属性
   doc.setAttribute('data-color-scheme', actualScheme)
   doc.setAttribute('data-bg-type', actualBg)
+  doc.setAttribute('data-glass-style', currentGlassStyle.value)
 
   // 2. 兼容旧版属性
   doc.setAttribute('data-theme-style', legacyTheme)
@@ -420,8 +599,8 @@ export function applyThemeToDOM(scheme = currentColorScheme.value, bg = currentB
       doc.style.setProperty('--raised', palette.raised || 'rgba(255, 255, 255, 0.1)')
       doc.style.setProperty('--glass', palette.glass || 'rgba(0, 0, 0, 0.3)')
       doc.style.setProperty('--text', '#f8fafc')
-      doc.style.setProperty('--soft', '#cbd5e1')
-      doc.style.setProperty('--muted', '#94a3b8')
+      doc.style.setProperty('--soft', palette.soft || '#cbd5e1')
+      doc.style.setProperty('--muted', palette.muted || '#94a3b8')
       doc.style.setProperty('--accent', palette.primaryColor)
       doc.style.setProperty('--accent-strong', palette.accentStrong || palette.primaryColor)
       doc.style.setProperty('--accent-ink', palette.accentInk || '#000000')
@@ -435,7 +614,7 @@ export function applyThemeToDOM(scheme = currentColorScheme.value, bg = currentB
           doc.style.removeProperty(v)
         }
       })
-      const baseBg = actualScheme === 'nebula-purple' ? '#03020a' : '#081f28'
+      const baseBg = actualScheme === 'obsidian-gray' ? '#090d16' : (actualScheme === 'nebula-purple' ? '#03020a' : '#081f28')
       doc.style.backgroundColor = baseBg
     }
 
@@ -447,6 +626,7 @@ export function applyThemeToDOM(scheme = currentColorScheme.value, bg = currentB
     } else {
       doc.style.backgroundImage = 'none'
     }
+    doc.style.setProperty('--bg-dim', (currentBgDim.value / 100).toFixed(2))
   }
 }
 
@@ -463,13 +643,14 @@ export function applyPreviewPaletteToDOM(palette) {
     doc.style.setProperty('--raised', palette.raised || 'rgba(255, 255, 255, 0.1)')
     doc.style.setProperty('--glass', palette.glass || 'rgba(0, 0, 0, 0.3)')
     doc.style.setProperty('--text', '#f8fafc')
-    doc.style.setProperty('--soft', '#cbd5e1')
-    doc.style.setProperty('--muted', '#94a3b8')
+    doc.style.setProperty('--soft', palette.soft || '#cbd5e1')
+    doc.style.setProperty('--muted', palette.muted || '#94a3b8')
     doc.style.setProperty('--accent', palette.primaryColor)
     doc.style.setProperty('--accent-strong', palette.accentStrong || palette.primaryColor)
     doc.style.setProperty('--accent-ink', palette.accentInk || '#000000')
     doc.style.setProperty('--line', palette.lineColor)
     doc.style.setProperty('--focus', palette.primaryColor)
+    doc.style.setProperty('--bg-dim', (currentBgDim.value / 100).toFixed(2))
     doc.style.backgroundColor = palette.baseColor
   }
 }
@@ -479,7 +660,7 @@ applyThemeToDOM(currentColorScheme.value, currentBgType.value)
 
 export function useThemeStyle() {
   function setColorScheme(scheme) {
-    if (scheme !== 'classic-cyan' && scheme !== 'nebula-purple' && scheme !== 'custom') return
+    if (scheme !== 'obsidian-gray' && scheme !== 'classic-cyan' && scheme !== 'nebula-purple' && scheme !== 'custom') return
     currentColorScheme.value = scheme
     currentThemeStyle.value = resolveLegacyTheme(scheme, currentBgType.value)
     applyThemeToDOM(scheme, currentBgType.value)
@@ -492,7 +673,7 @@ export function useThemeStyle() {
   }
 
   function setBgType(bgType) {
-    if (bgType !== 'galaxy' && bgType !== 'vanta-fog' && bgType !== 'clouds-static' && bgType !== 'custom-local') return
+    if (bgType !== 'earth-orbit' && bgType !== 'galaxy' && bgType !== 'vanta-fog' && bgType !== 'clouds-static' && bgType !== 'custom-local') return
     currentBgType.value = bgType
     currentThemeStyle.value = resolveLegacyTheme(currentColorScheme.value, bgType)
     applyThemeToDOM(currentColorScheme.value, bgType)
@@ -506,7 +687,10 @@ export function useThemeStyle() {
 
   // 兼容旧版 setThemeStyle 调用
   function setThemeStyle(style) {
-    if (style === 'galaxy') {
+    if (style === 'earth-orbit') {
+      setColorScheme('obsidian-gray')
+      setBgType('earth-orbit')
+    } else if (style === 'galaxy') {
       setColorScheme('nebula-purple')
       setBgType('galaxy')
     } else if (style === 'vanta-fog') {
@@ -521,9 +705,15 @@ export function useThemeStyle() {
   return {
     currentColorScheme,
     currentBgType,
+    currentBgDim,
+    setBgDim,
+    DEFAULT_BG_DIM,
     currentThemeStyle,
     colorSchemes: COLOR_SCHEMES,
     bgOptions: BG_OPTIONS,
+    glassOptions: GLASS_OPTIONS,
+    currentGlassStyle,
+    setGlassStyle,
     themeStyles: THEME_STYLES,
     customColorScheme,
     customPresetTemplates: CUSTOM_PRESET_TEMPLATES,
@@ -539,5 +729,5 @@ export function useThemeStyle() {
   }
 }
 
-export { COLOR_SCHEMES as colorSchemes, BG_OPTIONS as bgOptions, THEME_STYLES as themeStyles }
+export { COLOR_SCHEMES as colorSchemes, BG_OPTIONS as bgOptions, THEME_STYLES as themeStyles, GLASS_OPTIONS as glassOptions }
 

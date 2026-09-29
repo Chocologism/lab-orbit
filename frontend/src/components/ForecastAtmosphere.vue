@@ -6,11 +6,20 @@ import * as THREE from 'three'
 import FOG from 'vanta/dist/vanta.fog.min'
 import { currentThemeStyle, currentBgType } from '../composables/useThemeStyle'
 import { getLocalBackground } from '../utils/localBgStorage'
+import {
+  getOrLoadRawOrbitVideoUrl,
+  getImmediateRawOrbitVideoUrl,
+  preloadRawOrbitVideo
+} from '../utils/rawOrbitBackground'
 
 const route = useRoute()
 const containerRef = ref(null)
+const defaultVideoRef = ref(null)
+const localVideoRef = ref(null)
 const isLogin = computed(() => route.path === '/login')
 const localMedia = ref(null)
+const rawOrbitUrl = ref(getImmediateRawOrbitVideoUrl())
+const isOrbitPlaying = ref(false)
 
 const vertexShader = `
 attribute vec2 uv;
@@ -548,33 +557,138 @@ function handleLocalBgChanged() {
   }
 }
 
+function onOrbitPlaying() {
+  isOrbitPlaying.value = true
+  onMediaLoaded()
+}
+
+// ==========================================
+// 电源与休眠保护管理（Power & Sleep Assertion Release）
+// ==========================================
+const IDLE_TIMEOUT_MS = 3 * 60 * 1000 // 3 分钟无用户操作自动暂停视频，释放操作系统 PreventUserIdleDisplaySleep 断言
+let idleTimer = null
+let lastActivityTime = 0
+const isUserIdle = ref(false)
+
+function getActiveVideo() {
+  if (currentBgType.value === 'earth-orbit') {
+    return defaultVideoRef.value
+  }
+  if (currentBgType.value === 'custom-local' && localMedia.value?.type === 'video') {
+    return localVideoRef.value
+  }
+  return null
+}
+
+function pauseVideoForPowerSaving() {
+  const vid = getActiveVideo()
+  if (vid && !vid.paused) {
+    vid.pause()
+  }
+}
+
+function resumeVideoPlayback() {
+  if (typeof document !== 'undefined' && document.hidden) return
+  if (isUserIdle.value) return
+  const vid = getActiveVideo()
+  if (vid && vid.paused) {
+    vid.play().catch(() => {})
+  }
+}
+
+function handleVisibilityChange() {
+  if (document.hidden) {
+    pauseVideoForPowerSaving()
+  } else {
+    resetUserActivity()
+    resumeVideoPlayback()
+  }
+}
+
+function resetUserActivity() {
+  const now = Date.now()
+  if (isUserIdle.value) {
+    isUserIdle.value = false
+    resumeVideoPlayback()
+  }
+  // 节流定时器重置（每秒最多重新安排一次定时器）
+  if (now - lastActivityTime > 1000 || !idleTimer) {
+    lastActivityTime = now
+    if (idleTimer) clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => {
+      isUserIdle.value = true
+      pauseVideoForPowerSaving()
+    }, IDLE_TIMEOUT_MS)
+  }
+}
+
+const USER_EVENTS = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll']
+
+async function loadRawOrbit() {
+  try {
+    const url = await getOrLoadRawOrbitVideoUrl()
+    if (url && rawOrbitUrl.value !== url) {
+      rawOrbitUrl.value = url
+    }
+  } catch (e) {
+    console.warn('Failed to load raw orbit video:', e)
+    if (!rawOrbitUrl.value) {
+      rawOrbitUrl.value = '/api/video/earth-orbit'
+    }
+  }
+}
+
 function startAtmosphere(bgType) {
-  if (!containerRef.value) return
-  if (bgType === 'clouds-static') {
+  if (bgType === 'earth-orbit') {
     destroyGalaxy()
     destroyVantaFog()
     if (containerRef.value) {
       containerRef.value.innerHTML = ''
     }
-  } else if (bgType === 'vanta-fog') {
-    destroyGalaxy()
-    initVantaFog()
-  } else if (bgType === 'galaxy') {
-    destroyVantaFog()
-    initGalaxy()
-  } else if (bgType === 'custom-local') {
-    destroyGalaxy()
-    destroyVantaFog()
-    if (containerRef.value) {
-      containerRef.value.innerHTML = ''
+    if (defaultVideoRef.value && !isUserIdle.value && (typeof document === 'undefined' || !document.hidden)) {
+      defaultVideoRef.value.play().catch(() => {})
     }
-    refreshLocalMedia()
+    loadRawOrbit()
+  } else {
+    if (defaultVideoRef.value) {
+      defaultVideoRef.value.pause()
+    }
+    if (localVideoRef.value && bgType !== 'custom-local') {
+      localVideoRef.value.pause()
+    }
+    if (!containerRef.value) return
+    if (bgType === 'clouds-static') {
+      destroyGalaxy()
+      destroyVantaFog()
+      if (containerRef.value) {
+        containerRef.value.innerHTML = ''
+      }
+    } else if (bgType === 'vanta-fog') {
+      destroyGalaxy()
+      initVantaFog()
+    } else if (bgType === 'galaxy') {
+      destroyVantaFog()
+      initGalaxy()
+    } else if (bgType === 'custom-local') {
+      destroyGalaxy()
+      destroyVantaFog()
+      if (containerRef.value) {
+        containerRef.value.innerHTML = ''
+      }
+      refreshLocalMedia()
+    }
   }
 }
 
 function stopAtmosphere() {
   destroyGalaxy()
   destroyVantaFog()
+  if (defaultVideoRef.value) {
+    defaultVideoRef.value.pause()
+  }
+  if (localVideoRef.value) {
+    localVideoRef.value.pause()
+  }
   if (localMedia.value?.url) {
     try {
       URL.revokeObjectURL(localMedia.value.url)
@@ -585,6 +699,9 @@ function stopAtmosphere() {
 
 watch(currentBgType, (newBg) => {
   startAtmosphere(newBg)
+  nextTick(() => {
+    onMediaLoaded()
+  })
 })
 
 watch(() => route.path, (newPath) => {
@@ -605,9 +722,21 @@ function onMediaLoaded() {
   }
 }
 
+function handleRawOrbitReady(e) {
+  if (e?.detail?.url && rawOrbitUrl.value !== e.detail.url) {
+    rawOrbitUrl.value = e.detail.url
+  }
+}
+
 onMounted(() => {
   if (typeof window !== 'undefined') {
     window.addEventListener('local-bg-changed', handleLocalBgChanged)
+    window.addEventListener('csbd-raw-orbit-ready', handleRawOrbitReady)
+    USER_EVENTS.forEach(ev => {
+      window.addEventListener(ev, resetUserActivity, { passive: true })
+    })
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    resetUserActivity()
   }
   startAtmosphere(currentBgType.value)
 })
@@ -615,6 +744,15 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('local-bg-changed', handleLocalBgChanged)
+    window.removeEventListener('csbd-raw-orbit-ready', handleRawOrbitReady)
+    USER_EVENTS.forEach(ev => {
+      window.removeEventListener(ev, resetUserActivity)
+    })
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
+    if (idleTimer) {
+      clearTimeout(idleTimer)
+      idleTimer = null
+    }
   }
   stopAtmosphere()
 })
@@ -622,10 +760,40 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="forecast-atmosphere" aria-hidden="true">
+    <!-- 默认深空轨道 4K 视频背景（原版无损，持久保活，秒切秒播） -->
+    <div
+      class="earth-orbit-media-layer"
+      :class="{ 'is-active': currentBgType === 'earth-orbit' }"
+    >
+      <video
+        ref="defaultVideoRef"
+        class="default-bg-video"
+        :class="{ 'custom-bg-media': currentBgType === 'earth-orbit' }"
+        :src="rawOrbitUrl || '/api/video/earth-orbit'"
+        poster="/assets/forecast/earth-orbit-poster.jpg"
+        autoplay
+        loop
+        muted
+        playsinline
+        disablepictureinpicture
+        @loadeddata="onMediaLoaded"
+        @playing="onOrbitPlaying"
+      ></video>
+      <img
+        v-if="!isOrbitPlaying && currentBgType === 'earth-orbit'"
+        class="custom-bg-media default-bg-video earth-orbit-poster-fallback"
+        src="/assets/forecast/earth-orbit-poster.jpg"
+        alt=""
+        decoding="async"
+        @load="onMediaLoaded"
+      />
+    </div>
+
     <!-- 本地自定义图片/视频背景（纯本地加载，绝不上云） -->
     <template v-if="currentBgType === 'custom-local' && localMedia">
       <video
         v-if="localMedia.type === 'video'"
+        ref="localVideoRef"
         :src="localMedia.url"
         class="custom-bg-media"
         autoplay
@@ -654,6 +822,36 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.earth-orbit-media-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.35s ease-out, visibility 0.35s ease-out;
+  z-index: 0;
+}
+
+.earth-orbit-media-layer.is-active {
+  opacity: 1;
+  visibility: visible;
+}
+
+.default-bg-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.earth-orbit-poster-fallback {
+  transition: opacity 0.3s ease-out;
+}
+
 .galaxy-atmosphere-canvas,
 .vanta-atmosphere-canvas {
   position: absolute;

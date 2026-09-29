@@ -65,6 +65,7 @@ def ensure_talks_columns(db: Session):
             ("city", "VARCHAR(100) DEFAULT ''"),
             ("organizer", "VARCHAR(200) DEFAULT ''"),
             ("sub_type", "VARCHAR(50) DEFAULT ''"),
+            ("abstract_start_date", "VARCHAR(10) DEFAULT ''"),
             ("abstract_deadline", "VARCHAR(10) DEFAULT ''"),
             ("early_bird_deadline", "VARCHAR(10) DEFAULT ''"),
             ("registration_deadline", "VARCHAR(10) DEFAULT ''"),
@@ -264,7 +265,7 @@ def update_talk(talk_id: int, req: TalkInput, user: User = Depends(get_current_u
     if not is_admin_or_creator:
         protected_fields = [
             'title', 'speaker', 'location', 'poster_url', 'notes', 'event_type',
-            'city', 'organizer', 'sub_type', 'abstract_deadline', 'early_bird_deadline',
+            'city', 'organizer', 'sub_type', 'abstract_start_date', 'abstract_deadline', 'early_bird_deadline',
             'registration_deadline', 'website_url', 'registration_url', 'handbook_url', 'source'
         ]
         for field in protected_fields:
@@ -293,3 +294,373 @@ def delete_talk(talk_id: int, user: User = Depends(get_current_user), db: Sessio
     if user.id != talk.created_by_id and user.role != 'admin': raise HTTPException(403, '仅上传者或管理员可删除报告')
     db.delete(talk); db.commit()
     return {'message': '报告已删除'}
+
+
+from pydantic import BaseModel
+import html as html_lib
+import json
+import re
+from urllib.parse import urljoin, urlparse, parse_qs, urlencode, urlunparse
+
+class ScrapeUrlRequest(BaseModel):
+    url: str
+
+def clean_html_to_text(html_content: str) -> str:
+    if not html_content:
+        return ''
+    t = re.sub(r'<(script|style|svg|noscript|iframe)\b[^<]*(?:(?!<\/\1>)<[^<]*)*<\/\1>', ' ', html_content, flags=re.I)
+    t = re.sub(r'<!--[\s\S]*?-->', ' ', t)
+    # 剔除下拉选择框与选项（防止带入全世界几百个时区或语言列表）
+    t = re.sub(r'<select\b[^<]*(?:(?!<\/select>)<[^<]*)*<\/select>', ' ', t, flags=re.I)
+    t = re.sub(r'<option\b[^<]*(?:(?!<\/option>)<[^<]*)*<\/option>', ' ', t, flags=re.I)
+    # 剔除导航与页眉页脚
+    t = re.sub(r'<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>', ' ', t, flags=re.I)
+    t = re.sub(r'<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>', ' ', t, flags=re.I)
+    t = re.sub(r'<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>', ' ', t, flags=re.I)
+    t = re.sub(r'<dialog\b[^<]*(?:(?!<\/dialog>)<[^<]*)*<\/dialog>', ' ', t, flags=re.I)
+    # 剔除特定噪音容器（时区选择器、语言切换栏、通知弹窗、跳过链接、工具栏等）
+    t = re.sub(r'<(?:div|section|aside)\b[^>]*\b(?:class|id)=["\'][^"\']*(?:timezone|language|toolbar|flashed|announcement|bypass|modal|dropdown|event-service-toolbar)[^"\']*["\'][^>]*>[\s\S]*?<\/(?:div|section|aside)>', ' ', t, flags=re.I)
+
+    t = re.sub(r'<\/(?:p|div|h[1-6]|li|tr|section|article|header|footer|aside|blockquote|table)>', '\n', t, flags=re.I)
+    t = re.sub(r'<(?:br|hr)\s*\/?>', '\n', t, flags=re.I)
+    t = re.sub(r'<[^>]+>', ' ', t)
+    t = html_lib.unescape(t)
+
+    timezone_pattern = re.compile(r'^[A-Za-z]+(?:\/[A-Za-z_]+)+$')
+    timezone_ui_pattern = re.compile(r'^(?:Choose timezone|Your profile timezone:|Use timezone based on:|Select a custom timezone|Custom|Event\/category)\b', re.I)
+    lang_pattern = re.compile(r'^(?:Deutsch|English|Español|Français|Italiano|Magyar|Polski|Português|Suomi|Svenska|Türkçe|Čeština|Монгол|Українська|中文|日本語)\s*(?:\([^)]+\))?$', re.I)
+    timetable_view_pattern = re.compile(r'^(?:Indico style(?:\s*-\s*.*)?|Indico Weeks View)$', re.I)
+    site_chrome_pattern = re.compile(r'^(?:Skip to main content|Go to the Indico Home Page|Powered by Indico|Oldest event|Older event|Newer event|Newest event)$', re.I)
+
+    lines = [re.sub(r'[ \t\f\v]+', ' ', line).strip() for line in t.splitlines()]
+    filtered_lines = []
+    for line in lines:
+        if not line:
+            continue
+        if timezone_pattern.match(line):
+            continue
+        if timezone_ui_pattern.match(line):
+            continue
+        if lang_pattern.match(line):
+            continue
+        if timetable_view_pattern.match(line):
+            continue
+        if site_chrome_pattern.match(line):
+            continue
+        filtered_lines.append(line)
+
+    dedup = []
+    prev = ''
+    for line in filtered_lines:
+        if line != prev:
+            dedup.append(line)
+            prev = line
+    return '\n'.join(dedup)
+
+def extract_main_content(html_content: str) -> str:
+    if not html_content:
+        return ''
+    content_container_regexes = [
+        r'<div\b[^>]*\bclass=["\'][^"\']*(?:conference-page|page-content|conferenceDetails)[^"\']*["\'][^>]*>([\s\S]*?)<\/div>\s*<\/div>',
+        r'<div\b[^>]*\bclass=["\'][^"\']*mainContent[^"\']*["\'][^>]*>([\s\S]*?)<\/div>\s*<\/div>',
+        r'<main\b[^>]*>([\s\S]*?)<\/main>',
+        r'<article\b[^>]*>([\s\S]*?)<\/article>',
+        r'<div\b[^>]*\bid=["\']main-content["\'][^>]*>([\s\S]*?)<\/div>'
+    ]
+    for pattern in content_container_regexes:
+        m = re.search(pattern, html_content, re.I)
+        if m and m.group(1):
+            extracted = clean_html_to_text(m.group(1))
+            if len(extracted.strip()) > 60:
+                return extracted
+    return clean_html_to_text(html_content)
+
+def extract_json_ld_event(html_content: str):
+    if not html_content:
+        return None
+    for m in re.finditer(r'<script\b[^>]*type=["\']application\/ld\+json["\'][^>]*>([\s\S]*?)<\/script>', html_content, re.I):
+        try:
+            data = json.loads(m.group(1))
+            event_obj = None
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict) and (item.get('@type') == 'Event' or item.get('type') == 'Event'):
+                        event_obj = item
+                        break
+            elif isinstance(data, dict):
+                if data.get('@type') == 'Event' or data.get('type') == 'Event':
+                    event_obj = data
+            if event_obj:
+                loc = event_obj.get('location')
+                location_str = ''
+                if isinstance(loc, dict):
+                    loc_name = loc.get('name', '')
+                    addr = loc.get('address', '')
+                    loc_addr = addr if isinstance(addr, str) else (addr.get('streetAddress', '') if isinstance(addr, dict) else '')
+                    location_str = f"{loc_name} ({loc_addr})" if (loc_name and loc_addr) else (loc_name or loc_addr)
+                elif isinstance(loc, str):
+                    location_str = loc
+                return {
+                    'title': event_obj.get('name', ''),
+                    'startDate': event_obj.get('startDate', ''),
+                    'endDate': event_obj.get('endDate', ''),
+                    'location': location_str,
+                    'description': event_obj.get('description', ''),
+                    'url': event_obj.get('url', '')
+                }
+        except Exception:
+            continue
+    return None
+
+def normalize_url(raw_url: str) -> str:
+    try:
+        p = urlparse(raw_url)
+        qs = parse_qs(p.query, keep_blank_values=True)
+        for k in ['view', 'lang', 'locale']:
+            qs.pop(k, None)
+        new_query = urlencode(qs, doseq=True)
+        clean_path = p.path.rstrip('/')
+        return urlunparse((p.scheme, p.netloc, clean_path, '', new_query, ''))
+    except Exception:
+        return raw_url.rstrip('/')
+
+@router.post('/scrape-url')
+async def scrape_url(req: ScrapeUrlRequest, user: User = Depends(get_current_user)):
+    target_url = (req.url or '').strip()
+    if not target_url.startswith(('http://', 'https://')):
+        raise HTTPException(400, '仅支持 HTTP 或 HTTPS 链接')
+
+    import aiohttp
+    import asyncio
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+    }
+
+    pages_scraped = []
+    text_sections = []
+    images_scored = {}
+    registration_url = ''
+    main_title = ''
+
+    timeout = aiohttp.ClientTimeout(total=8)
+    conn = aiohttp.TCPConnector(ssl=False)
+
+    try:
+        async with aiohttp.ClientSession(timeout=timeout, connector=conn, headers=headers) as session:
+            try:
+                async with session.get(target_url) as resp:
+                    if resp.status >= 400:
+                        raise HTTPException(400, f'目标网页返回错误状态码: {resp.status}')
+                    main_html = await resp.text(errors='ignore')
+            except Exception as e:
+                raise HTTPException(400, f'抓取目标网页失败: {str(e)}')
+
+            # 提取主页标题
+            m_og_title = re.search(r'<meta\s+[^>]*property=["\']og:title["\'][^>]*content=["\']([^"\']+)["\']', main_html, re.I) \
+                         or re.search(r'<meta\s+[^>]*content=["\']([^"\']+)["\'][^>]*property=["\']og:title["\']', main_html, re.I)
+            if m_og_title:
+                main_title = html_lib.unescape(m_og_title.group(1).strip())
+            else:
+                m_title = re.search(r'<title[^>]*>([\s\S]*?)<\/title>', main_html, re.I)
+                if m_title:
+                    main_title = html_lib.unescape(re.sub(r'<[^>]+>', '', m_title.group(1)).strip())
+
+            pages_scraped.append({'url': target_url, 'title': main_title or '活动主页', 'type': 'main', 'status': 'success'})
+
+            # 提取主页图片
+            for m_og_img in re.finditer(r'<meta\s+[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']', main_html, re.I):
+                abs_img = urljoin(target_url, m_og_img.group(1).strip())
+                images_scored[abs_img] = images_scored.get(abs_img, 0) + 15
+
+            poster_regex = re.compile(r'poster|banner|flyer|haibao|fengmian|cover|kv|headline|main', re.I)
+            ignore_regex = re.compile(r'favicon|\.ico$|\.svg$|avatar|headshot|arrow|badge|button|tracker|spacer|pixel|qrcode', re.I)
+
+            for m_img in re.finditer(r'<img\b([^>]+)>', main_html, re.I):
+                attrs = m_img.group(1)
+                m_src = re.search(r'\bsrc=["\']([^"\']+)["\']', attrs, re.I)
+                if not m_src:
+                    continue
+                raw_src = m_src.group(1).strip()
+                if raw_src.startswith('data:'):
+                    continue
+                abs_img = urljoin(target_url, raw_src)
+                if ignore_regex.search(abs_img):
+                    continue
+                score = 10 if poster_regex.search(attrs + ' ' + abs_img) else 2
+                images_scored[abs_img] = max(images_scored.get(abs_img, 0), score)
+
+            # 提取报名与子页面链接
+            parsed_main = urlparse(target_url)
+            target_path = parsed_main.path.rstrip('/')
+            candidate_links_dict = {}
+            subpage_regex = re.compile(r'program|schedule|agenda|timetable|calendar|registration|register|signup|submission|abstract|cfp|venue|hotel|accommodation|location|travel|speakers|keynote|committee|organization|dates|key-dates|important-dates|visa|fees|poster|flyer|invitation|announcement|日程|议程|注册|报名|投稿|征文|摘要|地点|会场|交通|住宿|酒店|签证|海报|组委会|组织机构|报告人|嘉宾|重要日期|关键日期|截止日期|截稿日期|大会日程', re.I)
+            external_reg_regex = re.compile(r'wjx\.cn|wj\.qq\.com|huodongxing\.com|forms\.gle|docs\.google\.com\/forms|jinshuju\.net', re.I)
+
+            # 1. 优先提取专属活动侧边栏/导航菜单中的所有栏目链接（如 Indico 的 conf_leftMenu / Event menu）
+            menu_block_m = re.search(
+                r'<(?:div|nav)\b[^>]*\b(?:class|id)=["\'][^"\']*(?:conf_leftMenu|event-menu|side-menu|conference-menu)[^"\']*["\'][^>]*>([\s\S]*?)<\/(?:div|nav)>',
+                main_html,
+                re.I
+            ) or re.search(
+                r'<h2\b[^>]*\bclass=["\'][^"\']*event-menu-heading[^"\']*["\'][^>]*>[\s\S]*?<ul\b[^>]*>([\s\S]*?)<\/ul>',
+                main_html,
+                re.I
+            )
+
+            base_clean = normalize_url(target_url)
+
+            if menu_block_m:
+                menu_html = menu_block_m.group(1)
+                for m_menu_a in re.finditer(r'<a\b([^>]*)\bhref=["\']([^"\'#]+)["\']([^>]*)>([\s\S]*?)<\/a>', menu_html, re.I):
+                    raw_href = m_menu_a.group(2).strip()
+                    link_text = html_lib.unescape(re.sub(r'<[^>]+>', '', m_menu_a.group(4)).strip())
+                    abs_href = urljoin(target_url, raw_href)
+                    if not abs_href or abs_href.startswith(('javascript:', 'mailto:', 'tel:')):
+                        continue
+                    clean_key = normalize_url(abs_href)
+                    if clean_key == base_clean or clean_key == f"{base_clean}/overview":
+                        continue
+
+                    menu_score = 30
+                    ctx = f"{clean_key} {link_text}"
+                    if re.search(r'key-dates|dates|日期|截止', ctx, re.I):
+                        menu_score += 10
+                    if re.search(r'abstract|submission|摘要|征集|投稿', ctx, re.I):
+                        menu_score += 8
+                    if re.search(r'registration|register|报名|注册', ctx, re.I):
+                        menu_score += 8
+                    if re.search(r'venue|hotel|location|会场|地点|酒店', ctx, re.I):
+                        menu_score += 6
+                    if re.search(r'visa|签证', ctx, re.I):
+                        menu_score += 6
+
+                    candidate_links_dict[clean_key] = {'url': abs_href, 'text': link_text, 'score': menu_score}
+
+            # 2. 遍历页面所有 a 标签进行补充探测
+            for m_a in re.finditer(r'<a\b([^>]*)\bhref=["\']([^"\'#]+)["\']([^>]*)>([\s\S]*?)<\/a>', main_html, re.I):
+                raw_href = m_a.group(2).strip()
+                link_text = html_lib.unescape(re.sub(r'<[^>]+>', '', m_a.group(4)).strip())
+                abs_href = urljoin(target_url, raw_href)
+                if not abs_href or abs_href.startswith(('javascript:', 'mailto:', 'tel:')):
+                    continue
+                combined_ctx = f"{raw_href} {link_text}"
+
+                if external_reg_regex.search(abs_href):
+                    if not registration_url:
+                        registration_url = abs_href
+                elif not registration_url and re.search(r'register|registration|signup|baoming', combined_ctx, re.I) and not re.search(r'login|signin', combined_ctx, re.I):
+                    registration_url = abs_href
+
+                if re.search(r'login|signin|logout|register_account|change-language|getindico\.io|learn\.getindico', abs_href, re.I):
+                    continue
+                if re.search(r'[?&]view=(?:standard|standard_inline_minutes|standard_numbered|standard_numbered_inline_minutes|indico_weeks_view)', abs_href, re.I):
+                    continue
+
+                clean_key = normalize_url(abs_href)
+                if clean_key == base_clean or clean_key == f"{base_clean}/overview":
+                    continue
+
+                parsed_link = urlparse(abs_href)
+                if parsed_main.netloc and parsed_link.netloc == parsed_main.netloc:
+                    if re.search(r'\.(zip|rar|tar|gz|exe|dmg|mp4|avi|mp3|ics|xml)$', abs_href, re.I):
+                        continue
+                    is_sub_path = bool(target_path and parsed_link.path.rstrip('/').startswith(target_path))
+                    matches_keyword = bool(subpage_regex.search(combined_ctx))
+
+                    if matches_keyword or is_sub_path:
+                        score = 6
+                        if re.search(r'key-dates|dates|important-dates|重要日期|关键日期|截止日期|截稿日期', combined_ctx, re.I):
+                            score += 12
+                        if re.search(r'submission|abstract|cfp|call for abstracts|投稿|征文|摘要', combined_ctx, re.I):
+                            score += 10
+                        if re.search(r'registration|register|signup|registration info|注册|报名', combined_ctx, re.I):
+                            score += 10
+                        if re.search(r'venue|hotel|accommodation|location|travel|地点|会场|交通|住宿|酒店', combined_ctx, re.I):
+                            score += 9
+                        if re.search(r'visa|visa-information|签证', combined_ctx, re.I):
+                            score += 9
+                        if re.search(r'program|schedule|agenda|timetable|calendar|日程|议程', combined_ctx, re.I):
+                            score += 8
+                        if re.search(r'speakers|keynote|报告人|嘉宾', combined_ctx, re.I):
+                            score += 7
+                        if re.search(r'committee|organization|组委会|组织机构', combined_ctx, re.I):
+                            score += 5
+                        if is_sub_path:
+                            score += 5
+
+                        if clean_key not in candidate_links_dict or candidate_links_dict[clean_key]['score'] < score:
+                            candidate_links_dict[clean_key] = {'url': abs_href, 'text': link_text, 'score': score}
+
+            candidate_links = sorted(candidate_links_dict.values(), key=lambda x: x['score'], reverse=True)
+
+            # 若存在 JSON-LD 结构化活动元数据，优先置顶录入
+            json_ld_event = extract_json_ld_event(main_html)
+            if json_ld_event:
+                meta_lines = ['【活动官网结构化元数据】']
+                if json_ld_event.get('title'):
+                    meta_lines.append(f"活动名称：{json_ld_event['title']}")
+                if json_ld_event.get('startDate'):
+                    meta_lines.append(f"开始日期：{json_ld_event['startDate']}")
+                if json_ld_event.get('endDate'):
+                    meta_lines.append(f"结束日期：{json_ld_event['endDate']}")
+                if json_ld_event.get('location'):
+                    meta_lines.append(f"活动地点：{json_ld_event['location']}")
+                if json_ld_event.get('description'):
+                    meta_lines.append(f"活动简述：{json_ld_event['description']}")
+                text_sections.append('\n'.join(meta_lines))
+
+            cleaned_main = extract_main_content(main_html)[:7000]
+            text_sections.append(f"【活动官网主页】{target_url}\n页面标题：{main_title}\n页面正文：\n{cleaned_main}")
+
+            # 并发抓取子页面 (最多 8 个核心子栏目)
+            sub_targets = candidate_links[:8]
+            if sub_targets:
+                async def fetch_sub(link):
+                    try:
+                        async with session.get(link['url'], timeout=aiohttp.ClientTimeout(total=5)) as s_resp:
+                            if s_resp.status == 200:
+                                s_html = await s_resp.text(errors='ignore')
+                                s_text = extract_main_content(s_html)[:3500]
+                                for m_img in re.finditer(r'<img\b([^>]+)>', s_html, re.I):
+                                    attrs = m_img.group(1)
+                                    m_src = re.search(r'\bsrc=["\']([^"\']+)["\']', attrs, re.I)
+                                    if m_src:
+                                        abs_img = urljoin(link['url'], m_src.group(1).strip())
+                                        if not ignore_regex.search(abs_img) and not abs_img.startswith('data:'):
+                                            score = 8 if poster_regex.search(attrs + ' ' + abs_img) else 2
+                                            images_scored[abs_img] = max(images_scored.get(abs_img, 0), score)
+                                pages_scraped.append({'url': link['url'], 'title': link['text'] or '相关栏目', 'type': 'subpage', 'status': 'success'})
+                                return f"\n【相关栏目：{link['text']}】{link['url']}\n{s_text}"
+                    except Exception:
+                        pass
+                    pages_scraped.append({'url': link['url'], 'title': link['text'] or '相关栏目', 'type': 'subpage', 'status': 'failed'})
+                    return ''
+
+                sub_results = await asyncio.gather(*(fetch_sub(l) for l in sub_targets))
+                for s_res in sub_results:
+                    if s_res:
+                        text_sections.append(s_res)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f'抓取服务异常: {str(e)}')
+
+    sorted_imgs = [img for img, _ in sorted(images_scored.items(), key=lambda x: x[1], reverse=True)]
+    best_poster = sorted_imgs[0] if sorted_imgs else ''
+    combined_text = '\n\n'.join(text_sections)[:18000]
+
+    return {
+        'success': True,
+        'url': target_url,
+        'title': main_title,
+        'combined_text': combined_text,
+        'pages_scraped': pages_scraped,
+        'poster_candidates': sorted_imgs[:8],
+        'best_poster_url': best_poster,
+        'registration_url': registration_url
+    }
+

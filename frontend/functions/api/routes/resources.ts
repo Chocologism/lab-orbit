@@ -110,10 +110,11 @@ app.post('/books', async (c) => {
   const download_url = body.download_url || '';
   const order_num = body.order_num || 0;
 
+  await c.env.DB.prepare('ALTER TABLE resource_books ADD COLUMN updated_at TEXT').run().catch(() => {});
   const res = await c.env.DB.prepare(
     `INSERT INTO resource_books 
-     (title, original_title, authors, category, description, cover_url, tutorial_url, exercise_url, github_url, download_url, order_num, created_by_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+     (title, original_title, authors, category, description, cover_url, tutorial_url, exercise_url, github_url, download_url, order_num, created_by_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
   ).bind(title, original_title, authors, category, description, cover_url, tutorial_url, exercise_url, github_url, download_url, order_num, user.id).run();
 
   const created = await c.env.DB.prepare('SELECT * FROM resource_books WHERE id = ?').bind(res.meta.last_row_id).first();
@@ -124,6 +125,7 @@ app.put('/books/:id', async (c) => {
   const id = parseInt(c.req.param('id'), 10);
   const body = await c.req.json().catch(() => ({}));
 
+  await c.env.DB.prepare('ALTER TABLE resource_books ADD COLUMN updated_at TEXT').run().catch(() => {});
   const existing = await c.env.DB.prepare('SELECT * FROM resource_books WHERE id = ?').bind(id).first();
   if (!existing) return c.json({ detail: '资料条目不存在' }, 404);
 
@@ -141,7 +143,7 @@ app.put('/books/:id', async (c) => {
 
   await c.env.DB.prepare(
     `UPDATE resource_books 
-     SET title = ?, original_title = ?, authors = ?, category = ?, description = ?, cover_url = ?, tutorial_url = ?, exercise_url = ?, github_url = ?, download_url = ?, order_num = ?
+     SET title = ?, original_title = ?, authors = ?, category = ?, description = ?, cover_url = ?, tutorial_url = ?, exercise_url = ?, github_url = ?, download_url = ?, order_num = ?, updated_at = datetime('now')
      WHERE id = ?`
   ).bind(title, original_title, authors, category, description, cover_url, tutorial_url, exercise_url, github_url, download_url, order_num, id).run();
 
@@ -152,6 +154,9 @@ app.put('/books/:id', async (c) => {
 app.delete('/books/:id', async (c) => {
   const user = c.get('user');
   const rawId = c.req.param('id');
+  if (rawId === 'vlab-tunnel') {
+    return c.json({ detail: '内置系统教程不允许删除' }, 403);
+  }
   const id = parseInt(rawId, 10);
   if (isNaN(id)) {
     return c.json({ detail: '资料条目不存在' }, 404);
@@ -159,6 +164,11 @@ app.delete('/books/:id', async (c) => {
 
   const book = await c.env.DB.prepare('SELECT id, title, created_by_id FROM resource_books WHERE id = ?').bind(id).first<{ id: number; title: string; created_by_id: number }>();
   if (!book) return c.json({ detail: '资料条目不存在' }, 404);
+
+  const isSystem = Boolean(book.title && (book.title.includes('VLab') || book.title.includes('隧道')));
+  if (isSystem && user.role !== 'admin') {
+    return c.json({ detail: '内置系统教程无法被普通用户移除' }, 403);
+  }
 
   if (book.created_by_id !== user.id && user.role !== 'admin' && user.role !== 'teacher') {
     return c.json({ detail: '权限不足，无法删除此资料' }, 403);

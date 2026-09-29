@@ -29,6 +29,24 @@ describe('pasteClassifier', () => {
       expect(classifyPastedText(confText)).toBe('conference')
     })
 
+    it('correctly classifies Indico international conference text with confirmed speakers and key dates', () => {
+      const indicoText = `
+        International Conference on Gravitational Lensing and Cosmology
+        11-15 January 2027, Tsung-Dao Lee Institute, Shanghai
+        https://web.gravity.sjtu.edu.cn/event/13/
+        Confirmed speakers:
+        - John Doe (Caltech)
+        - Jane Smith (Cambridge)
+        - David Brown (Tokyo)
+        Key Dates:
+        Call for abstracts - 2026, September 22
+        Abstract submission deadline - 2026, November 15
+        Registration deadline - 2026, December 20
+        Scientific Organising Committee: ...
+      `
+      expect(classifyPastedText(indicoText)).toBe('conference')
+    })
+
     it('correctly classifies scholarship notice text', () => {
       const noticeText = `
         关于开展2026年秋季学期研究生国家奖学金评定申报工作的通知
@@ -67,7 +85,7 @@ describe('pasteClassifier', () => {
         主讲人：李四 研究员
         报告题目：系外行星大气的透射光谱分析
         时间：2026年9月28日 14:30
-        地点：科研楼 5-516 会议室
+        地点：紫金山天文台仙林园区 5-516 会议室
         摘要：介绍 James Webb 空间望远镜关于气态巨行星大气的最新探测成果。
       `
       const fields = extractFieldsByRule(talkText, 'talk', { imageUrls: ['https://example.com/poster.png'] })
@@ -75,7 +93,7 @@ describe('pasteClassifier', () => {
       expect(fields.speaker).toContain('李四')
       expect(fields.date).toBe('2026-09-28')
       expect(fields.time).toBe('14:30')
-      expect(fields.location).toContain('科研楼')
+      expect(fields.location).toContain('紫台')
       expect(fields.poster_url).toBe('https://example.com/poster.png')
     })
 
@@ -96,6 +114,25 @@ describe('pasteClassifier', () => {
       expect(fields.city).toBe('南京')
       expect(fields.registration_deadline).toBe('2026-10-20')
       expect(fields.website_url).toContain('https://galaxy2026.nju.edu.cn')
+    })
+
+    it('extracts abstract_start_date and international conference subtype from Indico text', () => {
+      const indicoText = `
+        International Conference on Gravitational Lensing and Cosmology
+        11-15 January 2027, Tsung-Dao Lee Institute, Shanghai
+        https://web.gravity.sjtu.edu.cn/event/13/
+        Key Dates:
+        Call for abstracts - 2026, September 22
+        Abstract submission deadline - 2026, November 15
+        Registration deadline - 2026, December 20
+      `
+      const fields = extractFieldsByRule(indicoText, 'conference', { imageUrls: [] })
+      expect(fields.sub_type).toBe('国际会议')
+      expect(fields.abstract_start_date).toBe('2026-09-22')
+      expect(fields.abstract_deadline).toBe('2026-11-15')
+      expect(fields.registration_deadline).toBe('2026-12-20')
+      expect(fields.date).toBe('2027-01-11')
+      expect(fields.end_date).toBe('2027-01-15')
     })
 
     it('extracts fields for notice type', () => {

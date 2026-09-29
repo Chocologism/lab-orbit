@@ -8,20 +8,11 @@ import { useSiteConfig } from '../composables/useSiteConfig'
 
 const { siteConfig } = useSiteConfig()
 
-function getInitialUser() {
-  try {
-    const raw = localStorage.getItem('labhub_user')
-    return raw ? JSON.parse(raw) : null
-  } catch {
-    return null
-  }
-}
-
 const router = useRouter()
 const route = useRoute()
 
 const showMenu = ref(false)
-const user = ref(getInitialUser())
+const user = ref(null)
 
 const pageTitles = {
   '/': '工作台',
@@ -29,10 +20,11 @@ const pageTitles = {
   '/quick-share': '推荐文献',
   '/seminars': '学术日程',
   '/mailbox': '学术邮箱',
-  '/resources': '教材资料',
+  '/resources': '资料库',
   '/library': '文献库',
   '/favorites': '我的收藏',
   '/account': '账户设置',
+  '/style': '个性风格',
   '/feedback': '意见反馈',
   '/admin/feedback': '反馈管理'
 }
@@ -49,17 +41,8 @@ const roleLabel = computed(() => ({ teacher: '导师', admin: '管理员' }[user
 
 async function refreshUser() {
   try {
-    const me = await authApi.getMe()
-    user.value = me
-    try {
-      localStorage.setItem('labhub_user', JSON.stringify(me))
-    } catch {}
-  } catch {
-    const token = localStorage.getItem('labhub_token')
-    if (!token) {
-      user.value = null
-    }
-  }
+    user.value = await authApi.getMe()
+  } catch {}
 }
 
 onMounted(() => {
@@ -79,7 +62,7 @@ function navigateTo(path) {
 function logout() {
   showMenu.value = false
   if (!window.confirm('确定要退出登录吗？')) return
-  for (const key of ['labhub_token', 'labhub_user']) {
+  for (const key of ['cssbd_token', 'cssbd_user', 'labhub_token', 'labhub_user']) {
     localStorage.removeItem(key)
   }
   router.push('/login')
@@ -90,22 +73,10 @@ function logout() {
   <Teleport to="body">
     <header class="mobile-header">
       <div class="mobile-header-inner">
-        <div class="mobile-brand-group">
-          <a
-            href="https://github.com/Chocologism/lab-orbit"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="mobile-logo-link"
-            title="访问 GitHub 开源仓库"
-            aria-label="访问 GitHub 开源仓库"
-          >
-            <img src="/assets/LO_logo.svg" alt="LabOrbit Logo" class="mobile-brand-logo" />
-          </a>
-          <router-link to="/" class="mobile-brand" aria-label="返回工作台">
-            <span class="brand-badge">{{ siteConfig.labShortName }}</span>
-            <span class="brand-title">{{ currentTitle }}</span>
-          </router-link>
-        </div>
+        <router-link to="/" class="mobile-brand" aria-label="返回工作台">
+          <span class="brand-badge">{{ siteConfig.labShortName || 'Orbit' }}</span>
+          <span class="brand-title">{{ currentTitle }}</span>
+        </router-link>
 
         <button
           type="button"
@@ -154,6 +125,11 @@ function logout() {
             <button type="button" class="sheet-nav-item" @click="navigateTo('/account')">
               <AppIcon name="user" :size="18" />
               <span>账户与身份设置</span>
+              <AppIcon name="right" :size="16" class="nav-arrow" />
+            </button>
+            <button type="button" class="sheet-nav-item" @click="navigateTo('/style')">
+              <AppIcon name="style" :size="18" />
+              <span>外观与风格</span>
               <AppIcon name="right" :size="16" class="nav-arrow" />
             </button>
             <button type="button" class="sheet-nav-item" @click="navigateTo(user?.role === 'admin' ? '/admin/feedback' : '/feedback')">
@@ -211,39 +187,10 @@ function logout() {
     margin: 0 auto;
   }
 
-  .mobile-brand-group {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .mobile-logo-link {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    text-decoration: none;
-    flex-shrink: 0;
-    padding: 2px;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .mobile-brand-logo {
-    width: 30px;
-    height: 30px;
-    object-fit: contain;
-    filter: drop-shadow(0 0 8px rgba(187, 144, 252, 0.55));
-    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-  }
-
-  .mobile-logo-link:active .mobile-brand-logo {
-    transform: scale(0.92);
-  }
-
   .mobile-brand {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     text-decoration: none;
     color: var(--text, #ffffff);
   }
@@ -315,6 +262,7 @@ function logout() {
     border-radius: 24px 24px 0 0;
     padding: 12px 20px calc(24px + env(safe-area-inset-bottom, 0px));
     box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.7);
+    max-height: 85vh;
     max-height: 85dvh;
     overflow-y: auto;
     transform: translateZ(0);
@@ -492,51 +440,190 @@ function logout() {
   }
 
   /* ==========================================================================
-     水波云雾风格还原 (Vanta Fog / Clouds Static)
+     曜石碳灰风格还原 (Obsidian Gray) - 系统默认
      ========================================================================== */
+  [data-color-scheme="obsidian-gray"] .mobile-header {
+    background: rgba(9, 13, 22, 0.94) !important;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18) !important;
+  }
+
+  [data-color-scheme="obsidian-gray"] .brand-badge {
+    background: rgba(148, 163, 184, 0.14) !important;
+    color: var(--accent, #94a3b8) !important;
+    border: 1px solid rgba(148, 163, 184, 0.3) !important;
+  }
+
+  [data-color-scheme="obsidian-gray"] .mobile-avatar-btn {
+    border: 1.5px solid rgba(148, 163, 184, 0.3) !important;
+  }
+
+  [data-color-scheme="obsidian-gray"] .mobile-profile-overlay {
+    background: rgba(4, 7, 13, 0.72) !important;
+  }
+
+  [data-color-scheme="obsidian-gray"] .mobile-profile-sheet {
+    background: #111723 !important;
+    border-top: 1px solid rgba(148, 163, 184, 0.22) !important;
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.75) !important;
+  }
+
+  [data-color-scheme="obsidian-gray"] .sheet-drag-handle {
+    background: rgba(148, 163, 184, 0.3) !important;
+  }
+
+  [data-color-scheme="obsidian-gray"] .sheet-header {
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14) !important;
+  }
+
+  [data-color-scheme="obsidian-gray"] .sheet-close-btn {
+    background: rgba(148, 163, 184, 0.08) !important;
+  }
+
+  [data-color-scheme="obsidian-gray"] .sheet-nav-item:active {
+    background: rgba(148, 163, 184, 0.12) !important;
+  }
+
+  [data-color-scheme="obsidian-gray"] .sheet-footer {
+    border-top: 1px solid rgba(148, 163, 184, 0.12) !important;
+  }
+
+  /* ==========================================================================
+     星云紫风格还原 (Nebula Purple)
+     ========================================================================== */
+  [data-color-scheme="nebula-purple"] .mobile-header {
+    background: rgba(12, 8, 30, 0.94) !important;
+    border-bottom: 1px solid rgba(184, 155, 248, 0.22) !important;
+  }
+
+  [data-color-scheme="nebula-purple"] .brand-badge {
+    background: rgba(184, 155, 248, 0.16) !important;
+    color: var(--accent, #b89bf8) !important;
+    border: 1px solid rgba(184, 155, 248, 0.35) !important;
+  }
+
+  [data-color-scheme="nebula-purple"] .mobile-avatar-btn {
+    border: 1.5px solid rgba(184, 155, 248, 0.35) !important;
+  }
+
+  [data-color-scheme="nebula-purple"] .mobile-profile-overlay {
+    background: rgba(3, 2, 10, 0.72) !important;
+  }
+
+  [data-color-scheme="nebula-purple"] .mobile-profile-sheet {
+    background: #120e26 !important;
+    border-top: 1px solid rgba(184, 155, 248, 0.25) !important;
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.75) !important;
+  }
+
+  [data-color-scheme="nebula-purple"] .sheet-drag-handle {
+    background: rgba(184, 155, 248, 0.35) !important;
+  }
+
+  [data-color-scheme="nebula-purple"] .sheet-header {
+    border-bottom: 1px solid rgba(184, 155, 248, 0.16) !important;
+  }
+
+  [data-color-scheme="nebula-purple"] .sheet-close-btn {
+    background: rgba(184, 155, 248, 0.1) !important;
+  }
+
+  [data-color-scheme="nebula-purple"] .sheet-nav-item:active {
+    background: rgba(184, 155, 248, 0.14) !important;
+  }
+
+  [data-color-scheme="nebula-purple"] .sheet-footer {
+    border-top: 1px solid rgba(184, 155, 248, 0.14) !important;
+  }
+
+  /* ==========================================================================
+     水波云雾风格还原 (Vanta Fog / Clouds Static / Classic Cyan)
+     ========================================================================== */
+  [data-color-scheme="classic-cyan"] .mobile-header,
   [data-theme-style="vanta-fog"] .mobile-header {
     background: rgba(8, 31, 40, 0.92) !important;
     border-bottom: 1px solid rgba(218, 238, 235, 0.16) !important;
   }
 
+  [data-color-scheme="classic-cyan"] .brand-badge,
   [data-theme-style="vanta-fog"] .brand-badge {
     background: rgba(197, 230, 223, 0.18) !important;
     color: var(--accent, #c5e6df) !important;
     border: 1px solid rgba(197, 230, 223, 0.35) !important;
   }
 
+  [data-color-scheme="classic-cyan"] .mobile-avatar-btn,
   [data-theme-style="vanta-fog"] .mobile-avatar-btn {
     border: 1.5px solid rgba(197, 230, 223, 0.3) !important;
   }
 
+  [data-color-scheme="classic-cyan"] .mobile-profile-overlay,
   [data-theme-style="vanta-fog"] .mobile-profile-overlay {
     background: rgba(4, 16, 21, 0.68) !important;
   }
 
+  [data-color-scheme="classic-cyan"] .mobile-profile-sheet,
   [data-theme-style="vanta-fog"] .mobile-profile-sheet {
     background: #142f38 !important;
     border-top: 1px solid rgba(218, 238, 235, 0.22) !important;
     box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.6) !important;
   }
 
+  [data-color-scheme="classic-cyan"] .sheet-drag-handle,
   [data-theme-style="vanta-fog"] .sheet-drag-handle {
     background: rgba(218, 238, 235, 0.3) !important;
   }
 
+  [data-color-scheme="classic-cyan"] .sheet-header,
   [data-theme-style="vanta-fog"] .sheet-header {
     border-bottom: 1px solid rgba(218, 238, 235, 0.14) !important;
   }
 
+  [data-color-scheme="classic-cyan"] .sheet-close-btn,
   [data-theme-style="vanta-fog"] .sheet-close-btn {
     background: rgba(218, 238, 235, 0.08) !important;
   }
 
+  [data-color-scheme="classic-cyan"] .sheet-nav-item:active,
   [data-theme-style="vanta-fog"] .sheet-nav-item:active {
     background: rgba(218, 238, 235, 0.12) !important;
   }
 
+  [data-color-scheme="classic-cyan"] .sheet-footer,
   [data-theme-style="vanta-fog"] .sheet-footer {
     border-top: 1px solid rgba(218, 238, 235, 0.12) !important;
+  }
+
+  /* 自定义配色方案适配 */
+  [data-color-scheme="custom"] .mobile-header {
+    background: color-mix(in srgb, var(--bg, #090d16) 94%, transparent) !important;
+    border-bottom: 1px solid var(--line) !important;
+  }
+  [data-color-scheme="custom"] .brand-badge {
+    background: color-mix(in srgb, var(--accent) 18%, transparent) !important;
+    color: var(--accent) !important;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent) !important;
+  }
+  [data-color-scheme="custom"] .mobile-avatar-btn {
+    border: 1.5px solid color-mix(in srgb, var(--accent) 30%, transparent) !important;
+  }
+  [data-color-scheme="custom"] .mobile-profile-sheet {
+    background: var(--panel-solid) !important;
+    border-top: 1px solid color-mix(in srgb, var(--accent) 22%, transparent) !important;
+  }
+  [data-color-scheme="custom"] .sheet-drag-handle {
+    background: color-mix(in srgb, var(--accent) 30%, transparent) !important;
+  }
+  [data-color-scheme="custom"] .sheet-header {
+    border-bottom: 1px solid var(--line) !important;
+  }
+  [data-color-scheme="custom"] .sheet-close-btn {
+    background: var(--raised) !important;
+  }
+  [data-color-scheme="custom"] .sheet-nav-item:active {
+    background: var(--raised) !important;
+  }
+  [data-color-scheme="custom"] .sheet-footer {
+    border-top: 1px solid var(--line) !important;
   }
 }
 </style>

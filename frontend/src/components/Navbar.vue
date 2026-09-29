@@ -5,6 +5,17 @@ import AppIcon from './AppIcon.vue'
 import UserAvatar from './UserAvatar.vue'
 import { authApi, noticeApi } from '../api/client'
 import { getUnreadNoticesCount, NOTICES_READ_EVENT } from '../utils/noticeUnread'
+import {
+  refreshArxivUnread,
+  getCachedArxivUnread,
+  markArxivFeedViewed,
+  ARXIV_UNREAD_EVENT
+} from '../utils/arxivUnread'
+import {
+  hasAnyResourceUnread,
+  refreshResourceUnread,
+  RESOURCE_UNREAD_EVENT
+} from '../composables/resourceUnread'
 import { isAiGeneratingGlobally } from '../composables/useAiAssistantState'
 import { useSiteConfig } from '../composables/useSiteConfig'
 import { useTutorial } from '../composables/useTutorial'
@@ -154,19 +165,39 @@ watch(() => route.fullPath, () => {
 })
 
 const items = [
-  { to: '/', label: '工作台', icon: 'planet' },
+  { to: '/', label: '工作台', icon: 'workbench' },
   { to: '/notices', label: '重要通知', icon: 'bell' },
-  { to: '/arxiv', label: '文献推荐', icon: 'file-text' },
-  { to: '/seminars', label: '学术日程', icon: 'calendar' },
-  { to: '/mailbox', label: '邮箱', icon: 'envelope' },
-  { to: '/library', label: '文献库', icon: 'book-open' },
-  { to: '/resources', label: '教材资料', icon: 'database' },
+  { to: '/arxiv', label: '文献推荐', icon: 'feed-paper' },
+  { to: '/seminars', label: '学术日程', icon: 'schedule' },
+  { to: '/mailbox', label: '学术邮箱', icon: 'envelope' },
+  { to: '/library', label: '文献库', icon: 'paper-library' },
+  { to: '/resources', label: '资料库', icon: 'resource-db' },
 ]
-
 
 const roleLabel = computed(() => ({ teacher: '导师', admin: '管理员' }[user.value?.role] || '组员'))
 
 const unreadNoticesCount = ref(0)
+const unreadArxivCount = ref(0)
+const hasDirectArxiv = ref(false)
+const unreadResourceCount = ref(0)
+
+function handleResourceUnreadState(e) {
+  unreadResourceCount.value = Number(e?.detail?.count || 0)
+}
+
+function handleArxivUnreadState(e) {
+  const summary = e?.detail || getCachedArxivUnread()
+  unreadArxivCount.value = Number(summary.unreadCount || 0)
+  hasDirectArxiv.value = Boolean(summary.hasDirect)
+}
+
+async function refreshUnreadArxivState() {
+  try {
+    const summary = await refreshArxivUnread()
+    unreadArxivCount.value = Number(summary.unreadCount || 0)
+    hasDirectArxiv.value = Boolean(summary.hasDirect)
+  } catch {}
+}
 
 async function refreshUnreadNotices() {
   try {
@@ -184,6 +215,12 @@ function handleNoticesReadState() {
 watch(() => route.path, (newPath) => {
   if (newPath === '/notices') {
     setTimeout(refreshUnreadNotices, 300)
+  }
+  if (newPath === '/arxiv') {
+    markArxivFeedViewed()
+  }
+  if (newPath === '/resources') {
+    refreshResourceUnread()
   }
 })
 
@@ -205,16 +242,27 @@ async function refreshUser() {
 onMounted(() => {
   refreshUser()
   refreshUnreadNotices()
+  const initialArxiv = getCachedArxivUnread()
+  unreadArxivCount.value = initialArxiv.unreadCount
+  hasDirectArxiv.value = initialArxiv.hasDirect
+  refreshUnreadArxivState()
+  refreshResourceUnread()
   initNewUserGuides()
   window.addEventListener('account-updated', refreshUser)
   window.addEventListener(NOTICES_READ_EVENT, handleNoticesReadState)
   window.addEventListener('notices-updated', refreshUnreadNotices)
+  window.addEventListener(ARXIV_UNREAD_EVENT, handleArxivUnreadState)
+  window.addEventListener('arxiv-feed-updated', refreshUnreadArxivState)
+  window.addEventListener(RESOURCE_UNREAD_EVENT, handleResourceUnreadState)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('account-updated', refreshUser)
   window.removeEventListener(NOTICES_READ_EVENT, handleNoticesReadState)
   window.removeEventListener('notices-updated', refreshUnreadNotices)
+  window.removeEventListener(ARXIV_UNREAD_EVENT, handleArxivUnreadState)
+  window.removeEventListener('arxiv-feed-updated', refreshUnreadArxivState)
+  window.removeEventListener(RESOURCE_UNREAD_EVENT, handleResourceUnreadState)
   if (leaveTimer) clearTimeout(leaveTimer)
   if (peekTimer) clearTimeout(peekTimer)
   if (peekRetractTimer) clearTimeout(peekRetractTimer)
@@ -347,6 +395,20 @@ function logout() {
             >
               {{ unreadNoticesCount > 99 ? '99+' : unreadNoticesCount }}
             </span>
+            <span
+              v-if="item.to === '/arxiv' && unreadArxivCount > 0"
+              class="nav-arxiv-badge"
+              :class="{ 'is-gold': hasDirectArxiv, 'is-red': !hasDirectArxiv }"
+              :title="hasDirectArxiv ? `有 ${unreadArxivCount} 篇未读文献推荐（包含定向推送给您的文献）` : `有 ${unreadArxivCount} 篇未读文献推荐`"
+            >
+              {{ unreadArxivCount > 99 ? '99+' : unreadArxivCount }}
+            </span>
+            <span
+              v-if="item.to === '/resources' && unreadResourceCount > 0"
+              class="nav-resource-dot"
+              title="有收藏资料发生更新"
+              aria-label="资料库有更新"
+            ></span>
           </div>
           <div class="iso-text">{{ item.label }}</div>
         </router-link>
@@ -392,6 +454,21 @@ function logout() {
             <span v-if="isAiGeneratingGlobally" class="nav-ai-pulsing-badge" title="AI 助手正在后台持续生成回复中..."></span>
           </div>
           <div class="iso-text">AI 助手</div>
+        </router-link>
+
+        <!-- 风格设置按钮 -->
+        <router-link
+          to="/style"
+          class="sidebar-tool iso-pro"
+          aria-label="风格"
+        >
+          <span class="iso-layer"></span>
+          <span class="iso-layer"></span>
+          <span class="iso-layer"></span>
+          <div class="iso-icon">
+            <AppIcon name="style" :size="21" />
+          </div>
+          <div class="iso-text">风格</div>
         </router-link>
 
         <!-- 头像账户设置按钮：鼠标悬停展开显示“账户设置”，点击直接进入账户设置 -->
@@ -994,6 +1071,74 @@ function logout() {
   animation: noticeBadgePop 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
+.nav-arxiv-badge {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+  pointer-events: none;
+  z-index: 10;
+  animation: noticeBadgePop 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.nav-arxiv-badge.is-red {
+  background: #ef4444;
+  background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(225, 29, 72, 0.45), 0 0 0 1.5px rgba(15, 12, 34, 0.85);
+}
+
+.nav-arxiv-badge.is-gold {
+  background: #f59e0b;
+  background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
+  color: #1c1917;
+  font-weight: 800;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.6), 0 0 12px rgba(251, 191, 36, 0.4), 0 0 0 1.5px rgba(254, 240, 138, 0.85);
+  animation: goldBadgeGlow 2.4s ease-in-out infinite, noticeBadgePop 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.nav-resource-dot {
+  position: absolute;
+  top: -3px;
+  right: -5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
+  box-shadow: 0 0 10px rgba(225, 29, 72, 0.75), 0 0 0 1.5px rgba(15, 12, 34, 0.85);
+  pointer-events: none;
+  z-index: 10;
+  animation: resourceDotPulse 2.2s ease-in-out infinite, noticeBadgePop 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes resourceDotPulse {
+  0%, 100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 8px rgba(225, 29, 72, 0.65), 0 0 0 1.5px rgba(15, 12, 34, 0.85);
+  }
+  50% {
+    transform: scale(1.3);
+    box-shadow: 0 0 14px rgba(244, 63, 94, 0.95), 0 0 0 1.5px rgba(15, 12, 34, 0.9);
+  }
+}
+
+@keyframes goldBadgeGlow {
+  0%, 100% {
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.55), 0 0 10px rgba(251, 191, 36, 0.35), 0 0 0 1.5px rgba(254, 240, 138, 0.85);
+  }
+  50% {
+    box-shadow: 0 3px 12px rgba(245, 158, 11, 0.85), 0 0 16px rgba(251, 191, 36, 0.65), 0 0 0 2px rgba(254, 240, 138, 1);
+  }
+}
+
 @keyframes noticeBadgePop {
   0% {
     transform: scale(0.4);
@@ -1050,7 +1195,14 @@ function logout() {
 
 .iso-pro:hover .iso-icon :deep(svg) {
   transform: scale(1.15);
+}
+
+.iso-pro:hover .iso-icon :deep(svg:not([fill="none"])) {
   fill: var(--text, #f3e8ff);
+}
+
+.iso-pro:hover .iso-icon :deep(svg[fill="none"]) {
+  stroke: var(--text, #f3e8ff);
 }
 
 .iso-pro .iso-text {
@@ -1192,8 +1344,12 @@ function logout() {
   color: #e4f7f2 !important;
 }
 
-[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon :deep(svg) {
+[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon :deep(svg:not([fill="none"])) {
   fill: #e4f7f2 !important;
+}
+
+[data-theme-style="vanta-fog"] .iso-pro:hover .iso-icon :deep(svg[fill="none"]) {
+  stroke: #e4f7f2 !important;
 }
 
 [data-theme-style="vanta-fog"] .iso-pro .iso-text {

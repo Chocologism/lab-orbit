@@ -5,18 +5,420 @@
  */
 
 /**
- * 规范化 arXiv 编号
+ * 规范化 arXiv 编号（支持纯 ID、版本号、以及完整 URL 如 https://arxiv.org/abs/...）
  * @param {string} rawId
  * @returns {string} 如 '2609.19132v1' 或 '2401.00001'
  */
 export function cleanArxivId(rawId) {
   if (!rawId || typeof rawId !== 'string') return ''
-  return rawId
-    .trim()
+  let cleaned = rawId.trim()
+  const urlMatch = cleaned.match(/(?:arxiv\.org\/(?:abs|pdf|html)\/|arxiv:)([\w.-]+)/i)
+  if (urlMatch && urlMatch[1]) {
+    cleaned = urlMatch[1]
+  }
+  return cleaned
+    .replace(/^https?:\/\/arxiv\.org\/(abs|pdf|html)\//i, '')
     .replace(/^arxiv:\s*/i, '')
     .replace(/\.pdf$/i, '')
     .trim()
 }
+
+import { resolveUserScope } from './userScope.js'
+
+export { resolveUserScope }
+
+export const RECENT_PAPERS_STORAGE_KEY = 'csbd_arxiv_recent_papers'
+export const META_CACHE_PREFIX = 'csbd_arxiv_meta_'
+
+/**
+ * 获取特定用户的最近文献本地存储键
+ */
+export function getRecentPapersStorageKey(userOrScope) {
+  const scope = resolveUserScope(userOrScope)
+  return scope ? `csbd_arxiv_recent_papers_${scope}` : RECENT_PAPERS_STORAGE_KEY
+}
+
+/**
+ * 校验标题是否为草稿标识、排版声明、LaTeX 宏包或无效噪音
+ * @param {string} title
+ * @returns {boolean}
+ */
+export function isNoiseTitle(title) {
+  if (!title || typeof title !== 'string') return true
+  const t = title.trim()
+  if (t.length < 3) return true
+  if (/^(draft\s+version|typeset\s+using|compiled\s+using|a\s+te?x\s+style|te?x\s+style|te?x\s+twocolumn|latex\s+twocolumn)/i.test(t)) return true
+  if (/^(mnras\b|arxiv:\s*\d|accepted\b|received\b|under\s+review)/i.test(t)) return true
+  if (/^\d{4}\.\d{4,5}(v\d+)?$/i.test(t)) return true
+  if (/^aastex/i.test(t)) return true
+  if (/^(\\documentclass|\\usepackage|%)/i.test(t)) return true
+  return false
+}
+
+/**
+ * 判断单行文本是否属于论文开头的排版/草稿/期刊元数据噪音行
+ * @param {string} l
+ * @returns {boolean}
+ */
+export function isNoiseHeaderLine(l) {
+  if (!l || l.length <= 1) return true
+  if (/^(draft\s+version|typeset\s+using|compiled\s+using|a\s+te?x\s+style|te?x\s+style|te?x\s+twocolumn|latex\s+twocolumn)/i.test(l)) return true
+  if (/^(mnras|preprint|arxiv|title:|accepted|received|submitted|published|in\s+press|under\s+review)/i.test(l)) return true
+  if (/^(aastex|revtex|ieee|acm|springer|elsevier|iop|nature|science)\b/i.test(l)) return true
+  if (/^(vol\.|volume\s+\d+|no\.|page\s+\d+|doi:|\b\d{4}\b.*\b(arxiv|preprint)\b)/i.test(l)) return true
+  if (/^(\\documentclass|\\usepackage|%)/i.test(l)) return true
+  return false
+}
+
+/**
+ * 判断单行文本是否可能为作者或机构信息
+ * @param {string} l
+ * @returns {boolean}
+ */
+export function isLikelyAuthorLine(l) {
+  if (!l) return false
+  if (/(university|department|institute|laboratory|center|faculty|college|school|@|email)/i.test(l)) return true
+  if (/[A-Za-z]+(\s+[A-Za-z]\.?)?\s*,(\s*\d+)?\s*$/.test(l.trim())) return true
+  if (/^[A-Z][\p{L}'-]+(\s+[A-Z]\.?)?\s+[A-Z][\p{L}'-]+$/u.test(l.trim())) return true
+  if (/^[A-Z][\p{L}'-]+(\s+[A-Z]\.?)?\s+[A-Z][\p{L}'-]+\s+(and|&)\s+[A-Z][\p{L}'-]+\s+[A-Z][\p{L}'-]+$/u.test(l.trim())) return true
+  return false
+}
+
+/**
+ * 判断标题第一行是否应与第二行副标题合并
+ * @param {string} line1
+ * @param {string} line2
+ * @returns {boolean}
+ */
+export function shouldJoinSubtitle(line1, line2) {
+  if (!line2 || isLikelyAuthorLine(line2)) return false
+  const trimmed1 = line1.trim()
+  if (/[:\-–—]$/.test(trimmed1)) return true
+  if (/\b(with|of|in|for|and|to|at|from|by|on|a|the|an|using|via|under|over|through|across|between|towards?|into|about)$/i.test(trimmed1)) return true
+  if (trimmed1.length < 85 && !/[.!?]$/.test(trimmed1) && !isLikelyAuthorLine(line2)) return true
+  return false
+}
+
+/**
+ * 从原始 Markdown 文本中精准提取学术文章真名标题
+ * @param {string} text
+ * @returns {string}
+ */
+export function parseTitleFromMarkdown(text) {
+  if (!text) return ''
+  const lines = text.split('\n')
+  const headerLines = []
+  for (let i = 0; i < Math.min(lines.length, 50); i++) {
+    const l = lines[i].trim()
+    if (!l) continue
+    if (isNoiseHeaderLine(l)) continue
+    if (/^ABSTRACT/i.test(l)) break
+    headerLines.push(l)
+  }
+  if (headerLines.length === 0) return ''
+  let title = headerLines[0].replace(/^#+\s*/, '')
+  if (headerLines.length > 1 && shouldJoinSubtitle(title, headerLines[1])) {
+    title += ' ' + headerLines[1].trim()
+  }
+  return title.trim()
+}
+
+/**
+ * 获取本地研讨过的最近 arXiv 文献列表（支持按用户隔离）
+ * @param {string|number|object} [userOrScope]
+ * @returns {Array<{id: string, title: string, timestamp: number}>}
+ */
+export function getRecentArxivPapers(userOrScope) {
+  if (typeof localStorage === 'undefined') return []
+  try {
+    const targetKey = getRecentPapersStorageKey(userOrScope)
+    const raw = localStorage.getItem(targetKey)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        let changed = false
+        const sanitized = parsed.map(item => {
+          if (isNoiseTitle(item.title)) {
+            const metaRaw = localStorage.getItem(`${META_CACHE_PREFIX}${item.id}`)
+            if (metaRaw) {
+              try {
+                const parsedMeta = JSON.parse(metaRaw)
+                if (parsedMeta?.title && !isNoiseTitle(parsedMeta.title)) {
+                  changed = true
+                  return { ...item, title: parsedMeta.title }
+                }
+              } catch (_) {}
+            }
+            return { ...item, title: `arXiv:${item.id}` }
+          }
+          return item
+        })
+        if (changed) {
+          localStorage.setItem(targetKey, JSON.stringify(sanitized))
+        }
+        return sanitized
+      }
+    }
+
+    // 若当前为特定用户且专属键为空，检查旧版未隔离的全局历史并迁移
+    if (targetKey !== RECENT_PAPERS_STORAGE_KEY) {
+      const legacyRaw = localStorage.getItem(RECENT_PAPERS_STORAGE_KEY)
+      if (legacyRaw) {
+        const parsedLegacy = JSON.parse(legacyRaw)
+        if (Array.isArray(parsedLegacy) && parsedLegacy.length > 0) {
+          const sanitized = parsedLegacy.map(item => isNoiseTitle(item.title) ? { ...item, title: `arXiv:${item.id}` } : item)
+          localStorage.setItem(targetKey, JSON.stringify(sanitized))
+          localStorage.removeItem(RECENT_PAPERS_STORAGE_KEY)
+          return sanitized
+        }
+      }
+    }
+    return []
+  } catch (_) {
+    return []
+  }
+}
+
+/**
+ * 保存研讨文献到本地历史（支持按用户隔离，防伪防噪声标题污染）
+ * @param {string} paperId 
+ * @param {string} title 
+ * @param {string|number|object} [userOrScope]
+ */
+export function saveRecentArxivPaper(paperId, title = '', userOrScope) {
+  const clean = cleanArxivId(paperId)
+  if (!clean || typeof localStorage === 'undefined') return
+  try {
+    const targetKey = getRecentPapersStorageKey(userOrScope)
+    const list = getRecentArxivPapers(userOrScope)
+    const existing = list.find(p => p.id === clean)
+    const filtered = list.filter(p => p.id !== clean)
+
+    let effectiveTitle = (title && typeof title === 'string') ? title.trim() : ''
+    // 若传入标题为噪音（如草稿或样式声明），优先使用已保存的有效标题；否则退回编号
+    if (isNoiseTitle(effectiveTitle)) {
+      effectiveTitle = (existing && !isNoiseTitle(existing.title)) ? existing.title : `arXiv:${clean}`
+    }
+
+    filtered.unshift({
+      id: clean,
+      title: effectiveTitle,
+      timestamp: Date.now()
+    })
+    localStorage.setItem(targetKey, JSON.stringify(filtered.slice(0, 12)))
+  } catch (_) {}
+}
+
+/**
+ * 从本地研讨历史中删除指定 arXiv 文献
+ * @param {string} paperId
+ * @param {string|number|object} [userOrScope]
+ */
+export function removeRecentArxivPaper(paperId, userOrScope) {
+  const clean = cleanArxivId(paperId)
+  if (!clean || typeof localStorage === 'undefined') return
+  try {
+    const targetKey = getRecentPapersStorageKey(userOrScope)
+    const list = getRecentArxivPapers(userOrScope)
+    const filtered = list.filter(p => p.id !== clean)
+    localStorage.setItem(targetKey, JSON.stringify(filtered))
+  } catch (_) {}
+}
+
+/**
+ * 权威解析 arXiv 文献真实标题与元信息（多层纯前端直连与智能容灾回退）
+ * 优先级：
+ * 1. 本地元数据缓存快速命中 (0ms)
+ * 2. DataCite 官方元数据中心 (arXiv 官方 DOI 注册机构，原生支持 CORS，纯前端直连)
+ * 3. OpenAlex 全球开放学术图谱 (原生支持 CORS，极速容灾，纯前端直连)
+ * 4. alphaXiv 预编译 Markdown 解析 (优先走同源代理 /api/arxiv/proxy-markdown)
+ * 5. 本地后端 /api/arxiv/preview 接口 (附带认证 Token)
+ * 6. Semantic Scholar 开放接口 (降级备选)
+ *
+ * @param {string} rawId
+ * @param {Object} [options]
+ * @returns {Promise<{id: string, title: string, authors?: string, abstract?: string}|null>}
+ */
+export async function resolveArxivPaperMetadata(rawId, { signal, timeout = 6000 } = {}) {
+  const clean = cleanArxivId(rawId)
+  if (!clean) return null
+
+  // 1. 本地缓存快速命中
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const cached = localStorage.getItem(`${META_CACHE_PREFIX}${clean}`)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        if (parsed?.title && !isNoiseTitle(parsed.title)) {
+          return parsed
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. 权威 DataCite 官方元数据中心 (arXiv 官方 DOI 注册机构，全量支持浏览器 CORS，纯前端直连)
+  try {
+    const dcCtrl = new AbortController()
+    const dcTimer = setTimeout(() => dcCtrl.abort(), timeout)
+    if (signal) signal.addEventListener('abort', () => dcCtrl.abort(), { once: true })
+
+    const dcRes = await fetch(`https://api.datacite.org/dois/10.48550/arxiv.${clean}`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      signal: dcCtrl.signal
+    })
+    clearTimeout(dcTimer)
+    if (dcRes.ok) {
+      const dcData = await dcRes.json()
+      const rawTitle = dcData?.data?.attributes?.titles?.[0]?.title
+      if (rawTitle && !isNoiseTitle(rawTitle)) {
+        const creators = dcData?.data?.attributes?.creators || []
+        const authorNames = creators.map(c => c.name).filter(Boolean).slice(0, 6).join(', ')
+        const meta = {
+          id: clean,
+          title: rawTitle.replace(/\s+/g, ' ').trim(),
+          authors: authorNames,
+          abstract: dcData?.data?.attributes?.descriptions?.[0]?.description || ''
+        }
+        try {
+          localStorage.setItem(`${META_CACHE_PREFIX}${clean}`, JSON.stringify(meta))
+        } catch (_) {}
+        return meta
+      }
+    }
+  } catch (_) {}
+
+  // 3. OpenAlex 全球开放学术图谱 (原生支持 CORS，极速容灾，纯前端直连)
+  try {
+    const oaCtrl = new AbortController()
+    const oaTimer = setTimeout(() => oaCtrl.abort(), timeout)
+    if (signal) signal.addEventListener('abort', () => oaCtrl.abort(), { once: true })
+
+    const oaRes = await fetch(`https://api.openalex.org/works/doi:10.48550/arXiv.${clean}`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      signal: oaCtrl.signal
+    })
+    clearTimeout(oaTimer)
+    if (oaRes.ok) {
+      const oaData = await oaRes.json()
+      if (oaData?.title && !isNoiseTitle(oaData.title)) {
+        const authorships = Array.isArray(oaData.authorships) ? oaData.authorships : []
+        const authorNames = authorships.map(a => a.author?.display_name).filter(Boolean).slice(0, 6).join(', ')
+        const meta = {
+          id: clean,
+          title: oaData.title.replace(/\s+/g, ' ').trim(),
+          authors: authorNames,
+          abstract: ''
+        }
+        try {
+          localStorage.setItem(`${META_CACHE_PREFIX}${clean}`, JSON.stringify(meta))
+        } catch (_) {}
+        return meta
+      }
+    }
+  } catch (_) {}
+
+  // 4. 同源代理或 alphaXiv 已预编译 Markdown 解析 (包含公式及全文)
+  const candidateMdUrls = [
+    `/api/arxiv/proxy-markdown/${clean}`,
+    `https://www.alphaxiv.org/abs/${clean}.md`
+  ]
+  for (const url of candidateMdUrls) {
+    try {
+      const mdCtrl = new AbortController()
+      const mdTimer = setTimeout(() => mdCtrl.abort(), timeout)
+      if (signal) signal.addEventListener('abort', () => mdCtrl.abort(), { once: true })
+
+      const mdRes = await fetch(url, { signal: mdCtrl.signal })
+      clearTimeout(mdTimer)
+      if (mdRes.ok) {
+        const text = await mdRes.text()
+        const title = parseTitleFromMarkdown(text)
+        if (title && !isNoiseTitle(title)) {
+          const meta = {
+            id: clean,
+            title: title.replace(/\s+/g, ' ').trim(),
+            authors: '',
+            abstract: ''
+          }
+          try {
+            localStorage.setItem(`${META_CACHE_PREFIX}${clean}`, JSON.stringify(meta))
+          } catch (_) {}
+          return meta
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 5. 本地后端 /api/arxiv/preview 接口 (若处于登录状态并部署了后端)
+  try {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), timeout)
+    if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true })
+
+    const headers = { 'Content-Type': 'application/json' }
+    if (typeof localStorage !== 'undefined') {
+      const token = localStorage.getItem('cssbd_token') || localStorage.getItem('labhub_token')
+      if (token) headers['Authorization'] = `Bearer ${token}`
+    }
+
+    const res = await fetch('/api/arxiv/preview', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ url_or_id: clean }),
+      signal: ctrl.signal
+    })
+    clearTimeout(timer)
+    if (res.ok) {
+      const data = await res.json()
+      if (data?.title && !isNoiseTitle(data.title)) {
+        const meta = {
+          id: clean,
+          title: data.title.replace(/\s+/g, ' ').trim(),
+          authors: data.authors || '',
+          abstract: data.abstract || ''
+        }
+        try {
+          localStorage.setItem(`${META_CACHE_PREFIX}${clean}`, JSON.stringify(meta))
+        } catch (_) {}
+        return meta
+      }
+    }
+  } catch (_) {}
+
+  // 6. Semantic Scholar 开放接口 (补充降级备选)
+  try {
+    const s2Ctrl = new AbortController()
+    const s2Timer = setTimeout(() => s2Ctrl.abort(), timeout)
+    if (signal) signal.addEventListener('abort', () => s2Ctrl.abort(), { once: true })
+
+    const s2Res = await fetch(`https://api.semanticscholar.org/graph/v1/paper/ARXIV:${clean}?fields=title,authors,abstract`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      signal: s2Ctrl.signal
+    })
+    s2Timer && clearTimeout(s2Timer)
+    if (s2Res.ok) {
+      const s2Data = await s2Res.json()
+      if (s2Data?.title && !isNoiseTitle(s2Data.title)) {
+        const meta = {
+          id: clean,
+          title: s2Data.title.replace(/\s+/g, ' ').trim(),
+          authors: Array.isArray(s2Data.authors) ? s2Data.authors.map(a => a.name).join(', ') : '',
+          abstract: s2Data.abstract || ''
+        }
+        try {
+          localStorage.setItem(`${META_CACHE_PREFIX}${clean}`, JSON.stringify(meta))
+        } catch (_) {}
+        return meta
+      }
+    }
+  } catch (_) {}
+
+  return null
+}
+
 
 /**
  * 获取 arXiv 官方 HTML 页面 URL

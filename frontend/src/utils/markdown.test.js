@@ -137,4 +137,13 @@ describe('markdown utils', () => {
     expect(html).toContain('<span class="tex-sc" style="font-variant: small-caps;">Cloudy</span>')
     expect(html).toContain('<strong><span class="tex-sc" style="font-variant: small-caps;">Fast</span></strong>')
   })
+
+  it('should mark internal links with chat-internal-link class and target _self', () => {
+    const md = '点击前往 [文献库](/library?q=磁场) 或 [查看通知](/notices?id=12)'
+    const html = renderMarkdown(md)
+    expect(html).toContain('class="chat-internal-link"')
+    expect(html).toContain('target="_self"')
+    expect(html).toContain('href="/library?q=磁场"')
+    expect(html).toContain('href="/notices?id=12"')
+  })
 })

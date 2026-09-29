@@ -22,6 +22,7 @@
     "ogl": "^1.0.11",
     "pdfjs-dist": "^4.10.38",
     "three": "^0.186.0",
+    "utif": "^3.1.0",
     "vanta": "^0.5.24",
     "vue": "^3.4.21",
     "vue-router": "^4.3.0"
@@ -36,5 +37,12 @@
     "vite": "^5.1.6",
     "vitest": "^3.2.7",
     "wrangler": "^4.131.0"
-  }
+  },
+  "browserslist": [
+    "> 0.2%",
+    "last 2 versions",
+    "Safari >= 13",
+    "iOS >= 13",
+    "not dead"
+  ]
 }

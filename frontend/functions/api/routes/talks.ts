@@ -26,6 +26,7 @@ async function ensureTalksColumns(db: any) {
     "city VARCHAR(100) DEFAULT ''",
     "organizer VARCHAR(200) DEFAULT ''",
     "sub_type VARCHAR(50) DEFAULT ''",
+    "abstract_start_date VARCHAR(10) DEFAULT ''",
     "abstract_deadline VARCHAR(10) DEFAULT ''",
     "early_bird_deadline VARCHAR(10) DEFAULT ''",
     "registration_deadline VARCHAR(10) DEFAULT ''",
@@ -162,6 +163,7 @@ app.post('', async (c) => {
   const city = (body.city || '').trim();
   const organizer = (body.organizer || '').trim();
   const sub_type = (body.sub_type || '').trim();
+  const abstract_start_date = (body.abstract_start_date || '').trim();
   const abstract_deadline = (body.abstract_deadline || '').trim();
   const early_bird_deadline = (body.early_bird_deadline || '').trim();
   const registration_deadline = (body.registration_deadline || '').trim();
@@ -253,6 +255,7 @@ app.post('', async (c) => {
       (city && city !== (matchedExisting.city || '')) ||
       (organizer && organizer !== (matchedExisting.organizer || '')) ||
       (sub_type && sub_type !== (matchedExisting.sub_type || '')) ||
+      (abstract_start_date && abstract_start_date !== (matchedExisting.abstract_start_date || '')) ||
       (abstract_deadline && abstract_deadline !== (matchedExisting.abstract_deadline || '')) ||
       (early_bird_deadline && early_bird_deadline !== (matchedExisting.early_bird_deadline || '')) ||
       (registration_deadline && registration_deadline !== (matchedExisting.registration_deadline || '')) ||
@@ -274,7 +277,7 @@ app.post('', async (c) => {
       await c.env.DB.prepare(
         `UPDATE observatory_talks 
          SET date = ?, end_date = ?, time = ?, event_type = ?, title = ?, speaker = ?, location = ?, poster_url = ?, notes = ?,
-             city = ?, organizer = ?, sub_type = ?, abstract_deadline = ?, early_bird_deadline = ?, registration_deadline = ?,
+             city = ?, organizer = ?, sub_type = ?, abstract_start_date = ?, abstract_deadline = ?, early_bird_deadline = ?, registration_deadline = ?,
              website_url = ?, registration_url = ?, handbook_url = ?, source = ?, updated_at = datetime('now')
          WHERE id = ?`
       ).bind(
@@ -282,6 +285,7 @@ app.post('', async (c) => {
         city || matchedExisting.city || '',
         organizer || matchedExisting.organizer || '',
         sub_type || matchedExisting.sub_type || '',
+        abstract_start_date || matchedExisting.abstract_start_date || '',
         abstract_deadline || matchedExisting.abstract_deadline || '',
         early_bird_deadline || matchedExisting.early_bird_deadline || '',
         registration_deadline || matchedExisting.registration_deadline || '',
@@ -309,12 +313,12 @@ app.post('', async (c) => {
   const res = await c.env.DB.prepare(
     `INSERT INTO observatory_talks (
       date, end_date, time, title, speaker, location, poster_url, notes, event_type,
-      city, organizer, sub_type, abstract_deadline, early_bird_deadline, registration_deadline,
+      city, organizer, sub_type, abstract_start_date, abstract_deadline, early_bird_deadline, registration_deadline,
       website_url, registration_url, handbook_url, source, created_by_id, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
   ).bind(
     date, effectiveEndDate, effectiveTime, title, speaker, location, poster_url, notes, event_type,
-    city, organizer, sub_type, abstract_deadline, early_bird_deadline, registration_deadline,
+    city, organizer, sub_type, abstract_start_date, abstract_deadline, early_bird_deadline, registration_deadline,
     website_url, registration_url, handbook_url, source, user.id
   ).run();
 
@@ -350,6 +354,7 @@ app.put('/:id', async (c) => {
   const city = body.city !== undefined ? (body.city || '') : (((existing as any).city) || '');
   const organizer = body.organizer !== undefined ? (body.organizer || '') : (((existing as any).organizer) || '');
   const sub_type = body.sub_type !== undefined ? (body.sub_type || '') : (((existing as any).sub_type) || '');
+  const abstract_start_date = body.abstract_start_date !== undefined ? (body.abstract_start_date || '') : (((existing as any).abstract_start_date) || '');
   const abstract_deadline = body.abstract_deadline !== undefined ? (body.abstract_deadline || '') : (((existing as any).abstract_deadline) || '');
   const early_bird_deadline = body.early_bird_deadline !== undefined ? (body.early_bird_deadline || '') : (((existing as any).early_bird_deadline) || '');
   const registration_deadline = body.registration_deadline !== undefined ? (body.registration_deadline || '') : (((existing as any).registration_deadline) || '');
@@ -362,12 +367,12 @@ app.put('/:id', async (c) => {
     await c.env.DB.prepare(
       `UPDATE observatory_talks 
        SET date = ?, end_date = ?, time = ?, title = ?, speaker = ?, location = ?, poster_url = ?, notes = ?, event_type = ?,
-           city = ?, organizer = ?, sub_type = ?, abstract_deadline = ?, early_bird_deadline = ?, registration_deadline = ?,
+           city = ?, organizer = ?, sub_type = ?, abstract_start_date = ?, abstract_deadline = ?, early_bird_deadline = ?, registration_deadline = ?,
            website_url = ?, registration_url = ?, handbook_url = ?, source = ?, updated_at = datetime('now')
        WHERE id = ?`
     ).bind(
       date, end_date, time, title, speaker, location, poster_url, notes, event_type,
-      city, organizer, sub_type, abstract_deadline, early_bird_deadline, registration_deadline,
+      city, organizer, sub_type, abstract_start_date, abstract_deadline, early_bird_deadline, registration_deadline,
       website_url, registration_url, handbook_url, source, id
     ).run();
 

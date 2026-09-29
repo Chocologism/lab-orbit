@@ -133,6 +133,7 @@ def update_resource_book(
     for field, value in req.model_dump().items():
         setattr(book, field, value)
 
+    book.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(book)
     return book
@@ -148,6 +149,12 @@ def delete_resource_book(
     book = db.query(ResourceBook).filter(ResourceBook.id == book_id).first()
     if not book:
         raise HTTPException(status_code=404, detail="未找到该教材资料")
+
+    title_str = book.title or ""
+    if "VLab" in title_str or "隧道" in title_str:
+        if current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="内置系统教程无法被普通用户移除")
+
     if book.created_by_id not in (None, current_user.id) and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="只有资料上传者或管理员可以删除")
 

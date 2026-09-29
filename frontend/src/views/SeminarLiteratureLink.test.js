@@ -22,9 +22,9 @@ describe('Seminar and Library Literature Linkage', () => {
     expect('checkingDuplicateArxiv' in bindings).toBe(true)
     expect('checkSharerDuplicateArxiv' in bindings).toBe(true)
 
-    // Ensure text has been changed to remove (可选)
+    // Ensure text has been changed to remove (可选) and supports multiple papers
     expect(content).not.toContain('label="arXiv 编号或链接（可选）"')
-    expect(content).toContain('label="arXiv 编号或链接"')
+    expect(content).toContain('label="arXiv 编号或链接（支持多篇）"')
   })
 
   it('verifies LibraryView.vue SFC bindings and card click navigation', () => {
@@ -37,11 +37,14 @@ describe('Seminar and Library Literature Linkage', () => {
     expect('router' in bindings).toBe(true)
     expect('handlePaperCardClick' in bindings).toBe(true)
     expect('goToSeminar' in bindings).toBe(true)
+    expect('goToRecommendation' in bindings).toBe(true)
 
     // Check template contains clickable seminar card class and 查看组会 button
     expect(content).toContain('clickable-seminar-card')
     expect(content).toContain('查看组会')
     expect(content).toContain('seminar-jump-pill')
+    expect(content).toContain('recommender-badge')
+    expect(content).toContain('查看推荐流')
   })
 
   it('verifies seminarApi.checkArxivPresented method exists', () => {
@@ -71,6 +74,7 @@ describe('Seminar and Library Literature Linkage', () => {
     expect('router' in bindings).toBe(true)
     expect('goToSeminar' in bindings).toBe(true)
     expect('handleRecommendBodyClick' in bindings).toBe(true)
+    expect('checkRouteHighlight' in bindings).toBe(true)
 
     // Check template contains seminar tags and jump triggers
     expect(content).toContain('seminar-priority')
@@ -78,23 +82,24 @@ describe('Seminar and Library Literature Linkage', () => {
     expect(content).toContain('seminar-tag-action')
     expect(content).toContain('查看组会')
     expect(content).toContain('clickable-recommend')
+    expect(content).toContain('推荐文章 · ')
   })
 
-  it('verifies dynamic seminar pinning and expiry sorting logic', () => {
+  it('verifies dynamic seminar and teacher same-day pinning and expiry sorting logic', () => {
     const today = '2026-09-16'
-    const pastSeminarDate = '2026-09-15'
 
     const testFeed = [
-      { id: 10, title: 'Old paper', is_pinned: false, seminar_id: null, seminar_date: null },
-      { id: 11, title: 'Seminar paper', is_pinned: false, seminar_id: 1, seminar_date: today },
-      { id: 12, title: 'Teacher pinned paper', is_pinned: true, seminar_id: null, seminar_date: null },
+      { id: 10, title: 'Old paper', is_pinned: false, recommender_identity: 'student', created_date: '2026-09-10', seminar_id: null, seminar_date: null },
+      { id: 11, title: 'Seminar paper', is_pinned: false, recommender_identity: 'student', created_date: '2026-09-12', seminar_id: 1, seminar_date: today },
+      { id: 12, title: 'Teacher pinned paper', is_pinned: true, recommender_identity: 'teacher', created_date: today, seminar_id: null, seminar_date: null },
     ]
 
-    // On seminar day
+    // On recommendation day: teacher paper recommended today is pinned; seminar today is pinned
     const onDayList = testFeed.map(p => {
       const isSeminarToday = Boolean(p.seminar_date && p.seminar_date === today)
-      const effectiveIsPinned = Boolean(p.is_pinned || isSeminarToday)
-      return { ...p, is_pinned: effectiveIsPinned, is_seminar_today: isSeminarToday }
+      const isTeacherPinned = Boolean(p.is_pinned && p.recommender_identity === 'teacher' && p.created_date === today)
+      const effectiveIsPinned = Boolean(isTeacherPinned || isSeminarToday)
+      return { ...p, is_pinned: effectiveIsPinned, is_teacher_pinned: isTeacherPinned, is_seminar_today: isSeminarToday }
     }).sort((a, b) => {
       const pinA = a.is_pinned ? 1 : 0
       const pinB = b.is_pinned ? 1 : 0
@@ -102,23 +107,25 @@ describe('Seminar and Library Literature Linkage', () => {
       return b.id - a.id
     })
 
-    // Both seminar paper (id 11) and teacher paper (id 12) are pinned
+    // Both teacher paper (id 12) and seminar paper (id 11) are pinned on today
     expect(onDayList[0].id).toBe(12)
+    expect(onDayList[0].is_teacher_pinned).toBe(true)
     expect(onDayList[1].id).toBe(11)
     expect(onDayList[1].is_seminar_today).toBe(true)
     expect(onDayList[2].id).toBe(10)
 
-    // Next day (expired seminar): seminar paper unpins automatically
+    // Next day (expired recommendation day): teacher paper unpins automatically
     const nextDay = '2026-09-17'
     const feedNextDay = [
       ...testFeed,
-      { id: 13, title: 'New paper next day', is_pinned: false, seminar_id: null, seminar_date: null }
+      { id: 13, title: 'New paper next day', is_pinned: false, recommender_identity: 'student', created_date: nextDay, seminar_id: null, seminar_date: null }
     ]
 
     const nextDayList = feedNextDay.map(p => {
       const isSeminarToday = Boolean(p.seminar_date && p.seminar_date === nextDay)
-      const effectiveIsPinned = Boolean(p.is_pinned || isSeminarToday)
-      return { ...p, is_pinned: effectiveIsPinned, is_seminar_today: isSeminarToday }
+      const isTeacherPinned = Boolean(p.is_pinned && p.recommender_identity === 'teacher' && p.created_date === nextDay)
+      const effectiveIsPinned = Boolean(isTeacherPinned || isSeminarToday)
+      return { ...p, is_pinned: effectiveIsPinned, is_teacher_pinned: isTeacherPinned, is_seminar_today: isSeminarToday }
     }).sort((a, b) => {
       const pinA = a.is_pinned ? 1 : 0
       const pinB = b.is_pinned ? 1 : 0
@@ -126,10 +133,10 @@ describe('Seminar and Library Literature Linkage', () => {
       return b.id - a.id
     })
 
-    // Teacher paper (id 12) remains pinned at the top
-    expect(nextDayList[0].id).toBe(12)
-    // New unpinned paper (id 13) naturally appears above past seminar paper (id 11)
-    expect(nextDayList[1].id).toBe(13)
+    // New paper (id 13) naturally appears above expired teacher paper (id 12) because teacher paper unpinned!
+    expect(nextDayList[0].id).toBe(13)
+    expect(nextDayList[1].id).toBe(12)
+    expect(nextDayList[1].is_teacher_pinned).toBe(false)
     // Past seminar paper (id 11) is unpinned, but still above older paper (id 10)
     expect(nextDayList[2].id).toBe(11)
     expect(nextDayList[2].is_seminar_today).toBe(false)

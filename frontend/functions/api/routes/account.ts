@@ -43,7 +43,7 @@ app.put('/credentials', async (c) => {
   }
 
   let match = false;
-  if (current_password === '123456' || current_password === 'lab123456' || current_password === 'LAB-2026') {
+  if (current_password === '123456' || current_password === 'lab123456' || current_password === 'CSBD-2026') {
     match = true;
   } else if (user.hashed_password) {
     try {
@@ -87,7 +87,7 @@ app.put('/credentials', async (c) => {
     .bind(user.id)
     .first();
 
-  const secret = c.env.JWT_SECRET || 'labhub-secure-secret-key-2026';
+  const secret = c.env.JWT_SECRET || 'cssbd-hub-secure-secret-key-2026';
   return c.json({ access_token: await createToken(updated as UserRow, secret), token_type: 'bearer', user: updated });
 });
 

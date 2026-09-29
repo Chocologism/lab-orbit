@@ -25,6 +25,51 @@ export function shanghaiToday(now = new Date()) {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now).map(p => [p.type, p.value]))
   return `${p.year}-${p.month}-${p.day}`
 }
+/**
+ * 规范化并纠偏学术日程日期
+ * 1. 自动适配 YYYY-MM-DD / YYYY/MM/DD / YYYY年MM月DD日 / MM-DD / M月D日
+ * 2. 核心纠偏：若解析得到的年份早于基准年份（如大模型幻觉输出 2025/2024 年，而基准年份为 2026 年），自动纠偏为基准年份
+ * 3. 补全缺失年份（如仅提供月日）
+ * @param {string} dateRaw
+ * @param {string} referenceDate 基准参考日期 (YYYY-MM-DD)，默认为 shanghaiToday()
+ * @returns {string} 格式合规的 YYYY-MM-DD 字符串
+ */
+export function normalizeScheduleDate(dateRaw, referenceDate = shanghaiToday()) {
+  if (!dateRaw || typeof dateRaw !== 'string') return referenceDate || shanghaiToday()
+  const ref = referenceDate || shanghaiToday()
+  const refYear = parseInt(ref.slice(0, 4), 10) || 2026
+  const clean = dateRaw.replace(/[/.]/g, '-').trim()
+
+  const fullMatch = clean.match(/(?:^|[^\d])(20\d{2})[-年](\d{1,2})[-月](\d{1,2})日?/)
+  if (fullMatch) {
+    let y = parseInt(fullMatch[1], 10)
+    if (y < refYear) {
+      y = refYear
+    }
+    const m = String(parseInt(fullMatch[2], 10)).padStart(2, '0')
+    const d = String(parseInt(fullMatch[3], 10)).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+
+  const mdMatch = clean.match(/(?:^|[^\d])(\d{1,2})[-月](\d{1,2})日?/)
+  if (mdMatch) {
+    const m = String(parseInt(mdMatch[1], 10)).padStart(2, '0')
+    const d = String(parseInt(mdMatch[2], 10)).padStart(2, '0')
+    return `${refYear}-${m}-${d}`
+  }
+
+  const fallbackMatch = clean.match(/\d{4}-\d{2}-\d{2}/)
+  if (fallbackMatch) {
+    let y = parseInt(fallbackMatch[0].slice(0, 4), 10)
+    if (y < refYear) {
+      return `${refYear}${fallbackMatch[0].slice(4)}`
+    }
+    return fallbackMatch[0]
+  }
+
+  return clean.slice(0, 10) || ref
+}
+
 export function timeString(value) {
   const match = /^(\d{1,2})[:：](\d{2})$/.exec((value || '').trim())
   if (!match || +match[1] > 23 || +match[2] > 59) return null
@@ -38,19 +83,37 @@ export function eventTime(item, defaultTime = '14:30') {
   const time = timeString(item.time) || defaultTime
   return parseDate(item.date) ? Date.parse(`${item.date}T${time}:00+08:00`) : NaN
 }
+export function isSeminarCompleted(item, now = Date.now()) {
+  if (!item) return false
+  if (item.status === 'completed') return true
+  if (item.status === 'cancelled') return false
+  const today = shanghaiToday(new Date(now))
+  return Boolean(item.date && item.date < today)
+}
+export function effectiveSeminarStatus(item, now = Date.now()) {
+  if (!item) return 'upcoming'
+  if (item.status === 'cancelled') return 'cancelled'
+  if (isSeminarCompleted(item, now)) return 'completed'
+  return 'upcoming'
+}
 export function statusLabel(item, now = Date.now()) {
-  if (item.status === 'completed') return '已完成'
-  return seminarTime(item) < now ? '待补纪要' : '待举行'
+  if (!item) return ''
+  if (item.status === 'cancelled') return '已取消'
+  if (isSeminarCompleted(item, now)) return '已完成'
+  return '待举行'
 }
 export const sortSeminars = items => [...items].sort((a, b) => `${a.date} ${timeString(a.time) || a.time}`.localeCompare(`${b.date} ${timeString(b.time) || b.time}`) || a.id - b.id)
 export function nextSeminar(items, now = Date.now()) {
-  return sortSeminars(items).find(item => item.status === 'upcoming' && seminarTime(item) >= now) || null
+  return sortSeminars(items).find(item => effectiveSeminarStatus(item, now) === 'upcoming' && seminarTime(item) >= now) || null
 }
-export function filterSeminars(items, status, presenter) {
-  return sortSeminars(items.filter(s => (status === 'all' || s.status === status) && (!presenter || s.presenter_name === presenter)))
+export function filterSeminars(items, status, presenter, now = Date.now()) {
+  return sortSeminars(items.filter(s => {
+    const effStatus = effectiveSeminarStatus(s, now)
+    return (status === 'all' || effStatus === status) && (!presenter || s.presenter_name === presenter)
+  }))
 }
 export function moveDraft(drafts, item, date) {
-  if (item.status !== 'upcoming' || !parseDate(date) || !parseDate(item.date)) return drafts
+  if (effectiveSeminarStatus(item) !== 'upcoming' || !parseDate(date) || !parseDate(item.date)) return drafts
   const result = { ...drafts }
   const original = result[item.id]?.expected_date || item.date
   if (date === original) delete result[item.id]
@@ -61,13 +124,13 @@ export const previewSeminars = (items, drafts) => items.map(item => ({ ...item, 
 export function reconcileChanges(changes, current) {
   const map = new Map(current.map(s => [s.id, s]))
   if (changes.every(c => map.get(c.id)?.date === c.date)) return 'saved'
-  if (changes.every(c => map.get(c.id)?.date === c.expected_date && map.get(c.id)?.status === 'upcoming')) return 'unchanged'
+  if (changes.every(c => map.get(c.id)?.date === c.expected_date && effectiveSeminarStatus(map.get(c.id)) === 'upcoming')) return 'unchanged'
   return 'conflict'
 }
 export function findConflicts(changes, current) {
   const map = new Map(current.map(s => [s.id, s]))
-  return changes.filter(c => !map.has(c.id) || map.get(c.id).status !== 'upcoming' || map.get(c.id).date !== c.expected_date).map(c => ({
-    ...c, current_date: map.get(c.id)?.date || null, status: map.get(c.id)?.status || null,
+  return changes.filter(c => !map.has(c.id) || effectiveSeminarStatus(map.get(c.id)) !== 'upcoming' || map.get(c.id).date !== c.expected_date).map(c => ({
+    ...c, current_date: map.get(c.id)?.date || null, status: map.get(c.id) ? effectiveSeminarStatus(map.get(c.id)) : null,
   }))
 }
 
@@ -87,8 +150,8 @@ export function seminarIcs(item, now = new Date()) {
   const start = seminarTime(item)
   if (!Number.isFinite(start)) throw new Error('请先修正组会日期与时间，再加入日历。')
   return [
-    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//LabOrbit//Seminars//CN', 'CALSCALE:GREGORIAN',
-    'BEGIN:VEVENT', `UID:seminar-${item.id}@laborbit.local`, `DTSTAMP:${utcStamp(now)}`,
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//CSBD-Hub//Seminars//CN', 'CALSCALE:GREGORIAN',
+    'BEGIN:VEVENT', `UID:seminar-${item.id}@csbd-hub.local`, `DTSTAMP:${utcStamp(now)}`,
     `DTSTART:${utcStamp(new Date(start))}`, `DTEND:${utcStamp(new Date(start + 2 * 3600000))}`,
     `SUMMARY:${escapeIcs(`[组会] ${item.topic} (${item.presenter_name})`)}`,
     `LOCATION:${escapeIcs(item.location)}`,
@@ -97,11 +160,11 @@ export function seminarIcs(item, now = new Date()) {
   ].map(foldLine).join('\r\n')
 }
 
-export function weekScheduleIcs(eventsList, calendarName = '课题组周日程', now = new Date()) {
+export function weekScheduleIcs(eventsList, calendarName = 'CSBD 课题组周日程', now = new Date()) {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//LabOrbit//WeeklySchedule//CN',
+    'PRODID:-//CSBD-Hub//WeeklySchedule//CN',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     `X-WR-CALNAME:${escapeIcs(calendarName)}`,
@@ -118,7 +181,7 @@ export function weekScheduleIcs(eventsList, calendarName = '课题组周日程',
     const durationMs = (isSeminar ? 2 : (isConference ? 8 : 1.5)) * 3600 * 1000
     const endMs = startMs + durationMs
 
-    const uid = `${item.type || 'event'}-${item.id}-${item.date}@laborbit.local`
+    const uid = `${item.type || 'event'}-${item.id}-${item.date}@csbd-hub.local`
     const summary = isSeminar
       ? `[组会] ${item.topic || item.title || '工作汇报'} (${item.presenter_name || item.speaker || '待定'})`
       : isConference

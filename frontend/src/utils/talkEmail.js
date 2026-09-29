@@ -34,6 +34,38 @@ export function isTalkEmail(email) {
 }
 
 /**
+ * 识别是否为机构/学院/研究生部/教务处公文通知或管理邮件
+ * @param {Object} email 邮件对象
+ * @returns {boolean}
+ */
+export function isNoticeEmail(email) {
+  if (!email) return false
+  const title = (email.subject || '').toLowerCase()
+  const snippet = (email.snippet || '').toLowerCase()
+  const body = (email.body_text || '').toLowerCase()
+  const sender = `${email.sender_name || ''} ${email.sender_email || ''}`.toLowerCase()
+  const combined = `${title} \n ${snippet} \n ${body}`
+
+  const isDeptSender = /研究生部|研究生院|教务处|科研处|科技处|人事处|人教处|院务|院办|党政办|综合办|行政办|学生工作|学工处|资产处|财务处|科发处|管理部|培养处|学位办|招生办|pmo\.ac\.cn|nju\.edu\.cn|cas\.cn|ustc\.edu\.cn/i.test(sender)
+
+  if (/通知|意见征集|征求意见|征集意见|实施细则|管理办法|暂行办法|方案|工作安排|工作通知|日程安排|申报通知|评审通知|公示|关于.*?的函|关于.*?的通知|关于.*?的决定|答辩|学位|奖学金|助学金|选拔|推免|考务|考试|放假|值班|安全检查|notice|announcement|circular|bulletin/i.test(title)) {
+    return true
+  }
+
+  if (isDeptSender && /通知|征集|细则|办法|规定|申报|评审|公示|安排|办理|名单|导师|研究生|学生|学院|关于/i.test(combined)) {
+    return true
+  }
+
+  const hasNoticeKeyword = /通知|意见征集|征求意见|实施细则|管理办法|工作方案|公示/i.test(combined)
+  const hasInstitutionalContext = /各单位|各位老师|各位同学|各位导师|各部门|各课题组|全体研究生|全体导师|根据.*?要求|经研究决定|印发|特此通知/i.test(combined)
+  if (hasNoticeKeyword && hasInstitutionalContext) {
+    return true
+  }
+
+  return false
+}
+
+/**
  * 将邮件正文分割为多场学术报告片段（如报告一/报告二、Talk 1/Talk 2、多个题目/主讲人锚点）
  * @param {string} text 邮件正文
  * @returns {{ header: string, segments: string[] }}
@@ -150,7 +182,9 @@ export function pickChinesePartIfDual(str = '') {
 }
 
 /**
- * 根据邮件及地点上下文判断所属单位并规范化地点前缀
+ * 根据邮件及地点上下文判断所属单位并规范化地点前缀：
+ * - 南大报告：最前面填入“南大 ”（包含空格，如“南大 天文楼302会议室”）
+ * - 紫台报告：最前面填入“紫台”（如“紫台仙林 5-516 会议室”或“紫台5-516 会议室”）
  */
 export function applyInstitutionLocationPrefix(location = '', context = '') {
   let loc = (location || '').trim()
@@ -158,8 +192,9 @@ export function applyInstitutionLocationPrefix(location = '', context = '') {
 
   const combined = `${context} ${loc}`
   const isNju = /南京大学|南大|nju\.edu\.cn|\bnju\b|天文与空间科学学院|左涤江|天文楼/i.test(combined)
+  const isPmo = /紫金山天文台|紫台|pmo\.ac.cn|\bpmo\b|仙林园区|5-516|大平房|青促会/i.test(combined)
 
-  if (isNju) {
+  if (isNju && !isPmo) {
     if (/^南大\s*/.test(loc)) {
       return loc.replace(/^南大\s*/, '南大 ')
     }
@@ -167,6 +202,28 @@ export function applyInstitutionLocationPrefix(location = '', context = '') {
       return loc.replace(/^南京大学\s*/, '南大 ')
     }
     return loc ? `南大 ${loc}` : '南大 '
+  }
+
+  if (isPmo && !isNju) {
+    if (/^紫台\s*/.test(loc)) {
+      return loc
+    }
+    if (/^紫金山天文台\s*/.test(loc)) {
+      return loc.replace(/^紫金山天文台\s*/, '紫台')
+    }
+    return loc ? `紫台${loc}` : '紫台'
+  }
+
+  if (isNju && isPmo) {
+    if (/紫台|紫金山|5-516|仙林园区|大平房/i.test(loc)) {
+      if (/^紫台\s*/.test(loc)) return loc
+      if (/^紫金山天文台\s*/.test(loc)) return loc.replace(/^紫金山天文台\s*/, '紫台')
+      return loc ? `紫台${loc}` : '紫台'
+    } else {
+      if (/^南大\s*/.test(loc)) return loc.replace(/^南大\s*/, '南大 ')
+      if (/^南京大学\s*/.test(loc)) return loc.replace(/^南京大学\s*/, '南大 ')
+      return loc ? `南大 ${loc}` : '南大 '
+    }
   }
 
   return loc
@@ -187,7 +244,7 @@ export function extractSingleTalkFields(text = '', fallback = {}) {
 
   // 1. 标题提取
   const mTitle = text.match(/(?:做题为|题为|题目为|题目是|报告题目|报告主题|报告名称)\s*[：:\s]*[《“]([^》”\n\r]+)[》”]/)
-    || text.match(/(?:报告(?:题目|标题|主题|名称)|题目|Title|Topic)[：:\s]+([^\n\r]+)/i)
+    || text.match(/(?:报告(?:题目|标题|主题|名称)|题目|页面标题|网页标题|Title|Topic)[：:\s]+([^\n\r]+)/i)
     || text.match(/[《“]([^》”\n\r]{4,100})[》”]\s*(?:的)?(?:学术)?(?:报告|讲座|分享)/)
 
   if (mTitle) {
@@ -205,29 +262,35 @@ export function extractSingleTalkFields(text = '', fallback = {}) {
   }
 
   // 2. 日期提取 (YYYY-MM-DD 或 YYYY年MM月DD日)
-  const fullDateMatch = text.match(/(?<!\d)(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})日?/)
+  const currentYear = new Date().getFullYear()
+  const fullDateMatch = text.match(/(?:^|[^\d])(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})日?/)
   if (fullDateMatch) {
-    const y = fullDateMatch[1]
+    let y = parseInt(fullDateMatch[1], 10)
+    if (y < currentYear) {
+      y = currentYear
+    }
     const m = fullDateMatch[2].padStart(2, '0')
     const d = fullDateMatch[3].padStart(2, '0')
     result.date = `${y}-${m}-${d}`
   } else {
-    const mdMatch = text.match(/(?<!\d)(\d{1,2})月(\d{1,2})日?/)
+    const mdMatch = text.match(/(?:^|[^\d])(\d{1,2})月(\d{1,2})日?/)
     if (mdMatch) {
-      const y = new Date().getFullYear()
+      const y = currentYear
       const m = mdMatch[1].padStart(2, '0')
       const d = mdMatch[2].padStart(2, '0')
       result.date = `${y}-${m}-${d}`
     }
   }
 
-  // 3. 时间提取
-  const timeMatch = text.match(/(?<!\d)(\d{1,2})[:：](\d{2})\s*(AM|PM)?|(?<!\d)(\d{1,2})[点时](?:(\d{1,2})分?)?/i)
+
+  // 3. 时间提取（避免 lookbehind 保证 Safari 全版本兼容）
+  const timeMatch = text.match(/(?:^|[^\d])(\d{1,2})[:：](\d{2})\s*(AM|PM)?|(?:^|[^\d])(\d{1,2})[点时](?:(\d{1,2})分?)?/i)
   if (timeMatch) {
     let hour = parseInt(timeMatch[1] || timeMatch[4], 10)
     const minute = parseInt(timeMatch[2] || timeMatch[5] || 0, 10)
     const idx = timeMatch.index || 0
-    const prefix = text.slice(Math.max(0, idx - 15), idx)
+    const matchStart = timeMatch[0].match(/^\d/) ? idx : idx + 1
+    const prefix = text.slice(Math.max(0, matchStart - 15), matchStart)
     const ampm = (timeMatch[3] || '').toUpperCase()
     if (ampm === 'PM' || /下午|晚上/.test(prefix)) {
       if (hour < 12) hour += 12
@@ -390,22 +453,94 @@ export function detectScheduleType(email) {
   return null
 }
 
+const MONTH_NAMES_MAP = {
+  january: '01', jan: '01',
+  february: '02', feb: '02',
+  march: '03', mar: '03',
+  april: '04', apr: '04',
+  may: '05',
+  june: '06', jun: '06',
+  july: '07', jul: '07',
+  august: '08', aug: '08',
+  september: '09', sep: '09', sept: '09',
+  october: '10', oct: '10',
+  november: '11', nov: '11',
+  december: '12', dec: '12'
+}
+
 function parseStandardDateStr(rawStr) {
   if (!rawStr) return ''
-  const fullMatch = rawStr.match(/(?<!\d)(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})日?/)
+  const currentYear = new Date().getFullYear()
+  const s = String(rawStr).trim().replace(/^[：:\-—~至到\s]+/, '')
+
+  // 1. English month format: "YYYY, Month DD" (e.g., "2026, September 22" or "2026 Sep 22")
+  const engYMD = s.match(/(?:^|[^\d])(20\d{2})\s*,\s*([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?/i)
+  if (engYMD) {
+    const mStr = engYMD[2].toLowerCase()
+    if (MONTH_NAMES_MAP[mStr]) {
+      let y = parseInt(engYMD[1], 10)
+      if (y < currentYear) y = currentYear
+      const m = MONTH_NAMES_MAP[mStr]
+      const d = engYMD[3].padStart(2, '0')
+      return `${y}-${m}-${d}`
+    }
+  }
+
+  // 2. English month format: "Month DD, YYYY" or "Month DD YYYY" (e.g., "September 22, 2026")
+  const engMDY = s.match(/(?:^|[^A-Za-z])([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?\s*,\s*(20\d{2})/i)
+    || s.match(/(?:^|[^A-Za-z])([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?\s+(20\d{2})/i)
+  if (engMDY) {
+    const mStr = engMDY[1].toLowerCase()
+    if (MONTH_NAMES_MAP[mStr]) {
+      let y = parseInt(engMDY[3], 10)
+      if (y < currentYear) y = currentYear
+      const m = MONTH_NAMES_MAP[mStr]
+      const d = engMDY[2].padStart(2, '0')
+      return `${y}-${m}-${d}`
+    }
+  }
+
+  // 3. English month format: "DD Month YYYY" (e.g., "22 September 2026" or "22nd Sep 2026")
+  const engDMY = s.match(/(?:^|[^\d])(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+(20\d{2})/i)
+  if (engDMY) {
+    const mStr = engDMY[2].toLowerCase()
+    if (MONTH_NAMES_MAP[mStr]) {
+      let y = parseInt(engDMY[3], 10)
+      if (y < currentYear) y = currentYear
+      const m = MONTH_NAMES_MAP[mStr]
+      const d = engDMY[1].padStart(2, '0')
+      return `${y}-${m}-${d}`
+    }
+  }
+
+  // 4. Chinese / ISO with year: "2026年9月22日", "2026-09-22", "2026/09/22", "2026.09.22"
+  const fullMatch = s.match(/(?:^|[^\d])(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})日?/)
   if (fullMatch) {
-    const y = fullMatch[1]
+    let y = parseInt(fullMatch[1], 10)
+    if (y < currentYear) {
+      y = currentYear
+    }
     const m = fullMatch[2].padStart(2, '0')
     const d = fullMatch[3].padStart(2, '0')
     return `${y}-${m}-${d}`
   }
-  const mdMatch = rawStr.match(/(?<!\d)(\d{1,2})[月/.-](\d{1,2})日?/)
+
+  // 5. English month format without year: "Month DD" or "DD Month"
+  const engMDNoY = s.match(/(?:^|[^A-Za-z])([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s|$|[^A-Za-z\d])/i)
+  if (engMDNoY && MONTH_NAMES_MAP[engMDNoY[1].toLowerCase()]) {
+    const m = MONTH_NAMES_MAP[engMDNoY[1].toLowerCase()]
+    const d = engMDNoY[2].padStart(2, '0')
+    return `${currentYear}-${m}-${d}`
+  }
+
+  // 6. Chinese / short date without year: "9月22日", "09-22"
+  const mdMatch = s.match(/(?:^|[^\d])(\d{1,2})[月/.-](\d{1,2})日?/)
   if (mdMatch) {
-    const y = new Date().getFullYear()
     const m = mdMatch[1].padStart(2, '0')
     const d = mdMatch[2].padStart(2, '0')
-    return `${y}-${m}-${d}`
+    return `${currentYear}-${m}-${d}`
   }
+
   return ''
 }
 
@@ -422,15 +557,32 @@ export function parseConferenceMetadataLocally(text = '', subject = '') {
   let title = (subject || '').replace(/^(?:提醒|通知|Fw|Fwd|转|转发)[:：\s]*/gi, '').trim()
   title = title.replace(/^[【\[](?:会议通知|学术会议|通知|参会邀请)[\]】]\s*/i, '').trim()
   title = title.replace(/^关于(?:召开|举办|组织)(?:的通知|的邀请)?/i, '').trim()
-  if (!title && text) {
-    const mFirstLine = text.split(/\r?\n/).find(l => l.trim().length > 4)
+  const pageTitleMatch = text.match(/(?:页面标题|网页标题|会议名称|活动名称)[:：\s]*([^\n\r]+)/i)
+  if (pageTitleMatch && pageTitleMatch[1].trim()) {
+    title = pageTitleMatch[1].trim()
+  } else if (!title && text) {
+    const mFirstLine = text.split(/\r?\n/).find(l => {
+      const cleanL = l.trim()
+      return cleanL.length > 4 && !cleanL.startsWith('【活动官网') && !cleanL.startsWith('http')
+    })
     if (mFirstLine) title = mFirstLine.trim().slice(0, 100)
   }
   title = pickChinesePartIfDual(title || '学术会议')
 
   // 2. 子类型判断
   let subType = '研讨会'
-  if (/年会|annual meeting/i.test(combined)) {
+  const mExplicitType = combined.match(/(?:会议类型|活动类型|会议类别)[:：\s]*([^\s\n\r]+)/)
+  if (mExplicitType) {
+    const rawT = mExplicitType[1].trim()
+    if (/国际/i.test(rawT)) subType = '国际会议'
+    else if (/年会/i.test(rawT)) subType = '年会'
+    else if (/暑期|研习|讲习/i.test(rawT)) subType = '暑期学校'
+    else if (/论坛/i.test(rawT)) subType = '学术论坛'
+    else if (/专题/i.test(rawT)) subType = '专题研讨'
+    else if (/研讨/i.test(rawT)) subType = '研讨会'
+  } else if (/国际会议(?!(?:中心|大酒店|酒店|展览|大厦))|international\s+conference/i.test(combined)) {
+    subType = '国际会议'
+  } else if (/年会|annual meeting/i.test(combined)) {
     subType = '年会'
   } else if (/暑期学校|暑假学校|讲习班|研习班|summer school|冬令营/i.test(combined)) {
     subType = '暑期学校'
@@ -444,31 +596,77 @@ export function parseConferenceMetadataLocally(text = '', subject = '') {
   let startDate = ''
   let endDate = ''
 
-  const rangeMatch1 = combined.match(/(?<!\d)(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})日?\s*(?:-|—|——|~|至|到)\s*(?:(20\d{2})[年/.-])?(?:(\d{1,2})[月/.-])?(\d{1,2})日?/)
-  if (rangeMatch1) {
-    const y1 = rangeMatch1[1]
-    const m1 = rangeMatch1[2].padStart(2, '0')
-    const d1 = rangeMatch1[3].padStart(2, '0')
-    const y2 = rangeMatch1[4] || y1
-    const m2 = (rangeMatch1[5] || m1).padStart(2, '0')
-    const d2 = rangeMatch1[6].padStart(2, '0')
-    startDate = `${y1}-${m1}-${d1}`
-    endDate = `${y2}-${m2}-${d2}`
-  } else {
-    const rangeMatch2 = combined.match(/(?<!\d)(\d{1,2})月(\d{1,2})日?\s*(?:-|—|——|~|至|到)\s*(?:(\d{1,2})月)?(\d{1,2})日?/)
-    if (rangeMatch2) {
-      const y = new Date().getFullYear()
-      const m1 = rangeMatch2[1].padStart(2, '0')
-      const d1 = rangeMatch2[2].padStart(2, '0')
-      const m2 = (rangeMatch2[3] || m1).padStart(2, '0')
-      const d2 = rangeMatch2[4].padStart(2, '0')
-      startDate = `${y}-${m1}-${d1}`
-      endDate = `${y}-${m2}-${d2}`
+  const currentYear = new Date().getFullYear()
+
+  // 3.1 英文日期范围匹配
+  const engRangeMatch1 = combined.match(/(?:^|[^\d])(20\d{2})\s*,\s*([A-Za-z]+)\s+(\d{1,2})\s*(?:-|—|——|~|to)\s*(\d{1,2})(?:st|nd|rd|th)?/i)
+  const engRangeMatch2 = combined.match(/(?:^|[^\d])(\d{1,2})\s*(?:-|—|——|~|to)\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+(20\d{2})/i)
+  const engRangeMatch3 = combined.match(/(?:^|[^A-Za-z])([A-Za-z]+)\s+(\d{1,2})\s*(?:-|—|——|~|to)\s*(\d{1,2})(?:st|nd|rd|th)?\s*,\s*(20\d{2})/i)
+  const indicoStartsMatch = combined.match(/Starts\s+(?:.*?,)?\s*(\d{1,2}\s+[A-Za-z]+\s+20\d{2}|[A-Za-z]+\s+\d{1,2},\s*20\d{2}|20\d{2},\s*[A-Za-z]+\s+\d{1,2})/i)
+  const indicoEndsMatch = combined.match(/Ends\s+(?:.*?,)?\s*(\d{1,2}\s+[A-Za-z]+\s+20\d{2}|[A-Za-z]+\s+\d{1,2},\s*20\d{2}|20\d{2},\s*[A-Za-z]+\s+\d{1,2})/i)
+
+  if (engRangeMatch1 && MONTH_NAMES_MAP[engRangeMatch1[2].toLowerCase()]) {
+    let y = parseInt(engRangeMatch1[1], 10)
+    if (y < currentYear) y = currentYear
+    const m = MONTH_NAMES_MAP[engRangeMatch1[2].toLowerCase()]
+    const d1 = engRangeMatch1[3].padStart(2, '0')
+    const d2 = engRangeMatch1[4].padStart(2, '0')
+    startDate = `${y}-${m}-${d1}`
+    endDate = `${y}-${m}-${d2}`
+  } else if (engRangeMatch2 && MONTH_NAMES_MAP[engRangeMatch2[3].toLowerCase()]) {
+    let y = parseInt(engRangeMatch2[4], 10)
+    if (y < currentYear) y = currentYear
+    const m = MONTH_NAMES_MAP[engRangeMatch2[3].toLowerCase()]
+    const d1 = engRangeMatch2[1].padStart(2, '0')
+    const d2 = engRangeMatch2[2].padStart(2, '0')
+    startDate = `${y}-${m}-${d1}`
+    endDate = `${y}-${m}-${d2}`
+  } else if (engRangeMatch3 && MONTH_NAMES_MAP[engRangeMatch3[1].toLowerCase()]) {
+    let y = parseInt(engRangeMatch3[4], 10)
+    if (y < currentYear) y = currentYear
+    const m = MONTH_NAMES_MAP[engRangeMatch3[1].toLowerCase()]
+    const d1 = engRangeMatch3[2].padStart(2, '0')
+    const d2 = engRangeMatch3[3].padStart(2, '0')
+    startDate = `${y}-${m}-${d1}`
+    endDate = `${y}-${m}-${d2}`
+  } else if (indicoStartsMatch && indicoEndsMatch) {
+    const sDate = parseStandardDateStr(indicoStartsMatch[1])
+    const eDate = parseStandardDateStr(indicoEndsMatch[1])
+    if (sDate) {
+      startDate = sDate
+      endDate = eDate || sDate
+    }
+  }
+
+  if (!startDate) {
+    const rangeMatch1 = combined.match(/(?:^|[^\d])(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})日?\s*(?:-|—|——|~|至|到)\s*(?:(20\d{2})[年/.-])?(?:(\d{1,2})[月/.-])?(\d{1,2})日?/)
+    if (rangeMatch1) {
+      let y1 = parseInt(rangeMatch1[1], 10)
+      if (y1 < currentYear) y1 = currentYear
+      const m1 = rangeMatch1[2].padStart(2, '0')
+      const d1 = rangeMatch1[3].padStart(2, '0')
+      let y2 = rangeMatch1[4] ? parseInt(rangeMatch1[4], 10) : y1
+      if (y2 < currentYear) y2 = currentYear
+      const m2 = (rangeMatch1[5] || m1).padStart(2, '0')
+      const d2 = rangeMatch1[6].padStart(2, '0')
+      startDate = `${y1}-${m1}-${d1}`
+      endDate = `${y2}-${m2}-${d2}`
     } else {
-      const singleDate = parseStandardDateStr(combined)
-      if (singleDate) {
-        startDate = singleDate
-        endDate = singleDate
+      const rangeMatch2 = combined.match(/(?:^|[^\d])(\d{1,2})月(\d{1,2})日?\s*(?:-|—|——|~|至|到)\s*(?:(\d{1,2})月)?(\d{1,2})日?/)
+      if (rangeMatch2) {
+        const y = new Date().getFullYear()
+        const m1 = rangeMatch2[1].padStart(2, '0')
+        const d1 = rangeMatch2[2].padStart(2, '0')
+        const m2 = (rangeMatch2[3] || m1).padStart(2, '0')
+        const d2 = rangeMatch2[4].padStart(2, '0')
+        startDate = `${y}-${m1}-${d1}`
+        endDate = `${y}-${m2}-${d2}`
+      } else {
+        const singleDate = parseStandardDateStr(combined)
+        if (singleDate) {
+          startDate = singleDate
+          endDate = singleDate
+        }
       }
     }
   }
@@ -486,6 +684,21 @@ export function parseConferenceMetadataLocally(text = '', subject = '') {
     for (const c of cityList) {
       if (combined.includes(c)) {
         city = c
+        break
+      }
+    }
+  }
+  if (!city) {
+    const engCityMap = {
+      shanghai: '上海', beijing: '北京', nanjing: '南京', hefei: '合肥',
+      hangzhou: '杭州', wuhan: '武汉', guangzhou: '广州', shenzhen: '深圳',
+      chengdu: '成都', chongqing: '重庆', xian: '西安', "xi'an": '西安',
+      kunming: '昆明', qingdao: '青岛', xiamen: '厦门', tianjin: '天津',
+      suzhou: '苏州', changsha: '长沙'
+    }
+    for (const [eng, chn] of Object.entries(engCityMap)) {
+      if (new RegExp(`\\b${eng}\\b`, 'i').test(combined)) {
+        city = chn
         break
       }
     }
@@ -512,32 +725,86 @@ export function parseConferenceMetadataLocally(text = '', subject = '') {
     }
   }
 
-  // 6. 截止日期提取 (摘要投递截止、早鸟截止、报名截止)
+  // 6. 截止与关键日期提取 (摘要开始、摘要截止、早鸟截止、报名截止)
+  let abstractStartDate = ''
   let abstractDeadline = ''
   let earlyBirdDeadline = ''
   let registrationDeadline = ''
 
-  const mAbs = combined.match(/摘要(?:投递|提交|截止)?(?:时间|日期|截止)?[:：\s]*((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?)/i)
-    || combined.match(/(?:call\s*for\s*abstract|abstract\s*deadline)[:：\s]*((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?)/i)
-  if (mAbs) abstractDeadline = parseStandardDateStr(mAbs[1])
+  // 6.1 摘要阶段范围提取（如：摘要提交：2026-09-22 至 2026-10-22 或 Call for abstracts: 2026, September 22 - 2026, October 22）
+  const mAbsRange = combined.match(/(?:摘要(?:提交|投递|征稿)?|call\s*for\s*abstracts?|abstract\s*submission)[\s:：\-—]*((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?|20\d{2},\s*[A-Za-z]+\s+\d{1,2}|[A-Za-z]+\s+\d{1,2},\s*20\d{2}|\d{1,2}\s+[A-Za-z]+\s+20\d{2})\s*(?:-|—|——|~|至|到|to)\s*((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?|20\d{2},\s*[A-Za-z]+\s+\d{1,2}|[A-Za-z]+\s+\d{1,2},\s*20\d{2}|\d{1,2}\s+[A-Za-z]+\s+20\d{2})/i)
+  if (mAbsRange) {
+    abstractStartDate = parseStandardDateStr(mAbsRange[1])
+    abstractDeadline = parseStandardDateStr(mAbsRange[2])
+  }
 
-  const mEb = combined.match(/早鸟(?:优惠|注册|报名|截止)?(?:时间|日期|截止)?[:：\s]*((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?)/i)
-    || combined.match(/(?:early\s*bird)[:：\s]*((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?)/i)
+  // 6.2 摘要开始日期提取（如：Call for abstracts - 2026, September 22 或 摘要提交开始：2026年9月22日）
+  if (!abstractStartDate) {
+    const mAbsStart = combined.match(/(?:call\s*for\s*abstracts?(?:\s*opens?|\s*begins?|\s*starts?)?|摘要(?:提交|投递|征集|征稿)?(?:开始|开放|起)(?:时间|日期)?)[\s:：\-—]+((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?|20\d{2},\s*[A-Za-z]+\s+\d{1,2}|[A-Za-z]+\s+\d{1,2},\s*20\d{2}|\d{1,2}\s+[A-Za-z]+\s+20\d{2})/i)
+    if (mAbsStart && !/deadline|截止|截稿/i.test(mAbsStart[0])) {
+      abstractStartDate = parseStandardDateStr(mAbsStart[1])
+    }
+  }
+
+  // 6.3 摘要截止日期提取（如：Abstract submission deadline - 2026, October 22 或 摘要提交截止时间：2026年10月22日）
+  if (!abstractDeadline) {
+    const mAbsDeadline = combined.match(/(?:abstract\s*(?:submission\s*)?deadline|call\s*for\s*abstracts?\s*deadline|摘要(?:提交|投递|征稿)?(?:截止|截稿)(?:日期|时间)?)[\s:：\-—]+((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?|20\d{2},\s*[A-Za-z]+\s+\d{1,2}|[A-Za-z]+\s+\d{1,2},\s*20\d{2}|\d{1,2}\s+[A-Za-z]+\s+20\d{2})/i)
+      || combined.match(/摘要(?:投递|提交|截稿|截止|日期|时间)*[\s:：\-—]+((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?|20\d{2},\s*[A-Za-z]+\s+\d{1,2}|[A-Za-z]+\s+\d{1,2},\s*20\d{2}|\d{1,2}\s+[A-Za-z]+\s+20\d{2})/i)
+    if (mAbsDeadline) {
+      abstractDeadline = parseStandardDateStr(mAbsDeadline[1])
+    }
+  }
+
+  // 6.4 早鸟截止日期提取
+  const mEb = combined.match(/早鸟(?:优惠|注册|报名|截稿|截止|日期|时间)*[\s:：\-—]+((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?|20\d{2},\s*[A-Za-z]+\s+\d{1,2}|[A-Za-z]+\s+\d{1,2},\s*20\d{2}|\d{1,2}\s+[A-Za-z]+\s+20\d{2})/i)
+    || combined.match(/(?:early\s*bird(?:\s*registration)?(?:\s*deadline)?)[\s:：\-—]+((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?|20\d{2},\s*[A-Za-z]+\s+\d{1,2}|[A-Za-z]+\s+\d{1,2},\s*20\d{2}|\d{1,2}\s+[A-Za-z]+\s+20\d{2})/i)
   if (mEb) earlyBirdDeadline = parseStandardDateStr(mEb[1])
 
-  const mReg = combined.match(/(?:正式)?(?:注册|报名|参会)(?:截止|截止日期|截止时间|时间)?[:：\s]*((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?)/i)
-    || combined.match(/(?:registration\s*deadline)[:：\s]*((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?)/i)
-  if (mReg) registrationDeadline = parseStandardDateStr(mReg[1])
+  // 6.5 注册/报名截止日期提取
+  const regMatches = [...combined.matchAll(/(?:正式|常规|普通)?(?:参会)?(?:注册|报名)(?:截止|截止日期|截止时间|时间)?[\s:：\-—]+((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?|20\d{2},\s*[A-Za-z]+\s+\d{1,2}|[A-Za-z]+\s+\d{1,2},\s*20\d{2}|\d{1,2}\s+[A-Za-z]+\s+20\d{2})/gi)]
+  for (const m of regMatches) {
+    const idx = m.index || 0
+    const prefix = combined.slice(Math.max(0, idx - 10), idx)
+    if (/早鸟|early/i.test(prefix)) {
+      continue
+    }
+    registrationDeadline = parseStandardDateStr(m[1])
+    break
+  }
+  if (!registrationDeadline) {
+    const mRegFallback = combined.match(/(?:registration\s*deadline)[\s:：\-—]+((?:20\d{2}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?|20\d{2},\s*[A-Za-z]+\s+\d{1,2}|[A-Za-z]+\s+\d{1,2},\s*20\d{2}|\d{1,2}\s+[A-Za-z]+\s+20\d{2})/i)
+    if (mRegFallback) registrationDeadline = parseStandardDateStr(mRegFallback[1])
+  }
 
   // 7. 网址链接提取
   let websiteUrl = ''
   let registrationUrl = ''
-  const urls = [...combined.matchAll(/https?:\/\/[^\s<>"'()]+/gi)].map(m => m[0])
-  for (const u of urls) {
-    if (/reg|signup|form|baoming|join/i.test(u) && !registrationUrl) {
+  const urlMatches = [...combined.matchAll(/https?:\/\/[^\s<>"'()]+/gi)]
+  for (const m of urlMatches) {
+    const u = m[0]
+    const idx = m.index || 0
+    const lineBefore = (combined.slice(0, idx).split(/\r?\n/).pop() || '').trim()
+
+    const isSubpageHeader = /^[【\[]相关子页面|^[【\[]子页面/i.test(lineBefore)
+    const isExplicitWeb = /(?:官网|主页|网站|web|homepage|portal)/i.test(lineBefore)
+    const isExplicitReg = /(?:报名|注册|问卷|表单|入口|参会登记)/i.test(lineBefore)
+    const isRegToolUrl = /wjx\.cn|wj\.qq\.com|huodongxing|jinshuju|forms\.gle|google\.com\/forms|wenjuan\.com/i.test(u)
+    const isRegPathUrl = /\/(?:register|registration|signup|baoming)($|\/|\?)/i.test(u)
+
+    if (isRegToolUrl) {
       registrationUrl = u
-    } else if (!websiteUrl) {
-      websiteUrl = u
+    } else if ((isExplicitReg || isRegPathUrl) && !isSubpageHeader) {
+      if (!registrationUrl) {
+        registrationUrl = u
+      }
+    } else if (isExplicitWeb && !isSubpageHeader) {
+      if (!websiteUrl) {
+        websiteUrl = u
+      }
+    } else if (!isSubpageHeader) {
+      if (!websiteUrl) {
+        websiteUrl = u
+      }
     }
   }
 
@@ -549,6 +816,7 @@ export function parseConferenceMetadataLocally(text = '', subject = '') {
     city,
     location,
     organizer,
+    abstract_start_date: abstractStartDate,
     abstract_deadline: abstractDeadline,
     early_bird_deadline: earlyBirdDeadline,
     registration_deadline: registrationDeadline,

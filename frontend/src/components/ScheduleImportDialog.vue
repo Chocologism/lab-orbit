@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import BaseDialog from './BaseDialog.vue'
 import AppIcon from './AppIcon.vue'
+import SlidingSegmented from './SlidingSegmented.vue'
 import { seminarApi } from '../api/client'
 import { notify } from '../composables/feedback'
 
@@ -141,14 +142,14 @@ async function save() {
 <template>
   <BaseDialog :open="open" title="导入组会排期" :wide="true" :busy="busy" @close="emit('close')">
     <div class="import-dialog-body">
-      <div class="segmented tab-switch">
+      <SlidingSegmented class="segmented tab-switch">
         <button :class="{ active: tab === 'file' }" type="button" @click="tab = 'file'">
           Excel / CSV 文件上传
         </button>
         <button :class="{ active: tab === 'paste' }" type="button" @click="tab = 'paste'">
           文本粘贴导入
         </button>
-      </div>
+      </SlidingSegmented>
 
       <!-- 文件上传模式 -->
       <section v-if="tab === 'file'" class="import-source-box">
@@ -185,7 +186,7 @@ async function save() {
           v-model="pasteText"
           class="paste-area"
           rows="6"
-          placeholder="报告人	日期	arxiv&#10;张伟	9.9	～&#10;李娜	9.16	～&#10;王强	9.23	刘洋，陈明"
+          placeholder="报告人	日期	arxiv&#10;钟福铖	9.9	～&#10;王蕾	9.16	～&#10;侯思媛	9.23	丁恒凯，郭子瑜"
         />
         <div class="paste-actions">
           <button class="button secondary small" type="button" :disabled="busy || !pasteText.trim()" @click="parsePastedText">

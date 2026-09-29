@@ -106,11 +106,11 @@ export class CloudflareSmtpClient {
     }
 
     // 2. 发送 EHLO 握手
-    await this.writeCommand(`EHLO labhub.local`);
+    await this.writeCommand(`EHLO cssbd-hub.local`);
     let ehloRes = await this.readResponse(timeoutMs);
     if (ehloRes.code !== 250) {
       // 兼容某些老旧服务器 HELO
-      await this.writeCommand(`HELO labhub.local`);
+      await this.writeCommand(`HELO cssbd-hub.local`);
       ehloRes = await this.readResponse(timeoutMs);
       if (ehloRes.code !== 250) {
         throw new Error(`EHLO/HELO 握手失败 (${ehloRes.code}): ${ehloRes.message}`);
@@ -130,7 +130,7 @@ export class CloudflareSmtpClient {
           this.writer = this.socket.writable.getWriter();
 
           // TLS 握手后需要再次 EHLO
-          await this.writeCommand(`EHLO labhub.local`);
+          await this.writeCommand(`EHLO cssbd-hub.local`);
           await this.readResponse(timeoutMs);
         }
       } catch (tlsErr) {
@@ -214,7 +214,7 @@ export class CloudflareSmtpClient {
     const fromDisplay = fromName ? `=?UTF-8?B?${Buffer.from(fromName, 'utf-8').toString('base64')}?= <${fromEmail}>` : `<${fromEmail}>`;
     const toDisplay = accepted.join(', ');
     const dateHeader = new Date().toUTCString();
-    const domain = fromEmail.split('@')[1] || 'labhub.local';
+    const domain = fromEmail.split('@')[1] || 'cssbd-hub.local';
     const messageId = `<${Date.now()}.${Math.random().toString(36).substring(2, 10)}@${domain}>`;
 
     let emailHeaders = [
@@ -229,7 +229,7 @@ export class CloudflareSmtpClient {
     let emailPayload = '';
 
     if (html) {
-      const boundary = `====_LABHUB_MULTIPART_${Date.now()}_====`;
+      const boundary = `====_CSSBD_MULTIPART_${Date.now()}_====`;
       emailHeaders.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
 
       const textBase64 = Buffer.from(text, 'utf-8').toString('base64').match(/.{1,76}/g)?.join('\r\n') || '';

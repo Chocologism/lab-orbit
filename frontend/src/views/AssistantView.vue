@@ -2,6 +2,7 @@
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch } from 'vue'
 import AppIcon from '../components/AppIcon.vue'
 import UserAvatar from '../components/UserAvatar.vue'
+import ThinHoundCheckbox from '../components/ThinHoundCheckbox.vue'
 import { renderMarkdown } from '../utils/markdown.js'
 import { notify, confirmAction } from '../composables/feedback.js'
 import { isAiGeneratingGlobally } from '../composables/useAiAssistantState.js'
@@ -23,19 +24,17 @@ import {
   setAiConnectivityPassed
 } from '../services/aiService.js'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  cleanArxivId,
-  getArxivHtmlUrl,
-  fetchArxivPaperFulltext
-} from '../utils/arxivHtml.js'
-import { useTutorial } from '../composables/useTutorial.js'
+import { cleanArxivId } from '../utils/arxivHtml.js'
+import ArxivPaperCopilot from '../components/ArxivPaperCopilot.vue'
+import SlidingSegmented from '../components/SlidingSegmented.vue'
+import ModelSelectPopover from '../components/ModelSelectPopover.vue'
+import { useSiteConfig } from '../composables/useSiteConfig.js'
+
+const { siteConfig } = useSiteConfig()
 
 defineOptions({
   name: 'AssistantView'
 })
-
-// 新手引导状态联动（引导过程中避免自动弹出大模型配置框打断正常体验）
-const { showTutorial } = useTutorial()
 
 // 组件是否处于 KeepAlive 离开激活态
 const isDeactivated = ref(false)
@@ -43,7 +42,7 @@ const isDeactivated = ref(false)
 // 当前登录用户
 const currentUser = computed(() => {
   try {
-    const raw = localStorage.getItem('labhub_user')
+    const raw = localStorage.getItem('cssbd_user') || localStorage.getItem('labhub_user')
     return raw ? JSON.parse(raw) : null
   } catch (e) {
     return null
@@ -53,30 +52,44 @@ const currentUser = computed(() => {
 // 模型配置状态
 const config = reactive(loadAiConfig())
 const showConfigModal = ref(false)
-
-watch(showTutorial, (isActive) => {
-  if (isActive) {
-    showConfigModal.value = false
-  }
-})
-
 const showApiKey = ref(false)
 const testingConnection = ref(false)
 const testResult = ref(null)
 
-// 会话列表与当前激活会话
-const sessions = ref(loadAiSessions())
-const activeSessionId = ref(loadActiveSessionId() || (sessions.value[0]?.id || ''))
+// 会话列表与当前激活会话（按当前登录用户沙箱隔离，绝不上传后端，保持纯前端直连）
+const sessions = ref(loadAiSessions(currentUser.value))
+const activeSessionId = ref(loadActiveSessionId(currentUser.value) || (sessions.value[0]?.id || ''))
 if (!activeSessionId.value && sessions.value.length > 0) {
   activeSessionId.value = sessions.value[0].id
-  saveActiveSessionId(activeSessionId.value)
+  saveActiveSessionId(activeSessionId.value, currentUser.value)
 }
 
+function reloadSessionsForCurrentUser() {
+  sessions.value = loadAiSessions(currentUser.value)
+  const savedActive = loadActiveSessionId(currentUser.value)
+  if (savedActive && sessions.value.some(s => s.id === savedActive)) {
+    activeSessionId.value = savedActive
+  } else {
+    activeSessionId.value = sessions.value[0]?.id || ''
+  }
+}
+
+// 监听当前用户账号切换，秒级切换对应账号的对话沙箱
+watch(
+  () => currentUser.value?.id || currentUser.value?.username || currentUser.value?.email || '',
+  (newVal, oldVal) => {
+    if (newVal !== oldVal) {
+      reloadSessionsForCurrentUser()
+    }
+  }
+)
+
 // 侧边栏折叠状态
-const isSidebarCollapsed = ref(localStorage.getItem('labhub_ai_sidebar_collapsed') === 'true')
+const isSidebarCollapsed = ref(localStorage.getItem('labhub_ai_sidebar_collapsed') === 'true' || localStorage.getItem('csbd_ai_sidebar_collapsed') === 'true')
 function toggleSidebar() {
   isSidebarCollapsed.value = !isSidebarCollapsed.value
   localStorage.setItem('labhub_ai_sidebar_collapsed', String(isSidebarCollapsed.value))
+  localStorage.setItem('csbd_ai_sidebar_collapsed', String(isSidebarCollapsed.value))
 }
 
 // 当前激活会话对象
@@ -159,10 +172,10 @@ const currentProviderInfo = computed(() => {
 const activeModel = computed(() => {
   if (!Array.isArray(config.models) || config.models.length === 0) {
     return {
-      id: config.model || 'deepseek-chat',
-      name: config.model || 'DeepSeek-V3',
-      contextWindow: 64000,
-      supportsReasoningEffort: false,
+      id: config.model || 'deepseek-flash',
+      name: config.model || 'DeepSeek V4.1 Flash (USTC via VLab)',
+      contextWindow: 1000000,
+      supportsReasoningEffort: true,
       reasoningEffort: 'off'
     }
   }
@@ -179,7 +192,7 @@ const hasSavedConfig = ref(Boolean(localStorage.getItem(AI_STORAGE_KEY)))
 // 是否已配置就绪（必须在本地保存有配置，且必须通过连通性测试；配置成功前严禁开启对话）
 const isConfigured = computed(() => {
   if (!hasSavedConfig.value) return false
-  if (config.provider !== 'ollama') {
+  if (config.provider !== 'ustc_vlab' && config.provider !== 'ollama') {
     if (!config.apiKey || !config.apiKey.trim()) return false
   }
   if (!config.baseUrl || !config.baseUrl.trim()) return false
@@ -189,135 +202,72 @@ const isConfigured = computed(() => {
 const route = useRoute()
 const router = useRouter()
 
-async function fetchPaperContentForSession(session, cleanId, fallbackMeta = {}) {
-  try {
-    session.paperContext.status = 'loading'
-    const result = await fetchArxivPaperFulltext(cleanId)
-    if (result.ok && result.fullText) {
-      session.paperContext.fullText = result.fullText
-      session.paperContext.wordCount = result.wordCount || result.fullText.length
-      if (result.title) session.paperContext.title = result.title
-      if (result.authors) session.paperContext.authors = result.authors
-      if (result.abstract) session.paperContext.abstract = result.abstract
-      session.paperContext.status = 'ready'
+// 页面模式状态：'chat'（普通对话）| 'arxiv'（与 arXiv 对话）
+const activeMode = ref(
+  (route.query.tab === 'arxiv' || Boolean(route.query.paperId) || Boolean(route.query.discussArxiv))
+    ? 'arxiv'
+    : 'chat'
+)
+const arxivPaperId = ref(
+  cleanArxivId(route.query.paperId || route.query.discussArxiv) || ''
+)
 
-      if (session.messages && session.messages.length > 0 && session.messages[0].role === 'assistant') {
-        session.messages[0].content = `论文 **《${session.paperContext.title}》**（arXiv: \`${cleanId}\`）的 HTML 全文已解析完成并注入为专属长期记忆（正文约 ${(session.paperContext.wordCount || 0).toLocaleString()} 字符）。\n\n您可以随时向我提问：\n- **核心内容与创新点**：如“请用中文详细阐述这篇文章的主要贡献与创新点”\n- **全文或指定段落翻译**：如“请翻译第 3 节的内容”、“翻译引言”\n- **公式推导与实验细节**：如“解释文中的主要公式和物理意义”\n- **对比与局限性**：如“本文方法相较于前人工作有何突破与不足”`
-      }
+function switchMode(mode) {
+  activeMode.value = mode
+  const newQuery = { ...route.query, tab: mode }
+  if (mode === 'chat') {
+    delete newQuery.paperId
+    delete newQuery.discussArxiv
+  } else if (mode === 'arxiv') {
+    if (arxivPaperId.value) {
+      newQuery.paperId = arxivPaperId.value
     } else {
-      const is404 = result.error && result.error.includes('404')
-      session.paperContext.status = is404 ? 'fallback' : 'error'
-      session.paperContext.fullText = fallbackMeta.abstract ? `Abstract:\n${fallbackMeta.abstract}` : ''
-      session.paperContext.wordCount = session.paperContext.fullText.length
-
-      if (session.messages && session.messages.length > 0 && session.messages[0].role === 'assistant') {
-        const reason = is404
-          ? '该论文在 arXiv 官方尚未提供 HTML 网页版本（通常见于早期论文）'
-          : (result.error || '获取 HTML 网页遇到异常')
-        session.messages[0].content = `论文 **《${session.paperContext.title || fallbackMeta.title || cleanId}》**（arXiv: \`${cleanId}\`）HTML 全文拉取提示：${reason}。\n\n系统已自动将论文元数据及摘要作为基础背景记忆。您依然可以随时针对该论文的背景、研究主题或您粘贴的具体段落向我提问或进行翻译。`
-      }
-    }
-  } catch (err) {
-    session.paperContext.status = 'error'
-    session.paperContext.fullText = fallbackMeta.abstract ? `Abstract:\n${fallbackMeta.abstract}` : ''
-    session.paperContext.wordCount = session.paperContext.fullText.length
-
-    if (session.messages && session.messages.length > 0 && session.messages[0].role === 'assistant') {
-      session.messages[0].content = `论文 **《${session.paperContext.title || fallbackMeta.title || cleanId}》**（arXiv: \`${cleanId}\`）HTML 全文拉取遇到网络波动。\n\n系统已自动切换至摘要背景记忆，您可以继续在此提问或粘贴感兴趣的论文段落进行深入探讨。`
-    }
-  } finally {
-    session.updatedAt = Date.now()
-    saveAiSessions(sessions.value)
-    if (!isDeactivated.value) {
-      nextTick(() => {
-        scrollToBottom(false)
-        enhanceCodeBlocks()
-      })
+      delete newQuery.paperId
+      delete newQuery.discussArxiv
     }
   }
-}
-
-function retryFetchPaperContent() {
-  if (!currentSession.value || !currentSession.value.paperContext) return
-  const pCtx = currentSession.value.paperContext
-  fetchPaperContentForSession(currentSession.value, pCtx.arxivId, {
-    title: pCtx.title,
-    authors: pCtx.authors,
-    abstract: pCtx.abstract
-  })
-}
-
-async function handleRouteDiscussArxiv(rawArxivId) {
-  if (!rawArxivId) return
-  const cleanId = cleanArxivId(rawArxivId)
-  if (!cleanId) return
-
-  if (isStreaming.value) {
-    handleStopGeneration()
-  }
-
-  let paperInfo = null
-  try {
-    const raw = sessionStorage.getItem('labhub_pending_discuss_paper')
-    if (raw) {
-      paperInfo = JSON.parse(raw)
-      sessionStorage.removeItem('labhub_pending_discuss_paper')
-    }
-  } catch (_) {}
-
-  const title = paperInfo?.title || `arXiv: ${cleanId}`
-  const authors = paperInfo?.authors || ''
-  const abstract = paperInfo?.abstract || ''
-
-  let targetSession = sessions.value.find(s => s.paperContext?.arxivId === cleanId)
-
-  if (!targetSession) {
-    const sessionTitle = `研读: ${cleanId}`
-    targetSession = createDefaultSession(sessionTitle, {
-      paperContext: {
-        arxivId: cleanId,
-        title,
-        authors,
-        abstract,
-        htmlUrl: getArxivHtmlUrl(cleanId),
-        status: 'loading',
-        fullText: '',
-        wordCount: 0
-      }
-    })
-
-    targetSession.messages.push({
-      role: 'assistant',
-      content: `已为您开启针对论文 **《${title}》**（arXiv: \`${cleanId}\`）的研讨专属对话。\n\n正在通过 arXiv 官方 HTML 服务（[${getArxivHtmlUrl(cleanId)}](${getArxivHtmlUrl(cleanId)})）获取文章完整源码与正文解析，作为本次对话的专属长期记忆基准...`,
-      reasoning: '',
-      reasoningOpen: false,
-      timestamp: Date.now()
-    })
-
-    sessions.value.unshift(targetSession)
-    activeSessionId.value = targetSession.id
-    saveActiveSessionId(targetSession.id)
-    saveAiSessions(sessions.value)
-
-    fetchPaperContentForSession(targetSession, cleanId, { title, authors, abstract })
-  } else {
-    activeSessionId.value = targetSession.id
-    saveActiveSessionId(targetSession.id)
-  }
-
-  if (route.query.discussArxiv) {
-    router.replace({ path: route.path, query: {} })
-  }
+  router.replace({ query: newQuery })
 }
 
 watch(
-  () => route.query.discussArxiv,
-  (newVal) => {
-    if (newVal) {
-      handleRouteDiscussArxiv(newVal)
+  () => [route.query.tab, route.query.paperId, route.query.discussArxiv],
+  ([tab, pId, discussId]) => {
+    if (tab === 'arxiv' || pId || discussId) {
+      activeMode.value = 'arxiv'
+      const clean = cleanArxivId(pId || discussId)
+      arxivPaperId.value = clean || ''
+    } else if (tab === 'chat') {
+      activeMode.value = 'chat'
     }
   }
 )
+
+function handleCopilotPaperChange(newId) {
+  const clean = cleanArxivId(newId)
+  arxivPaperId.value = clean || ''
+  const currentQuery = { ...route.query }
+  if (clean) {
+    if (currentQuery.paperId !== clean) {
+      router.replace({
+        query: {
+          ...currentQuery,
+          tab: 'arxiv',
+          paperId: clean
+        }
+      })
+    }
+  } else {
+    delete currentQuery.paperId
+    delete currentQuery.discussArxiv
+    router.replace({
+      query: {
+        ...currentQuery,
+        tab: 'arxiv'
+      }
+    })
+  }
+}
+
 
 function handleVisibilityChange() {
   if (typeof document !== 'undefined' && !document.hidden && !isDeactivated.value) {
@@ -341,12 +291,16 @@ onMounted(() => {
     window.addEventListener('storage', syncConnectivityState)
     window.addEventListener('focus', syncConnectivityState)
     window.addEventListener('labhub-ai-config-changed', syncConnectivityState)
+    window.addEventListener('csbd-ai-config-changed', syncConnectivityState)
+    window.addEventListener('account-updated', reloadSessionsForCurrentUser)
   }
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', handleVisibilityChange)
   }
-  if (route.query.discussArxiv) {
-    handleRouteDiscussArxiv(route.query.discussArxiv)
+  if (route.query.discussArxiv || route.query.paperId || route.query.tab === 'arxiv') {
+    activeMode.value = 'arxiv'
+    const clean = cleanArxivId(route.query.paperId || route.query.discussArxiv)
+    arxivPaperId.value = clean || ''
   }
   if (Array.isArray(config.models)) {
     // 默认设置推理深度为 off 以提供快速响应
@@ -361,7 +315,7 @@ onMounted(() => {
       saveAiConfig(config)
     }
   }
-  if (!isConfigured.value && !showTutorial.value) {
+  if (!isConfigured.value) {
     showConfigModal.value = true
   }
   nextTick(() => {
@@ -372,13 +326,13 @@ onMounted(() => {
 
 onActivated(() => {
   isDeactivated.value = false
-  if (showTutorial.value) {
-    showConfigModal.value = false
-  }
   connectivityPassed.value = isAiConnectivityPassed()
   hasSavedConfig.value = Boolean(localStorage.getItem(AI_STORAGE_KEY))
-  if (route.query.discussArxiv) {
-    handleRouteDiscussArxiv(route.query.discussArxiv)
+  reloadSessionsForCurrentUser()
+  if (route.query.discussArxiv || route.query.paperId || route.query.tab === 'arxiv') {
+    activeMode.value = 'arxiv'
+    const clean = cleanArxivId(route.query.paperId || route.query.discussArxiv)
+    arxivPaperId.value = clean || ''
   }
   nextTick(() => {
     scrollToBottom(false)
@@ -392,7 +346,7 @@ onDeactivated(() => {
     cancelAnimationFrame(streamRafId)
     streamRafId = null
   }
-  saveAiSessions(sessions.value)
+  saveAiSessions(sessions.value, currentUser.value)
 })
 
 onBeforeUnmount(() => {
@@ -400,6 +354,8 @@ onBeforeUnmount(() => {
     window.removeEventListener('storage', syncConnectivityState)
     window.removeEventListener('focus', syncConnectivityState)
     window.removeEventListener('labhub-ai-config-changed', syncConnectivityState)
+    window.removeEventListener('csbd-ai-config-changed', syncConnectivityState)
+    window.removeEventListener('account-updated', reloadSessionsForCurrentUser)
   }
   if (typeof document !== 'undefined') {
     document.removeEventListener('visibilitychange', handleVisibilityChange)
@@ -411,11 +367,11 @@ onBeforeUnmount(() => {
   isAiGeneratingGlobally.value = false
 })
 
-// 监听会话列表变化并持久化至本地存储
+// 监听会话列表变化并持久化至本地存储（当前用户专属沙箱）
 watch(
   sessions,
   (newSessions) => {
-    saveAiSessions(newSessions)
+    saveAiSessions(newSessions, currentUser.value)
     nextTick(() => {
       enhanceCodeBlocks()
     })
@@ -453,6 +409,25 @@ function scrollToBottom(smooth = true, force = false) {
 function jumpToBottom() {
   isUserScrolledUp.value = false
   scrollToBottom(true, true)
+}
+
+// 代理聊天容器内的所有超链接点击，实现平滑 SPA 内部路由跳转与定位
+function handleChatContainerClick(event) {
+  const link = event?.target?.closest('a')
+  if (!link) return
+  const href = link.getAttribute('href')
+  if (!href) return
+
+  // 站内内部路由拦截（支持 / 开头的相对路径，或 # 开头的锚点）
+  if (href.startsWith('/') || href.startsWith('#')) {
+    event.preventDefault()
+    if (href.startsWith('#')) {
+      const el = document.querySelector(href)
+      if (el) el.scrollIntoView({ behavior: 'smooth' })
+      return
+    }
+    router.push(href)
+  }
 }
 
 // 自动调整输入框高度
@@ -552,7 +527,7 @@ function removeCustomModel(index) {
 
 // 保存配置
 function handleSaveConfig() {
-  if (config.provider !== 'ollama' && !config.apiKey.trim()) {
+  if (config.provider !== 'ollama' && config.provider !== 'ustc_vlab' && !config.apiKey.trim()) {
     notify('请填写有效的 API Key 后再保存。', 'error')
     return
   }
@@ -617,6 +592,18 @@ function handleConfigOverlayClick(event) {
     showConfigModal.value = false
   }
   isConfigBackdropMouseDown = false
+}
+
+function handleJumpToVlabTutorial() {
+  showConfigModal.value = false
+  router.push({
+    path: '/resources',
+    query: {
+      category: '工具',
+      highlight: 'vlab-tunnel',
+      open: 'true'
+    }
+  })
 }
 
 let isImageLightboxMouseDown = false
@@ -867,7 +854,7 @@ async function sendMessage() {
       config,
       messages: messages.value.slice(0, assistantMsgIndex),
       activeModel: activeModel.value,
-      paperContext: currentSession.value?.paperContext || null,
+      paperContext: null,
       onChunk: (chunk) => {
         pendingContent += chunk
         scheduleStreamUpdate()
@@ -1098,11 +1085,11 @@ async function handleClearAllSessions() {
   isStreaming.value = false
   streamingIndex.value = -1
 
-  clearAllAiSessions()
+  clearAllAiSessions(currentUser.value)
   const fresh = createDefaultSession()
   sessions.value = [fresh]
   activeSessionId.value = fresh.id
-  saveActiveSessionId(fresh.id)
+  saveActiveSessionId(fresh.id, currentUser.value)
   notify('所有对话记录已清空。', 'success')
 }
 
@@ -1139,9 +1126,61 @@ async function handleClearChat() {
 </script>
 
 <template>
-  <div class="assistant-page workspace">
-    <!-- 核心左侧侧边栏：多轮历史对话管理 -->
-    <aside class="assistant-sidebar glass-card" :class="{ 'is-collapsed': isSidebarCollapsed }">
+  <div class="assistant-page" :class="{ 'is-arxiv-mode': activeMode === 'arxiv' }">
+    <!-- 顶部模式切换导航栏 -->
+    <header class="assistant-nav-bar glass-card">
+      <div class="nav-brand">
+        <div class="nav-avatar-badge">
+          <AppIcon name="robot" :size="20" class="robot-icon" />
+        </div>
+        <div class="nav-title-wrap">
+          <h2 class="nav-title">AI 科研助手</h2>
+          <span class="nav-sub">多模态对话 · arXiv 深度学术伴读</span>
+        </div>
+      </div>
+
+      <!-- 核心页面模式分段切换器：普通对话 | 与 arXiv 对话 -->
+      <SlidingSegmented class="assistant-mode-tabs" :active-key="activeMode">
+        <button
+          type="button"
+          class="mode-tab-btn"
+          :class="{ active: activeMode === 'chat' }"
+          @click="switchMode('chat')"
+        >
+          <AppIcon name="chat" :size="15" />
+          <span class="tab-label">普通对话</span>
+        </button>
+
+        <button
+          type="button"
+          class="mode-tab-btn"
+          :class="{ active: activeMode === 'arxiv' }"
+          @click="switchMode('arxiv')"
+        >
+          <AppIcon name="article" :size="15" />
+          <span class="tab-label">与 arXiv 对话</span>
+        </button>
+      </SlidingSegmented>
+
+      <div class="nav-actions">
+        <button
+          type="button"
+          class="button primary small"
+          @click="showConfigModal = true"
+          title="配置大模型服务商与模型列表"
+        >
+          <AppIcon name="gear" :size="15" />
+          <span>模型配置</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 页面主体容器 -->
+    <div class="assistant-content-body">
+      <!-- 模式 1：普通对话 (原完整双栏对话工作台) -->
+      <div v-show="activeMode === 'chat'" class="chat-mode-workspace">
+        <!-- 核心左侧侧边栏：多轮历史对话管理 -->
+        <aside class="assistant-sidebar glass-card" :class="{ 'is-collapsed': isSidebarCollapsed }">
       <div class="sidebar-top">
         <button
           type="button"
@@ -1171,8 +1210,8 @@ async function handleClearChat() {
           :class="{ 'is-active': session.id === activeSessionId }"
           @click="handleSwitchSession(session.id)"
         >
-          <div class="session-lead-icon" :class="{ 'is-paper': Boolean(session.paperContext) }">
-            <AppIcon :name="session.paperContext ? 'article' : 'chat'" :size="15" />
+          <div class="session-lead-icon">
+            <AppIcon name="chat" :size="15" />
           </div>
           <div class="session-main">
             <!-- 编辑标题模式 -->
@@ -1191,7 +1230,6 @@ async function handleClearChat() {
             <template v-else>
               <span class="session-title-text" :title="session.title">{{ session.title }}</span>
               <span class="session-meta-text">
-                <span v-if="session.paperContext" class="session-arxiv-tag">arXiv</span>
                 {{ formatSessionTime(session.updatedAt) }} · {{ session.messages ? session.messages.length : 0 }}条
               </span>
             </template>
@@ -1256,25 +1294,13 @@ async function handleClearChat() {
           <div class="meta-title-row">
             <h1 class="assistant-title">AI 科研助手</h1>
 
-            <!-- 核心功能：模型切换下拉选择器 -->
-            <div class="model-select-wrapper">
-              <span class="status-dot"></span>
-              <select
-                :value="config.model"
-                class="model-select-dropdown"
-                @change="handleSelectModel($event.target.value)"
-                title="点击切换当前模型"
-              >
-                <option
-                  v-for="m in config.models"
-                  :key="m.id"
-                  :value="m.id"
-                >
-                  {{ m.name || m.id }}
-                </option>
-              </select>
-              <AppIcon name="down" :size="12" class="select-arrow" />
-            </div>
+            <!-- 核心功能：模型切换下拉选择器 (升级为全域可点击高质感毛玻璃浮层) -->
+            <ModelSelectPopover
+              :model-value="config.model"
+              :models="config.models || []"
+              placement="bottom"
+              @change="handleSelectModel"
+            />
 
             <!-- 核心功能：推理档位调节器 (off / low / high / max) -->
             <div
@@ -1331,110 +1357,7 @@ async function handleClearChat() {
 
     <!-- 聊天交互主容器 -->
     <main class="chat-viewport glass-card">
-      <!-- 研讨论文专属长期记忆基准横幅 -->
-      <div v-if="currentSession?.paperContext" class="session-paper-banner">
-        <div class="banner-main-row">
-          <div class="banner-lead-icon">
-            <AppIcon name="article" :size="20" />
-          </div>
-          <div class="banner-info">
-            <div class="banner-top-line">
-              <span class="paper-arxiv-pill">arXiv: {{ currentSession.paperContext.arxivId }}</span>
-              <a
-                :href="`https://arxiv.org/abs/${currentSession.paperContext.arxivId}`"
-                target="_blank"
-                rel="noreferrer"
-                class="banner-link-btn"
-                title="打开 arXiv 官方摘要页面"
-              >
-                <span>官方摘要</span>
-                <AppIcon name="arrow-up-right" :size="11" />
-              </a>
-              <a
-                :href="`https://arxiv.org/html/${currentSession.paperContext.arxivId}`"
-                target="_blank"
-                rel="noreferrer"
-                class="banner-link-btn"
-                title="打开 arXiv 官方 HTML 网页"
-              >
-                <span>HTML 原文</span>
-                <AppIcon name="arrow-up-right" :size="11" />
-              </a>
-            </div>
-            <h3 class="banner-paper-title" :title="currentSession.paperContext.title">
-              {{ currentSession.paperContext.title }}
-            </h3>
-            <div class="banner-meta-line">
-              <span v-if="currentSession.paperContext.authors" class="banner-authors" :title="currentSession.paperContext.authors">
-                {{ currentSession.paperContext.authors }}
-              </span>
-              <span v-if="currentSession.paperContext.authors" class="banner-sep">·</span>
-              <span v-if="currentSession.paperContext.status === 'loading'" class="status-badge loading">
-                <AppIcon name="undo" :size="12" class="spin-icon" />
-                <span>正在抓取并解析 HTML 全文...</span>
-              </span>
-              <span v-else-if="currentSession.paperContext.status === 'ready'" class="status-badge ready">
-                <AppIcon name="check" :size="12" />
-                <span>HTML 全文基准已加载 (约 {{ (currentSession.paperContext.wordCount || 0).toLocaleString() }} 字符)</span>
-              </span>
-              <span v-else-if="currentSession.paperContext.status === 'fallback'" class="status-badge fallback">
-                <AppIcon name="warning" :size="12" />
-                <span>暂无官方 HTML，已自动转为摘要背景记忆</span>
-              </span>
-              <span v-else class="status-badge error">
-                <AppIcon name="warning" :size="12" />
-                <span>全文拉取异常，已降级为摘要记忆</span>
-              </span>
-
-              <button
-                v-if="currentSession.paperContext.status === 'error' || currentSession.paperContext.status === 'fallback'"
-                type="button"
-                class="banner-retry-btn"
-                title="重新尝试抓取 HTML 全文"
-                @click="retryFetchPaperContent"
-              >
-                <AppIcon name="undo" :size="11" />
-                <span>重试抓取</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 研讨快捷动作提示词标签 -->
-        <div class="banner-quick-actions">
-          <span class="quick-caption">快捷研讨:</span>
-          <button
-            type="button"
-            class="quick-action-pill"
-            @click="usePromptSuggestion('请结合论文全文，详细阐述本文的研究动机、核心创新点与主要结论。')"
-          >
-            创新点剖析
-          </button>
-          <button
-            type="button"
-            class="quick-action-pill"
-            @click="usePromptSuggestion('请将这篇论文的主要章节内容高质量翻译为学术中文，保留专业物理术语与 LaTeX 数学公式。')"
-          >
-            学术翻译
-          </button>
-          <button
-            type="button"
-            class="quick-action-pill"
-            @click="usePromptSuggestion('请系统梳理文中的关键物理公式和理论推导，并解释各参数物理意义。')"
-          >
-            物理公式推导
-          </button>
-          <button
-            type="button"
-            class="quick-action-pill"
-            @click="usePromptSuggestion('请客观分析本文所使用的观测样本/数值模型假设，指出其局限性与未来研究方向。')"
-          >
-            模型局限性
-          </button>
-        </div>
-      </div>
-
-      <div ref="chatContainerRef" class="chat-messages-container" @scroll.passive="handleContainerScroll">
+      <div ref="chatContainerRef" class="chat-messages-container" @scroll.passive="handleContainerScroll" @click="handleChatContainerClick">
         <!-- 未配置时的首屏引导卡片 -->
         <div v-if="!isConfigured" class="unconfigured-banner">
           <div class="unconfigured-icon-wrap">
@@ -1442,12 +1365,16 @@ async function handleClearChat() {
           </div>
           <h3>开启大模型科研对话</h3>
           <p>
-            当前尚未完成大模型配置或连通性测试。请点击下方按钮配置 API Key 及服务商（支持 DeepSeek、SiliconFlow、Ollama 等），测试连通成功后即可开启对话。
+            当前尚未完成大模型配置或连通性测试。使用 <strong>USTC via Vlab (推荐)</strong> 可通过本地 SSH 隧道免密连接科大昇腾算力大模型。测试连通成功后即可开启对话。
           </p>
           <div class="unconfigured-actions">
             <button type="button" class="button primary" @click="showConfigModal = true">
               <AppIcon name="gear" :size="18" />
               <span>立即配置大模型</span>
+            </button>
+            <button type="button" class="button secondary" @click="handleJumpToVlabTutorial">
+              <AppIcon name="book" :size="16" />
+              <span>查看 VLab 配置教程</span>
             </button>
           </div>
         </div>
@@ -1457,7 +1384,7 @@ async function handleClearChat() {
           <div class="welcome-badge">
             <AppIcon name="sparkle" :size="28" />
           </div>
-          <h2 class="welcome-title">您好，我是科研智能助理</h2>
+          <h2 class="welcome-title">您好，我是 {{ siteConfig.labShortName || 'LabOrbit' }} 科研智能助理</h2>
           <p class="welcome-desc">
             当前就绪模型: <strong>{{ activeModel?.name || activeModel?.id }}</strong>。支持学术提问、LaTeX 物理公式推导、数值模拟代码编写与图文多模态分析。
           </p>
@@ -1565,7 +1492,7 @@ async function handleClearChat() {
       </div>
 
       <!-- 底部输入操作区域 -->
-      <footer id="tour-assistant-workspace" class="chat-input-section">
+      <footer class="chat-input-section">
         <!-- 停止生成控制条 -->
         <div v-if="isStreaming" class="stop-generating-wrap">
           <button type="button" class="button secondary small stop-btn" @click="handleStopGeneration">
@@ -1661,6 +1588,17 @@ async function handleClearChat() {
       </Transition>
     </main>
     </section>
+      </div>
+
+      <!-- 模式 2：与 arXiv 对话 (alphaXiv 沉浸式伴读工作台) -->
+      <div v-show="activeMode === 'arxiv'" class="arxiv-mode-workspace">
+        <ArxivPaperCopilot
+          :initial-paper-id="arxivPaperId"
+          :preferred-source="config.arxivSource || 'markdown'"
+          @paper-change="handleCopilotPaperChange"
+        />
+      </div>
+    </div>
 
     <!-- 图片大图预览模态弹窗 (Lightbox) -->
     <div
@@ -1713,18 +1651,51 @@ async function handleClearChat() {
                 type="button"
                 class="provider-pill-btn"
                 :class="{
-                  'is-selected': config.provider === prov.id
+                  'is-selected': config.provider === prov.id,
+                  'is-highlight': prov.id === 'ustc_vlab'
                 }"
                 @click="handleProviderChange(prov.id)"
               >
                 {{ prov.name }}
               </button>
             </div>
-            <p class="field-hint">{{ currentProviderInfo?.hint }}</p>
+            <p v-if="config.provider === 'ustc_vlab'" class="field-hint">
+              通过校内 VLab 虚拟机 SSH 隧道 (127.0.0.1:4000) 访问<a
+                href="https://llm.ustc.edu.cn/"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="hint-link"
+              >中国科大大模型公共服务平台</a>。代理端已内置认证，选中此服务商无需输入 API Key。
+            </p>
+            <p v-else class="field-hint">{{ currentProviderInfo?.hint }}</p>
           </div>
 
-          <!-- API Key: 当为 Ollama 时免输 -->
-          <div v-if="config.provider !== 'ollama'" class="form-group">
+          <!-- API Key: 当为 USTC via Vlab 或 Ollama 时彻底免输 -->
+          <div
+            v-if="config.provider === 'ustc_vlab'"
+            class="ustc-vlab-notice-box"
+            :class="{ 'is-connected': connectivityPassed }"
+          >
+            <AppIcon :name="connectivityPassed ? 'check' : 'info'" :size="18" class="notice-icon" />
+            <div class="notice-body">
+              <div class="notice-text">
+                <strong>{{ connectivityPassed ? '免密直连模式已连通' : '免密直连模式（需本地 SSH 隧道保持运行）' }}</strong>
+                <span>{{ connectivityPassed ? '本地 SSH 隧道 (127.0.0.1:4000) 状态正常，鉴权由跳板机代理端自动注入，可直接开始对话。' : '该模式通过本机 SSH 隧道（127.0.0.1:4000）对接 VLab 代理。请确保已建立隧道并点击下方「测试连通性」验证通过。' }}</span>
+              </div>
+              <button
+                type="button"
+                class="notice-action-btn"
+                title="查看中国科大大模型 VLab 虚拟机 SSH 隧道配置教程"
+                @click="handleJumpToVlabTutorial"
+              >
+                <AppIcon name="book" :size="14" />
+                <span>配置教程</span>
+                <AppIcon name="arrow-up-right" :size="11" />
+              </button>
+            </div>
+          </div>
+
+          <div v-else-if="config.provider !== 'ollama'" class="form-group">
             <label class="form-label">
               <span>API Key</span>
               <button type="button" class="text-toggle-btn" @click="showApiKey = !showApiKey">
@@ -1824,23 +1795,21 @@ async function handleClearChat() {
                     />
                   </div>
 
-                  <label class="reasoning-toggle-wrap">
-                    <input
-                      type="checkbox"
-                      v-model="m.supportsReasoningEffort"
-                      class="checkbox-input"
-                    />
+                  <ThinHoundCheckbox
+                    v-model="m.supportsReasoningEffort"
+                    :size="16"
+                    class="reasoning-toggle-wrap"
+                  >
                     <span class="reasoning-toggle-label">支持深度推理 (reasoningEffort)</span>
-                  </label>
+                  </ThinHoundCheckbox>
 
-                  <label class="reasoning-toggle-wrap vision-toggle-wrap">
-                    <input
-                      type="checkbox"
-                      v-model="m.supportsVision"
-                      class="checkbox-input"
-                    />
+                  <ThinHoundCheckbox
+                    v-model="m.supportsVision"
+                    :size="16"
+                    class="reasoning-toggle-wrap vision-toggle-wrap"
+                  >
                     <span class="reasoning-toggle-label">支持多模态视觉 (Vision / 识图)</span>
-                  </label>
+                  </ThinHoundCheckbox>
                 </div>
               </div>
             </div>
@@ -1872,6 +1841,39 @@ async function handleClearChat() {
               step="0.1"
               class="range-slider"
             />
+          </div>
+
+          <!-- arXiv 原文文本来源（与 arXiv 对话时大模型的回答依据） -->
+          <div class="form-group">
+            <label class="form-label">
+              <span>arXiv 原文文本来源（与 arXiv 对话时大模型的回答依据）</span>
+            </label>
+            <div class="arxiv-source-options-grid">
+              <div
+                v-for="opt in SOURCE_OPTIONS"
+                :key="opt.id"
+                class="source-option-card"
+                :class="{ 'is-selected': config.arxivSource === opt.id }"
+                @click="config.arxivSource = opt.id"
+              >
+                <div class="source-card-header">
+                  <label class="source-radio-wrap" @click.stop>
+                    <input
+                      type="radio"
+                      name="arxivSourceRadio"
+                      :value="opt.id"
+                      :checked="config.arxivSource === opt.id"
+                      @change="config.arxivSource = opt.id"
+                    />
+                    <span class="source-radio-custom"></span>
+                  </label>
+                  <span class="source-card-title">{{ opt.name }}</span>
+                  <span class="source-badge-tag" :class="opt.id">{{ opt.badge }}</span>
+                </div>
+                <p class="source-card-desc">{{ opt.description }}</p>
+              </div>
+            </div>
+            <p class="field-hint">与 arXiv 论文伴读时，AI 助手将优先从该数据源提取学术正文与数学公式作为事实依据。</p>
           </div>
 
           <!-- 连通性测试结果反馈 -->
@@ -1910,12 +1912,143 @@ async function handleClearChat() {
 <style scoped>
 .assistant-page {
   display: flex;
-  flex-direction: row;
-  height: calc(100vh - 40px);
-  min-height: 540px;
-  gap: 16px;
-  padding-bottom: 24px;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  gap: 0;
   position: relative;
+  overflow: hidden;
+  background: var(--bg-main, #07090e);
+}
+
+/* 顶部模式切换导航栏 (精炼紧凑，贴合全屏学术工作台) */
+.assistant-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 16px;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  background: rgba(11, 15, 25, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  gap: 12px;
+  flex-shrink: 0;
+  z-index: 25;
+}
+
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nav-avatar-badge {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent-color, #38bdf8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-title-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.nav-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary, #f1f5f9);
+  line-height: 1.2;
+  margin: 0;
+}
+
+.nav-sub {
+  font-size: 11px;
+  color: var(--text-secondary, #94a3b8);
+  margin-top: 1px;
+}
+
+.assistant-mode-tabs {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
+  padding: 3px;
+  gap: 3px;
+}
+
+.mode-tab-btn {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border-radius: 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #94a3b8);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.mode-tab-btn:hover {
+  color: var(--text-primary, #f1f5f9);
+}
+
+.mode-tab-btn.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  font-weight: 600;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 页面主体视口容器 */
+.assistant-content-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+  height: 100%;
+}
+
+.chat-mode-workspace {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 100%;
+  gap: 16px;
+  padding: 12px 16px 16px;
+  overflow: hidden;
+}
+
+.arxiv-mode-workspace {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
 }
 
 /* 左侧会话历史侧边栏 */
@@ -2214,7 +2347,7 @@ async function handleClearChat() {
   flex-direction: column;
   height: 100%;
   gap: 16px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .sidebar-expand-header-btn {
@@ -2253,6 +2386,8 @@ async function handleClearChat() {
 
 /* 顶部操作卡片 */
 .assistant-header {
+  position: relative;
+  z-index: 50;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2420,190 +2555,6 @@ async function handleClearChat() {
   flex-direction: column;
   overflow: hidden;
   position: relative;
-}
-
-/* 研讨论文专属横幅 */
-.session-paper-banner {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 18px;
-  background: color-mix(in srgb, var(--accent) 5%, var(--panel));
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
-  animation: bannerFadeIn 0.25s ease-out;
-}
-
-@keyframes bannerFadeIn {
-  from { opacity: 0; transform: translateY(-6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.banner-main-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.banner-lead-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.banner-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.banner-top-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.paper-arxiv-pill {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  padding: 1px 7px;
-  border-radius: 9999px;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-}
-
-.banner-link-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
-  color: var(--muted);
-  text-decoration: none;
-  padding: 1px 6px;
-  border-radius: 5px;
-  transition: all 0.15s ease;
-}
-
-.banner-link-btn:hover {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.banner-paper-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-  line-height: 1.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.banner-meta-line {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--muted);
-  flex-wrap: wrap;
-}
-
-.banner-authors {
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.banner-sep {
-  color: var(--border);
-}
-
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11.5px;
-}
-
-.status-badge.loading {
-  color: var(--accent);
-}
-
-.status-badge.ready {
-  color: #10b981;
-}
-
-.status-badge.fallback,
-.status-badge.error {
-  color: #f59e0b;
-}
-
-.banner-retry-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  color: var(--soft);
-  font-size: 11px;
-  padding: 1px 6px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.banner-retry-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.banner-quick-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding-top: 4px;
-  border-top: 1px dashed color-mix(in srgb, var(--border) 60%, transparent);
-}
-
-.quick-caption {
-  font-size: 11px;
-  color: var(--soft);
-  margin-right: 2px;
-}
-
-.quick-action-pill {
-  display: inline-flex;
-  align-items: center;
-  font-size: 11px;
-  padding: 3px 9px;
-  border-radius: 9999px;
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
-  color: var(--text);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.quick-action-pill:hover {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  border-color: var(--accent);
-  color: var(--accent);
 }
 
 .chat-messages-container {
@@ -2982,6 +2933,39 @@ async function handleClearChat() {
   text-rendering: auto;
 }
 
+/* 对话正文超链接与可点击跳转文本样式（既符合清晰超链接特征，又具备优雅的交互微动效） */
+:deep(.markdown-rendered-body a) {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+:deep(.markdown-rendered-body a:hover) {
+  opacity: 0.8;
+}
+
+:deep(.markdown-rendered-body a.chat-internal-link) {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+  font-weight: 550;
+  padding: 1px 4px;
+  margin: 0 1px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  transition: all 0.16s ease;
+}
+
+:deep(.markdown-rendered-body a.chat-internal-link:hover) {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent-hover, var(--accent));
+  text-decoration-color: currentColor;
+}
+
 /* 思考过程折叠栏 */
 .reasoning-disclosure {
   border: 1px dashed color-mix(in srgb, var(--accent) 25%, var(--line));
@@ -3318,6 +3302,7 @@ async function handleClearChat() {
   inset: 0;
   background: rgba(0, 0, 0, 0.85);
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   z-index: 200;
   display: flex;
   align-items: center;
@@ -3354,6 +3339,7 @@ async function handleClearChat() {
   inset: 0;
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   z-index: 100;
   display: flex;
   align-items: center;
@@ -3466,6 +3452,88 @@ async function handleClearChat() {
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 600;
+}
+
+.provider-pill-btn.is-highlight {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.ustc-vlab-notice-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-radius: 12px;
+  transition: all 0.25s ease;
+}
+
+.ustc-vlab-notice-box.is-connected {
+  background: rgba(104, 211, 145, 0.1);
+  border-color: rgba(104, 211, 145, 0.35);
+}
+
+.notice-icon {
+  color: var(--accent);
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.ustc-vlab-notice-box.is-connected .notice-icon {
+  color: #48bb78;
+}
+
+.notice-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.notice-text {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.notice-text strong {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.notice-text span {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.notice-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.notice-action-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  transform: translateY(-1px);
 }
 
 /* 模型管理表格样式 */
@@ -3636,6 +3704,112 @@ async function handleClearChat() {
   color: var(--soft);
 }
 
+/* arXiv 原文来源选择卡片组 */
+.arxiv-source-options-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.source-option-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.source-option-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.source-option-card.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.source-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.source-radio-wrap {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.source-radio-wrap input {
+  display: none;
+}
+
+.source-radio-custom {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  display: inline-block;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.source-radio-wrap input:checked + .source-radio-custom {
+  border-color: var(--accent);
+}
+
+.source-radio-wrap input:checked + .source-radio-custom::after {
+  content: '';
+  position: absolute;
+  inset: 2.5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.source-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.source-badge-tag {
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.source-badge-tag.markdown {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.source-badge-tag.html {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.25);
+}
+
+.source-badge-tag.tex {
+  background: rgba(234, 179, 8, 0.15);
+  color: #facc15;
+  border: 1px solid rgba(234, 179, 8, 0.25);
+}
+
+.source-card-desc {
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0;
+  padding-left: 23px;
+}
+
 .form-input {
   width: 100%;
   padding: 10px 14px;
@@ -3673,6 +3847,43 @@ async function handleClearChat() {
 .field-hint .hint-link:hover {
   opacity: 0.8;
   text-decoration: underline;
+}
+
+.vlab-field-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hint-tutorial-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(184, 155, 248, 0.12);
+  border: 1px solid rgba(184, 155, 248, 0.3);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  margin-top: 2px;
+}
+
+.hint-tutorial-btn:hover {
+  background: rgba(184, 155, 248, 0.22);
+  border-color: var(--accent);
+}
+
+[data-theme-style="vanta-fog"] .hint-tutorial-btn,
+[data-color-scheme="classic-cyan"] .hint-tutorial-btn {
+  background: rgba(197, 230, 223, 0.15) !important;
+  border-color: rgba(197, 230, 223, 0.35) !important;
+  color: var(--accent, #c5e6df) !important;
 }
 
 .field-subnote {
@@ -3808,7 +4019,7 @@ async function handleClearChat() {
 }
 
 @media (max-width: 900px) {
-  .assistant-page {
+  .chat-mode-workspace {
     flex-direction: column;
   }
   .assistant-sidebar {
@@ -3835,6 +4046,19 @@ async function handleClearChat() {
     min-height: 100vh;
     padding-bottom: 80px;
   }
+  .assistant-nav-bar {
+    padding: 6px 10px;
+  }
+  .nav-sub {
+    display: none;
+  }
+  .mode-tab-btn {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+  .alphaxiv-pill {
+    display: none;
+  }
   .prompt-grid {
     grid-template-columns: 1fr;
   }
@@ -3848,18 +4072,6 @@ async function handleClearChat() {
     justify-content: flex-end;
   }
   .model-select-dropdown {
-    max-width: 180px;
-  }
-  .session-paper-banner {
-    padding: 10px 14px;
-  }
-  .banner-paper-title {
-    white-space: normal;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-  }
-  .banner-authors {
     max-width: 180px;
   }
   .scroll-to-bottom-btn {

@@ -7,6 +7,8 @@ describe('arxivHtml utility', () => {
     expect(cleanArxivId('arXiv:2609.19132v1')).toBe('2609.19132v1')
     expect(cleanArxivId('ARXIV:2401.00001')).toBe('2401.00001')
     expect(cleanArxivId(' 2502.03530.pdf ')).toBe('2502.03530')
+    expect(cleanArxivId('https://arxiv.org/abs/2312.00752')).toBe('2312.00752')
+    expect(cleanArxivId('https://arxiv.org/pdf/2312.00752.pdf')).toBe('2312.00752')
     expect(cleanArxivId('')).toBe('')
     expect(cleanArxivId(null)).toBe('')
   })
@@ -93,5 +95,157 @@ describe('arxivHtml utility', () => {
     expect(res.error).toContain('404')
 
     globalThis.fetch = originalFetch
+  })
+
+  it('correctly identifies noise titles and header lines', async () => {
+    const { isNoiseTitle, isNoiseHeaderLine } = await import('./arxivHtml')
+    expect(isNoiseTitle('Draft version September 17, 2026 Typeset using L')).toBe(true)
+    expect(isNoiseTitle('A TEX style file v3.0')).toBe(true)
+    expect(isNoiseTitle('Compiled using MNRAS LaTeX style file v3.0')).toBe(true)
+    expect(isNoiseTitle('arXiv:2609.17852')).toBe(true)
+    expect(isNoiseTitle('2609.17852')).toBe(true)
+    expect(isNoiseTitle('1801.01505')).toBe(true)
+    expect(isNoiseTitle('')).toBe(true)
+    expect(isNoiseTitle('Attention Is All You Need')).toBe(false)
+    expect(isNoiseTitle('A Generalist Framework for Multi-Task Learning')).toBe(false)
+
+    expect(isNoiseHeaderLine('Draft version September 17, 2026 Typeset using LaTeX')).toBe(true)
+    expect(isNoiseHeaderLine('A TEX style file v3.0')).toBe(true)
+    expect(isNoiseHeaderLine('Preprint 10 October 2018')).toBe(true)
+    expect(isNoiseHeaderLine('Deep Residual Learning for Image Recognition')).toBe(false)
+  })
+
+  it('accurately parses paper titles from raw markdown while filtering draft and style noise', async () => {
+    const { parseTitleFromMarkdown } = await import('./arxivHtml')
+
+    // 模拟 arXiv:2609.17852 实际排版噪音
+    const mdWithDraftNoise = `
+Draft version September 17, 2026 Typeset using LaTeX default style in AASTeX631
+
+The Origin of Chemical Inhomogeneity in Globular Clusters:
+Evidence from High-Precision Stellar Spectroscopy
+
+Alice Smith, Bob Jones
+Department of Astronomy, Harvard University
+
+ABSTRACT
+Globular clusters show complex multiple stellar populations...
+`
+    const extracted1 = parseTitleFromMarkdown(mdWithDraftNoise)
+    expect(extracted1).toBe('The Origin of Chemical Inhomogeneity in Globular Clusters: Evidence from High-Precision Stellar Spectroscopy')
+
+    // 模拟 arXiv:1801.01505 实际宏包排版噪音
+    const mdWithTexStyleNoise = `
+A TEX style file v3.0
+MNRAS 000, 1-15 (2018)
+Compiled using MNRAS LaTeX style file v3.0
+
+Magnetic Reconnection in Relativistic Magnetized Turbulence
+
+John Doe
+Max Planck Institute for Astrophysics
+
+ABSTRACT
+We investigate magnetic reconnection using 3D simulations...
+`
+    const extracted2 = parseTitleFromMarkdown(mdWithTexStyleNoise)
+    expect(extracted2).toBe('Magnetic Reconnection in Relativistic Magnetized Turbulence')
+  })
+
+  it('supports removing paper from recent papers and sanitizes existing noise titles', async () => {
+    const store = {}
+    const originalLocalStorage = globalThis.localStorage
+    globalThis.localStorage = {
+      getItem: vi.fn(key => (store[key] !== undefined ? store[key] : null)),
+      setItem: vi.fn((key, val) => {
+        store[key] = String(val)
+      }),
+      removeItem: vi.fn(key => {
+        delete store[key]
+      }),
+      clear: vi.fn(() => {
+        for (const k in store) delete store[k]
+      })
+    }
+
+    try {
+      const {
+        getRecentArxivPapers,
+        saveRecentArxivPaper,
+        removeRecentArxivPaper
+      } = await import('./arxivHtml')
+
+      const userScope = { username: 'test_researcher' }
+
+      // 写入初始测试数据（包含正常论文和一篇噪音标题文献）
+      saveRecentArxivPaper('2312.00752', 'Mamba: Linear-Time Sequence Modeling with Selective State Spaces', userScope)
+      saveRecentArxivPaper('2609.17852', 'Draft version September 17, 2026 Typeset using L', userScope)
+
+    let list = getRecentArxivPapers(userScope)
+    expect(list.some(p => p.id === '2312.00752')).toBe(true)
+    // 验证读取时自动将噪音标题净化为 fallback
+    const noiseItem = list.find(p => p.id === '2609.17852')
+    expect(noiseItem.title).toBe('arXiv:2609.17852')
+
+    // 执行删除 2609.17852
+    removeRecentArxivPaper('2609.17852', userScope)
+
+    list = getRecentArxivPapers(userScope)
+    expect(list.some(p => p.id === '2609.17852')).toBe(false)
+    expect(list.some(p => p.id === '2312.00752')).toBe(true)
+
+    // 验证 saveRecentArxivPaper 拒绝噪音标题覆盖已存在的有效标题
+    saveRecentArxivPaper('2312.00752', 'Draft version 2026', userScope)
+    list = getRecentArxivPapers(userScope)
+    const mamba = list.find(p => p.id === '2312.00752')
+    // 验证 getRecentArxivPapers 当存在有效元数据缓存时自动就地自愈
+    const { META_CACHE_PREFIX } = await import('./arxivHtml')
+    localStorage.setItem(
+      `${META_CACHE_PREFIX}2609.17852`,
+      JSON.stringify({ id: '2609.17852', title: 'Resolving 3 Exotic Hyperbolic-Umbilic Lensing Configurations' })
+    )
+    saveRecentArxivPaper('2609.17852', 'arXiv:2609.17852', userScope)
+    list = getRecentArxivPapers(userScope)
+    const healed = list.find(p => p.id === '2609.17852')
+    expect(healed.title).toBe('Resolving 3 Exotic Hyperbolic-Umbilic Lensing Configurations')
+
+    // 清理
+    removeRecentArxivPaper('2312.00752', userScope)
+    removeRecentArxivPaper('2609.17852', userScope)
+    } finally {
+      globalThis.localStorage = originalLocalStorage
+    }
+  })
+
+  it('resolves paper metadata via DataCite official registry with CORS compatibility', async () => {
+    const { resolveArxivPaperMetadata } = await import('./arxivHtml')
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockImplementation(async (url) => {
+      if (url.includes('datacite.org')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              attributes: {
+                titles: [{ title: 'Resolving 3 Exotic Hyperbolic-Umbilic Lensing Configurations in the "Cosmic Mantis"' }],
+                creators: [{ name: 'Cerny, Catherine' }, { name: 'Sharon, Keren' }]
+              }
+            }
+          })
+        }
+      }
+      return { ok: false, status: 404 }
+    })
+
+    try {
+      const meta = await resolveArxivPaperMetadata('2609.17852')
+      expect(meta).not.toBeNull()
+      expect(meta.title).toBe('Resolving 3 Exotic Hyperbolic-Umbilic Lensing Configurations in the "Cosmic Mantis"')
+      expect(meta.authors).toContain('Cerny, Catherine')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })

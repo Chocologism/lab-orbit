@@ -4,19 +4,12 @@
       <!-- 外部团组品牌标题 -->
       <header class="login-brand-header">
         <div class="brand-badge-wrap">
-          <a
-            href="https://github.com/Chocologism/lab-orbit"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="brand-logo-emblem"
-            title="访问 GitHub 开源仓库 (LabOrbit)"
-            aria-label="访问 GitHub 开源仓库 (LabOrbit)"
-          >
-            <img src="/assets/LO_logo.svg" alt="LabOrbit Logo" class="brand-logo-img" />
-          </a>
-          <h1 class="brand-name">{{ siteConfig.labName }}</h1>
+          <div class="brand-logo-emblem">
+            <img src="/assets/LO_logo.svg" alt="LabOrbit Logo" class="login-logo-img" />
+          </div>
+          <h1 class="brand-name">{{ siteConfig.labName || 'LabOrbit 科研协作工作台' }}</h1>
         </div>
-        <p class="brand-subtitle">{{ siteConfig.siteSlogan || '文献、组会排期与研习资料高效协作' }}</p>
+        <p class="brand-subtitle">文献精选、学术组会与研习资料高效协同</p>
       </header>
 
       <!-- 模式切换开关（afraid-cougar-9 风格） -->
@@ -59,10 +52,11 @@
             <form class="auth-form" @submit.prevent="handleLogin">
               <WaveInput
                 v-model="loginForm.email"
-                label="电子邮箱"
+                label="组内邮箱"
                 type="email"
                 required
                 autocomplete="username"
+                hint="推荐使用 @pmo.ac.cn 邮箱，亦支持其他常用邮箱"
               />
               <WaveInput
                 v-model="loginForm.password"
@@ -73,14 +67,6 @@
               />
               <button class="button button-primary submit-btn" :disabled="loading">
                 {{ loading ? '验证中…' : '登录并继续' }}
-              </button>
-              <button
-                v-if="isDemo"
-                type="button"
-                class="button button-secondary demo-direct-btn"
-                @click="enterDemoMode"
-              >
-                🚀 免密一键体验 (进入演示工作台)
               </button>
             </form>
           </section>
@@ -105,11 +91,11 @@
               />
               <WaveInput
                 v-model="regForm.email"
-                label="电子邮箱"
+                label="组内邮箱"
                 type="email"
                 required
                 autocomplete="email"
-                hint="请输入学术机构或常用个人邮箱"
+                hint="推荐使用 @pmo.ac.cn 邮箱，亦支持其他常用邮箱"
               />
               <WaveInput
                 v-model="regForm.password"
@@ -147,9 +133,9 @@
               />
               <WaveInput
                 v-model="regForm.invite_code"
-                label="注册邀请码"
+                label="组内邀请码"
                 required
-                hint="请输入团队提供的注册邀请码"
+                hint="请输入课题组提供的邀请码"
               />
               <button class="button button-primary submit-btn" :disabled="loading">
                 {{ loading ? '验证中…' : '注册并进入' }}
@@ -169,14 +155,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { authApi } from '../api/client'
 import WaveInput from '../components/WaveInput.vue'
 import { useSiteConfig } from '../composables/useSiteConfig'
-import { isDemoMode, initDemoAuth } from '../mock/isDemo'
-
-const isDemo = computed(() => isDemoMode())
-
-function enterDemoMode() {
-  initDemoAuth()
-  router.push('/')
-}
 
 const { siteConfig } = useSiteConfig()
 const router = useRouter()
@@ -241,6 +219,10 @@ watch(isRegister, () => {
 })
 
 const remember = (data) => {
+  localStorage.setItem('csbd_token', data.access_token)
+  localStorage.setItem('csbd_user', JSON.stringify(data.user))
+  localStorage.setItem('cssbd_token', data.access_token)
+  localStorage.setItem('cssbd_user', JSON.stringify(data.user))
   localStorage.setItem('labhub_token', data.access_token)
   localStorage.setItem('labhub_user', JSON.stringify(data.user))
   localStorage.setItem('sidebar_collapsed', 'true')
@@ -276,6 +258,12 @@ const handleRegister = async () => {
       regForm.value.invite_code
     )
     remember(data)
+    try {
+      localStorage.setItem('cssbd_color_scheme', 'obsidian-gray')
+      localStorage.setItem('cssbd_bg_type', 'earth-orbit')
+      localStorage.setItem('cssbd_theme_style', 'earth-orbit')
+      localStorage.setItem('cssbd_default_v20260925', '1')
+    } catch (e) {}
     router.push('/')
   } catch (error) {
     errorMsg.value = error.message
@@ -289,6 +277,7 @@ const handleRegister = async () => {
 .login-page {
   position: relative;
   display: flex;
+  min-height: 100vh;
   min-height: 100dvh;
   justify-content: center;
   align-items: center;
@@ -328,34 +317,26 @@ const handleRegister = async () => {
 }
 
 .brand-logo-emblem {
-  width: 64px;
-  height: 64px;
+  width: 50px;
+  height: 50px;
   border-radius: 9999px;
-  background: radial-gradient(circle, rgba(187, 144, 252, 0.25) 0%, rgba(12, 10, 26, 0.88) 100%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 25%, #ffffff) 0%, var(--accent) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1.5px solid rgba(187, 144, 252, 0.5);
-  box-shadow: 0 0 28px rgba(192, 132, 252, 0.5), 0 4px 14px rgba(0, 0, 0, 0.5);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--accent-ink, #070314);
+  border: 2px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 0 28px color-mix(in srgb, var(--accent) 45%, transparent), 0 4px 14px rgba(0, 0, 0, 0.5);
   flex-shrink: 0;
-  padding: 8px;
-  box-sizing: border-box;
-  text-decoration: none;
-  cursor: pointer;
-  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.28s ease, border-color 0.28s ease;
 }
 
-.brand-logo-emblem:hover {
-  transform: scale(1.08) rotate(5deg);
-  border-color: rgba(220, 185, 255, 0.85);
-  box-shadow: 0 0 36px rgba(192, 132, 252, 0.75), 0 6px 18px rgba(0, 0, 0, 0.6);
-}
-
-.brand-logo-img {
-  width: 100%;
-  height: 100%;
+.login-logo-img {
+  width: 32px;
+  height: 32px;
   object-fit: contain;
-  filter: drop-shadow(0 0 8px rgba(187, 144, 252, 0.5));
 }
 
 .brand-name {
@@ -420,7 +401,7 @@ const handleRegister = async () => {
   height: 2px;
   background: var(--accent);
   border-radius: 2px;
-  box-shadow: 0 0 8px rgba(184, 155, 248, 0.6);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
 .switch {
@@ -442,7 +423,7 @@ const handleRegister = async () => {
 .slider {
   position: absolute;
   inset: 0;
-  background-color: rgba(10, 6, 20, 0.85);
+  background-color: var(--surface);
   border: 1.5px solid var(--line);
   border-radius: 9999px;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -456,21 +437,21 @@ const handleRegister = async () => {
   width: 16px;
   left: 3px;
   bottom: 2.5px;
-  background: linear-gradient(135deg, var(--accent) 0%, #c084fc 100%);
+  background: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 70%, #ffffff) 100%);
   border-radius: 50%;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35);
   transition: transform 0.35s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 }
 
 .toggle:checked + .slider {
-  background-color: rgba(184, 155, 248, 0.18);
+  background-color: color-mix(in srgb, var(--accent) 18%, transparent);
   border-color: var(--accent);
 }
 
 .toggle:checked + .slider::before {
   transform: translateX(23px);
   background: linear-gradient(135deg, #ffffff 0%, var(--accent) 100%);
-  box-shadow: 0 0 10px rgba(184, 155, 248, 0.7);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 70%, transparent);
 }
 
 /* 3. 3D 翻转卡片核心 (afraid-cougar-9) */
@@ -510,12 +491,12 @@ const handleRegister = async () => {
   width: 100%;
   height: 100%;
   padding: 32px 32px 36px;
-  border: 1px solid var(--line, rgba(184, 155, 248, 0.22));
+  border: 1px solid var(--line);
   border-radius: 20px;
-  background: var(--panel, rgba(12, 10, 26, 0.88));
+  background: var(--panel);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
-  box-shadow: 0 24px 60px -8px rgba(0, 0, 0, 0.75), 0 0 0 1px var(--raised, rgba(184, 155, 248, 0.08)) inset;
+  box-shadow: 0 24px 60px -8px rgba(0, 0, 0, 0.75), 0 0 0 1px var(--raised) inset;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   transform-style: preserve-3d;
@@ -690,9 +671,9 @@ const handleRegister = async () => {
     font-size: 17px;
   }
   .brand-logo-emblem {
-    width: 54px;
-    height: 54px;
-    padding: 6px;
+    width: 44px;
+    height: 44px;
+    font-size: 13px;
   }
   .flip-card__front,
   .flip-card__back {
@@ -708,35 +689,90 @@ const handleRegister = async () => {
 }
 
 /* ==========================================================================
-   水波云雾风格还原 (Vanta Fog / Clouds Static)
+   配色方案深度适配 (Color Schemes for Login Card)
    ========================================================================== */
+[data-color-scheme="obsidian-gray"] .brand-logo-emblem {
+  background: linear-gradient(135deg, #f1f5f9 0%, #94a3b8 100%) !important;
+  color: #070e18 !important;
+  border: 2px solid rgba(255, 255, 255, 0.8) !important;
+  box-shadow: 0 0 28px rgba(148, 163, 184, 0.45), 0 4px 14px rgba(0, 0, 0, 0.5) !important;
+}
+
+[data-color-scheme="obsidian-gray"] .slider {
+  background-color: rgba(13, 18, 28, 0.85) !important;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+}
+
+[data-color-scheme="obsidian-gray"] .slider::before {
+  background: linear-gradient(135deg, #94a3b8 0%, #cbd5e1 100%) !important;
+}
+
+[data-color-scheme="obsidian-gray"] .flip-card__front,
+[data-color-scheme="obsidian-gray"] .flip-card__back {
+  border: 1px solid rgba(148, 163, 184, 0.22) !important;
+  background: rgba(17, 23, 35, 0.88) !important;
+  box-shadow: 0 24px 60px -8px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(148, 163, 184, 0.1) inset !important;
+}
+
+[data-color-scheme="nebula-purple"] .brand-logo-emblem {
+  background: linear-gradient(135deg, #f3e8ff 0%, #c084fc 100%) !important;
+  color: #070314 !important;
+  border: 2px solid rgba(255, 255, 255, 0.8) !important;
+  box-shadow: 0 0 28px rgba(192, 132, 252, 0.45), 0 4px 14px rgba(0, 0, 0, 0.5) !important;
+}
+
+[data-color-scheme="nebula-purple"] .slider {
+  background-color: rgba(10, 6, 20, 0.85) !important;
+  border-color: rgba(184, 155, 248, 0.22) !important;
+}
+
+[data-color-scheme="nebula-purple"] .slider::before {
+  background: linear-gradient(135deg, var(--accent) 0%, #c084fc 100%) !important;
+}
+
+[data-color-scheme="nebula-purple"] .flip-card__front,
+[data-color-scheme="nebula-purple"] .flip-card__back {
+  border: 1px solid rgba(184, 155, 248, 0.22) !important;
+  background: rgba(12, 10, 26, 0.88) !important;
+  box-shadow: 0 24px 60px -8px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(184, 155, 248, 0.08) inset !important;
+}
+
+[data-color-scheme="classic-cyan"] .brand-logo-emblem,
 [data-theme-style="vanta-fog"] .brand-logo-emblem {
-  background: radial-gradient(circle, rgba(197, 230, 223, 0.25) 0%, rgba(14, 38, 48, 0.85) 100%) !important;
-  border: 1.5px solid rgba(197, 230, 223, 0.5) !important;
+  background: linear-gradient(135deg, #c5e6df 0%, #edf9f5 100%) !important;
+  color: #0c262c !important;
+  border: 2px solid rgba(255, 255, 255, 0.7) !important;
   box-shadow: 0 0 24px rgba(197, 230, 223, 0.5), 0 4px 14px rgba(0, 0, 0, 0.25) !important;
 }
 
+[data-color-scheme="classic-cyan"] .switch-side.active::after,
 [data-theme-style="vanta-fog"] .switch-side.active::after {
   box-shadow: 0 0 8px rgba(197, 230, 223, 0.6) !important;
 }
 
+[data-color-scheme="classic-cyan"] .slider,
 [data-theme-style="vanta-fog"] .slider {
   background-color: rgba(9, 32, 41, 0.85) !important;
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4) !important;
 }
 
+[data-color-scheme="classic-cyan"] .slider::before,
 [data-theme-style="vanta-fog"] .slider::before {
   background: linear-gradient(135deg, var(--accent) 0%, #a8dcd0 100%) !important;
 }
 
+[data-color-scheme="classic-cyan"] .toggle:checked + .slider,
 [data-theme-style="vanta-fog"] .toggle:checked + .slider {
   background-color: rgba(197, 230, 223, 0.2) !important;
 }
 
+[data-color-scheme="classic-cyan"] .toggle:checked + .slider::before,
 [data-theme-style="vanta-fog"] .toggle:checked + .slider::before {
   box-shadow: 0 0 10px rgba(197, 230, 223, 0.7) !important;
 }
 
+[data-color-scheme="classic-cyan"] .flip-card__front,
+[data-color-scheme="classic-cyan"] .flip-card__back,
 [data-theme-style="vanta-fog"] .flip-card__front,
 [data-theme-style="vanta-fog"] .flip-card__back {
   border: 1px solid rgba(218, 238, 235, 0.22) !important;
@@ -744,26 +780,9 @@ const handleRegister = async () => {
   box-shadow: 0 20px 48px -8px rgba(3, 15, 21, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05) inset !important;
 }
 
-.demo-direct-btn {
-  margin-top: 10px;
-  width: 100%;
-  background: rgba(99, 102, 241, 0.15) !important;
-  border: 1px solid rgba(99, 102, 241, 0.4) !important;
-  color: #c7d2fe !important;
-  font-weight: 600;
-  transition: all 0.2s ease;
-}
-
-.demo-direct-btn:hover {
-  background: rgba(99, 102, 241, 0.25) !important;
-  border-color: rgba(99, 102, 241, 0.7) !important;
-  color: #ffffff !important;
-  transform: translateY(-1px);
-}
-
 [data-color-scheme="custom"] .brand-logo-emblem {
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 30%, transparent) 0%, rgba(12, 10, 26, 0.85) 100%) !important;
-  border: 1.5px solid color-mix(in srgb, var(--accent) 55%, transparent) !important;
+  background: linear-gradient(135deg, var(--accent-strong, var(--accent)) 0%, var(--accent) 100%) !important;
+  color: var(--accent-ink, #070314) !important;
   box-shadow: 0 0 28px color-mix(in srgb, var(--accent) 45%, transparent), 0 4px 14px rgba(0, 0, 0, 0.5) !important;
 }
 </style>

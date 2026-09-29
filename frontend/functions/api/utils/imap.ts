@@ -75,10 +75,39 @@ export function isTalkEmail(email: { subject?: string; snippet?: string; body_te
   return false;
 }
 
-export function decryptUserPassword(token: string, secretKey: string = 'labhub-secure-secret-key-2026'): string {
+export function isNoticeEmail(email: { subject?: string; snippet?: string; body_text?: string; sender_name?: string; sender_email?: string } | null | undefined): boolean {
+  if (!email) return false;
+  const title = (email.subject || '').toLowerCase();
+  const snippet = (email.snippet || '').toLowerCase();
+  const body = (email.body_text || '').toLowerCase();
+  const sender = `${email.sender_name || ''} ${email.sender_email || ''}`.toLowerCase();
+  const combined = `${title} \n ${snippet} \n ${body}`;
+
+  const isDeptSender = /研究生部|研究生院|教务处|科研处|科技处|人事处|人教处|院务|院办|党政办|综合办|行政办|学生工作|学工处|资产处|财务处|科发处|管理部|培养处|学位办|招生办|pmo\.ac\.cn|nju\.edu\.cn|cas\.cn|ustc\.edu\.cn/i.test(sender);
+
+  if (/通知|意见征集|征求意见|征集意见|实施细则|管理办法|暂行办法|方案|工作安排|工作通知|日程安排|申报通知|评审通知|公示|关于.*?的函|关于.*?的通知|关于.*?的决定|答辩|学位|奖学金|助学金|选拔|推免|考务|考试|放假|值班|安全检查|notice|announcement|circular|bulletin/i.test(title)) {
+    return true;
+  }
+
+  if (isDeptSender && /通知|征集|细则|办法|规定|申报|评审|公示|安排|办理|名单|导师|研究生|学生|学院|关于/i.test(combined)) {
+    return true;
+  }
+
+  const hasNoticeKeyword = /通知|意见征集|征求意见|实施细则|管理办法|工作方案|公示/i.test(combined);
+  const hasInstitutionalContext = /各单位|各位老师|各位同学|各位导师|各部门|各课题组|全体研究生|全体导师|根据.*?要求|经研究决定|印发|特此通知/i.test(combined);
+  if (hasNoticeKeyword && hasInstitutionalContext) {
+    return true;
+  }
+
+  return false;
+}
+
+export function decryptUserPassword(token: string, secretKey: string = 'cssbd-hub-secure-secret-key-2026'): string {
   if (!token) return '';
   const candidateKeys = Array.from(new Set([
     secretKey,
+    'cssbd-hub-secure-secret-key-2026',
+    'csbd-hub-secure-secret-key-2026',
     'labhub-secure-secret-key-2026',
   ])).filter(Boolean);
 
@@ -297,13 +326,21 @@ function parseMimeRecursive(headerText: string, bodyRaw: string, acc: MimeAccumu
     } catch {}
   }
 
-  // 识别并提取文档附件（PDF、Word doc/docx，最大 15MB）
+  // 识别并提取文档与文件附件（PDF、Word doc/docx、Excel、PPT、压缩包、CSV 等，最大 15MB）
   const isDocType = cType.includes('application/pdf') ||
     cType.includes('application/msword') ||
-    cType.includes('officedocument.wordprocessingml');
-  const isDocExt = /\.(pdf|docx?)$/i.test(rawFn);
+    cType.includes('officedocument') ||
+    cType.includes('application/vnd.ms-excel') ||
+    cType.includes('application/vnd.ms-powerpoint') ||
+    cType.includes('application/zip') ||
+    cType.includes('application/x-zip') ||
+    cType.includes('application/x-rar') ||
+    cType.includes('application/x-7z') ||
+    cType.includes('text/csv');
+  const isDocExt = /\.(pdf|docx?|xlsx?|pptx?|zip|rar|7z|csv|txt)$/i.test(rawFn);
+  const isGenericAttachment = (cDisp.includes('attachment') || (headers['content-type'] && headers['content-type'].includes('name='))) && Boolean(rawFn) && !isImageType && !isImageExt;
 
-  if ((isDocType || isDocExt) && (cEnc === 'base64' || !cEnc || cEnc === 'binary' || cEnc === '8bit')) {
+  if ((isDocType || isDocExt || isGenericAttachment) && (cEnc === 'base64' || !cEnc || cEnc === 'binary' || cEnc === '8bit')) {
     try {
       let bytes: Buffer;
       if (cEnc === 'base64') {
@@ -312,7 +349,7 @@ function parseMimeRecursive(headerText: string, bodyRaw: string, acc: MimeAccumu
       } else {
         bytes = Buffer.from(bodyRaw, 'binary');
       }
-      const extM = rawFn.match(/\.(pdf|docx?)$/i);
+      const extM = rawFn.match(/\.([a-z0-9]+)$/i);
       const ext = extM ? extM[1].toLowerCase() : (cType.includes('pdf') ? 'pdf' : (cType.includes('officedocument') ? 'docx' : 'doc'));
       const safeFn = rawFn || `document_${acc.documentAttachments.length + 1}.${ext}`;
       let safeCt = cType.split(';')[0].trim();
@@ -320,9 +357,16 @@ function parseMimeRecursive(headerText: string, bodyRaw: string, acc: MimeAccumu
         if (ext === 'pdf') safeCt = 'application/pdf';
         else if (ext === 'docx') safeCt = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
         else if (ext === 'doc') safeCt = 'application/msword';
+        else if (ext === 'xlsx') safeCt = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        else if (ext === 'xls') safeCt = 'application/vnd.ms-excel';
+        else if (ext === 'pptx') safeCt = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+        else if (ext === 'ppt') safeCt = 'application/vnd.ms-powerpoint';
+        else if (ext === 'zip') safeCt = 'application/zip';
+        else if (ext === 'txt') safeCt = 'text/plain';
+        else if (ext === 'csv') safeCt = 'text/csv';
       }
 
-      if (bytes.length >= 100 && bytes.length <= 15 * 1024 * 1024) {
+      if (bytes.length >= 10 && bytes.length <= 15 * 1024 * 1024) {
         acc.documentAttachments.push({
           filename: safeFn,
           contentType: safeCt,
@@ -585,6 +629,25 @@ export class CloudflareImapClient {
     const d = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
     const dateStr = `${d.getDate()}-${months[d.getMonth()]}-${d.getFullYear()}`;
     const res = await this.sendCommand(`SEARCH SINCE ${dateStr}`);
+    if (!res.ok) {
+      return [];
+    }
+    const ids: number[] = [];
+    for (const line of res.lines) {
+      if (line.startsWith('* SEARCH')) {
+        const parts = line.substring(8).trim().split(/\s+/);
+        for (const p of parts) {
+          const n = parseInt(p, 10);
+          if (!isNaN(n)) ids.push(n);
+        }
+      }
+    }
+    return ids;
+  }
+
+  async searchHeader(headerName: string, value: string): Promise<number[]> {
+    const safeVal = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const res = await this.sendCommand(`SEARCH HEADER ${headerName} "${safeVal}"`);
     if (!res.ok) {
       return [];
     }

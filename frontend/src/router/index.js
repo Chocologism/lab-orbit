@@ -64,6 +64,12 @@ const routes = [
     component: () => import('../views/AssistantView.vue'),
     meta: { requiresAuth: true },
   },
+  {
+    path: '/style',
+    name: 'Style',
+    component: () => import('../views/StyleView.vue'),
+    meta: { requiresAuth: true },
+  },
 ]
 
 import { isDemoMode, initDemoAuth } from '../mock/isDemo'

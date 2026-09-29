@@ -3,6 +3,7 @@ export interface Env {
   FILES_BUCKET?: R2Bucket;
   JWT_SECRET?: string;
   INVITE_CODE?: string;
+  ASSETS?: Fetcher;
 }
 
 export interface UserRow {
@@ -18,7 +19,9 @@ export interface UserRow {
   bio: string | null;
   token_version: number;
   can_manage_seminars: number; // 0 or 1
-  tutorial_completed?: number; // 0 or 1
+  zotero_user_id?: string | null;
+  zotero_api_key?: string | null;
+  zotero_default_collection?: string | null;
   last_active_at?: string | null;
   created_at: string;
 }

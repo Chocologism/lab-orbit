@@ -1,7 +1,5 @@
 import axios from 'axios'
 import { applyViewMode } from '../composables/useAdminMode'
-import { isDemoMode, initDemoAuth } from '../mock/isDemo'
-import { demoAxiosAdapter } from '../mock/demoAdapter'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || ''
 
@@ -10,32 +8,26 @@ const api = axios.create({
   timeout: 15000,
 })
 
-if (isDemoMode()) {
-  initDemoAuth()
-  api.defaults.adapter = demoAxiosAdapter
-}
-
 // 请求拦截器：自动注入 Bearer Token
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('labhub_token')
+  const token = localStorage.getItem('cssbd_token') || localStorage.getItem('labhub_token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
   return config
 })
 
-// 响应拦截器：401 / 凭据失效处理
+// 响应拦截器：401 处理
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    const isAuthMe404 = error.response && error.response.status === 404 && error.config?.url?.includes('/api/auth/me')
-    if (error.response && (error.response.status === 401 || isAuthMe404)) {
-      if (!isDemoMode()) {
-        localStorage.removeItem('labhub_token')
-        localStorage.removeItem('labhub_user')
-        if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/quick-share')) {
-          window.location.href = '/login'
-        }
+    if (error.response && error.response.status === 401) {
+      localStorage.removeItem('cssbd_token')
+      localStorage.removeItem('cssbd_user')
+      localStorage.removeItem('labhub_token')
+      localStorage.removeItem('labhub_user')
+      if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/quick-share')) {
+        window.location.href = '/login'
       }
     }
     const detail = error.response?.data?.detail
@@ -96,6 +88,10 @@ export const arxivApi = {
   addComment: (paper_id, content) => api.post(`/api/arxiv/${paper_id}/comments`, { content }),
   deleteComment: (comment_id) => api.delete(`/api/arxiv/comments/${comment_id}`),
   getComments: (paper_id, since_id = 0) => api.get(`/api/arxiv/${paper_id}/comments`, { params: since_id ? { since_id } : {} }),
+  getUnreadSummary: () => api.get('/api/arxiv/unread-summary'),
+  saveTranslation: (id, data) => api.post(`/api/arxiv/${id}/translate`, data),
+  markFeedViewed: () => api.post('/api/arxiv/mark-viewed'),
+  markAllRead: () => api.post('/api/arxiv/mark-all-read'),
 }
 
 export const seminarApi = {
@@ -112,6 +108,8 @@ export const seminarApi = {
   checkArxivPresented: (arxivId, currentSeminarId = null) => api.get('/api/seminars/check-arxiv-presented', {
     params: { arxiv_id: arxivId, current_seminar_id: currentSeminarId }
   }),
+  getMyUpcomingPresentations: (all = false) => api.get('/api/seminars/mine/upcoming-presentations', { params: all ? { all: 1 } : {} }),
+  linkPaperToPresentation: (data) => api.post('/api/seminars/link-presentation-paper', data),
   submitPresentationArxiv: (seminarId, data) => api.put(`/api/seminars/${seminarId}/presentation-arxiv`, data),
   submitPresentationShare: (seminarId, data) => api.put(`/api/seminars/${seminarId}/presentation-share`, data),
   importSchedule: rows => api.post('/api/seminars/import', { rows }),
@@ -168,6 +166,7 @@ export const talkApi = {
   create: data => api.post('/api/talks', data),
   update: (id, data) => api.put(`/api/talks/${id}`, data),
   remove: id => api.delete(`/api/talks/${id}`),
+  scrapeUrl: (url) => api.post('/api/talks/scrape-url', { url }, { timeout: 35000 }),
 }
 export const fileApi = {
   upload: file => { const data = new FormData(); data.append('file', file); return api.post('/api/files', data, { timeout: 60000 }) },
@@ -186,10 +185,11 @@ export const mailboxApi = {
   getSentEmailDetail: id => api.get(`/api/mailbox/sent-emails/${id}`),
   getEmails: (params = {}) => api.get('/api/mailbox/emails', { params, timeout: 60000 }),
   getEmailDetail: id => api.get(`/api/mailbox/emails/${id}`),
+  fetchEmailAttachments: id => api.post(`/api/mailbox/emails/${id}/fetch-attachments`, {}, { timeout: 60000 }),
   clearEmails: () => api.delete('/api/mailbox/emails'),
   deleteEmail: id => api.delete(`/api/mailbox/emails/${id}`),
   syncStream: (onProgress, onDone, onError) => {
-    const token = localStorage.getItem('labhub_token')
+    const token = localStorage.getItem('cssbd_token') || localStorage.getItem('labhub_token')
     const base = API_BASE_URL.replace(/\/$/, '')
     const url = `${base}/api/mailbox/sync-stream`
     const controller = new AbortController()
@@ -256,6 +256,7 @@ export const noticeApi = {
   batchCreate: (notices) => api.post('/api/notices/batch', { notices }),
   update: (id, data) => api.put(`/api/notices/${id}`, data),
   delete: (id) => api.delete(`/api/notices/${id}`),
+  rate: (id, rating) => api.post(`/api/notices/${id}/rate`, { rating }),
 }
 
 export const scheduleImportApi = {
@@ -263,5 +264,15 @@ export const scheduleImportApi = {
   createPending: (data) => api.post('/api/schedule-imports/pending', data),
   resolvePending: (id, data) => api.post(`/api/schedule-imports/${id}/resolve`, data),
   deletePending: (id) => api.delete(`/api/schedule-imports/${id}`),
+  scrapeUrl: (url) => api.post('/api/schedule-imports/scrape-url', { url }, { timeout: 35000 }),
 }
+
+export const zoteroApi = {
+  getConfig: () => api.get('/api/zotero/config'),
+  saveConfig: (data) => api.put('/api/zotero/config', data),
+  clearConfig: () => api.delete('/api/zotero/config'),
+  getCollections: () => api.get('/api/zotero/collections'),
+  pushPaper: (data) => api.post('/api/zotero/push', data, { timeout: 35000 }),
+}
+
 

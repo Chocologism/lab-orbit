@@ -3,7 +3,7 @@ import { streamSSE } from 'hono/streaming';
 import { Buffer } from 'node:buffer';
 import { Env, UserRow } from '../types';
 import { authMiddleware, adminOnlyMiddleware, verifyToken } from '../middleware/auth';
-import { CloudflareImapClient, decryptUserPassword, parseRawEmail, extractMessageId, extractDateHeader, extractSubjectHeader, isTalkEmail, isConferenceEmail } from '../utils/imap';
+import { CloudflareImapClient, decryptUserPassword, parseRawEmail, extractMessageId, extractDateHeader, extractSubjectHeader, isTalkEmail, isConferenceEmail, isNoticeEmail } from '../utils/imap';
 import { CloudflareSmtpClient, parseExternalEmails } from '../utils/smtp';
 
 async function computeSha256(data: Uint8Array | ArrayBuffer): Promise<string> {
@@ -263,17 +263,18 @@ app.get('/sync-stream', async (c) => {
 
           let existing = cachedByUid.get(msgUid) || (metaKey ? cachedByMeta.get(metaKey) : null);
 
-          // 综合邮件头与库中已有缓存的主题、正文、摘要，全面判定是否属于学术会议或学术报告
+          // 综合邮件头与库中已有缓存的主题、正文、摘要，全面判定是否属于学术会议、学术报告或通知公文
           const candidateSubj = `${existing?.subject || ''} ${rawHeaderSubj}`.trim();
           const isConfCandidate = isConferenceEmail({ subject: candidateSubj, snippet: existing?.snippet, body_text: existing?.body_text });
           const isTalkCandidate = isTalkEmail({ subject: candidateSubj, snippet: existing?.snippet, body_text: existing?.body_text });
-          const isAcademic = isConfCandidate || isTalkCandidate || /报告|讲座|论坛|研讨会|会议|seminar|colloquium/i.test(candidateSubj);
+          const isNoticeCandidate = isNoticeEmail({ subject: candidateSubj, snippet: existing?.snippet, body_text: existing?.body_text, sender_name: existing?.sender_name, sender_email: existing?.sender_email });
+          const isAcademic = isConfCandidate || isTalkCandidate || isNoticeCandidate || /报告|讲座|论坛|研讨会|会议|通知|细则|办法|规定|意见征集|征求意见|seminar|colloquium|notice/i.test(candidateSubj);
 
           // 缓存完整性与自愈判定：
-          // 针对学术会议或学术报告：若库中此前标记有附件但既无海报也无有效附件列表，说明此前抓取截断，重新拉取完整报文补全海报与通知文件！
+          // 针对学术会议、学术报告或公文通知：若库中此前标记有附件但既无有效附件列表，说明此前抓取截断，重新拉取完整报文补全海报与通知文件！
           const hasNoAttachments = !existing?.attachments || existing.attachments === '[]';
           const lacksPoster = !existing?.poster_url;
-          const isPossiblyIncomplete = existing && isAcademic && Boolean(existing.has_attachments) && hasNoAttachments && lacksPoster;
+          const isPossiblyIncomplete = existing && isAcademic && Boolean(existing.has_attachments) && (hasNoAttachments || lacksPoster);
 
           if (existing && (existing.body_text || existing.body_html) && !isPossiblyIncomplete) {
             // 已存在于数据库缓存且完备，直接跳过正文下载，极速进行下一封
@@ -323,8 +324,9 @@ app.get('/sync-stream', async (c) => {
 
             const isConf = isConferenceEmail(parsed);
             const isTalk = isTalkEmail(parsed);
+            const isNotice = isNoticeEmail(parsed);
 
-            // 提取并保存有效附件（图片附件，以及仅对学术会议/报告保存的 PDF、Word 文档附件）
+            // 提取并保存有效附件（图片附件，以及对通知公文、学术会议/报告保存的文档附件）
             const imageItems = parsed.imageAttachments && parsed.imageAttachments.length > 0
               ? parsed.imageAttachments
               : (parsed.imageAttachment ? [parsed.imageAttachment] : []);
@@ -334,7 +336,7 @@ app.get('/sync-stream', async (c) => {
 
             const itemsToSave: Array<{ filename: string; contentType: string; data: Uint8Array; isImage: boolean }> = [
               ...imageItems.map(img => ({ filename: img.filename, contentType: img.contentType, data: img.data, isImage: true })),
-              ...((isConf || isTalk) ? docItems.map(doc => ({ filename: doc.filename, contentType: doc.contentType, data: doc.data, isImage: false })) : [])
+              ...((isConf || isTalk || isNotice || docItems.length <= 8) ? docItems.map(doc => ({ filename: doc.filename, contentType: doc.contentType, data: doc.data, isImage: false })) : [])
             ];
 
             const savedAttachments: Array<{ id: string; filename: string; content_type: string; size: number; url: string }> = [];
@@ -905,6 +907,228 @@ app.get('/emails/:id', async (c) => {
   }
 });
 
+// 单邮件按需抓取并保存附件
+app.post('/emails/:id/fetch-attachments', async (c) => {
+  try {
+    const user = c.get('user');
+    const id = parseInt(c.req.param('id'), 10);
+
+    const email = await c.env.DB.prepare(
+      'SELECT * FROM user_cached_emails WHERE id = ? AND user_id = ?'
+    ).bind(id, user.id).first<any>();
+
+    if (!email) {
+      return c.json({ detail: '未找到对应邮件' }, 404);
+    }
+
+    const config = await c.env.DB.prepare(
+      'SELECT * FROM user_mail_configs WHERE user_id = ?'
+    ).bind(user.id).first<any>();
+
+    if (!config) {
+      return c.json({ detail: '当前用户尚未配置邮箱' }, 400);
+    }
+
+    const password = decryptUserPassword(config.encrypted_password, c.env.JWT_SECRET);
+    if (!password) {
+      return c.json({ detail: '解密用户邮箱密码失败，请在设置中重新保存邮箱密码' }, 400);
+    }
+
+    const client = new CloudflareImapClient();
+    const port = config.server_port || 993;
+
+    try {
+      await client.connect(config.server_host, port, 10000);
+      await client.login(config.username, password);
+      await client.selectInbox();
+
+      const msgUid = (email.msg_uid || '').replace(/[<>]/g, '').trim();
+      let targetSeq: number | null = null;
+
+      // 1. 若 msg_uid 以 imap_ 开头，检验该序号
+      if (/^imap_(\d+)$/.test(msgUid)) {
+        const seqCandidate = parseInt(msgUid.replace('imap_', ''), 10);
+        try {
+          const { header } = await client.fetchMessageHeader(seqCandidate, 4000);
+          const curUid = extractMessageId(header, `imap_${seqCandidate}`).replace(/[<>]/g, '').trim();
+          if (curUid === msgUid) {
+            targetSeq = seqCandidate;
+          }
+        } catch {}
+      }
+
+      // 2. 使用 SEARCH HEADER Message-ID 检索
+      if (!targetSeq && msgUid && !msgUid.startsWith('imap_')) {
+        try {
+          const searchResWithAngles = await client.searchHeader('Message-ID', `<${msgUid}>`);
+          if (searchResWithAngles.length > 0) {
+            targetSeq = searchResWithAngles[searchResWithAngles.length - 1];
+          } else {
+            const searchResWithoutAngles = await client.searchHeader('Message-ID', msgUid);
+            if (searchResWithoutAngles.length > 0) {
+              targetSeq = searchResWithoutAngles[searchResWithoutAngles.length - 1];
+            }
+          }
+        } catch {}
+      }
+
+      // 3. 回退：根据邮件主题在最近邮件中回退匹配
+      if (!targetSeq) {
+        try {
+          const recentIds = await client.searchSince(10);
+          const candidateSeqs = (recentIds.length > 0 ? recentIds : await client.searchAll()).slice(-50).reverse();
+          const targetSubjClean = (email.subject || '').replace(/\s+/g, '').toLowerCase();
+
+          for (const seq of candidateSeqs) {
+            try {
+              const { header } = await client.fetchMessageHeader(seq, 3000);
+              const curUid = extractMessageId(header, '').replace(/[<>]/g, '').trim();
+              if (msgUid && curUid && curUid === msgUid) {
+                targetSeq = seq;
+                break;
+              }
+              const curSubjClean = extractSubjectHeader(header).replace(/\s+/g, '').toLowerCase();
+              if (targetSubjClean && curSubjClean && curSubjClean === targetSubjClean) {
+                targetSeq = seq;
+                break;
+              }
+            } catch {}
+          }
+        } catch {}
+      }
+
+      if (!targetSeq) {
+        await client.logout();
+        return c.json({ detail: '未在邮箱服务器收件箱中定位到该邮件（可能已被删除或归档）' }, 404);
+      }
+
+      // 完整拉取该邮件原始报文（上限 25MB）
+      const raw = await client.fetchMessageRaw(targetSeq, 0, 30000);
+      await client.logout();
+
+      if (!raw) {
+        return c.json({ detail: '拉取邮件原始内容为空' }, 500);
+      }
+
+      const parsed = parseRawEmail(raw, msgUid);
+
+      const imageItems = parsed.imageAttachments && parsed.imageAttachments.length > 0
+        ? parsed.imageAttachments
+        : (parsed.imageAttachment ? [parsed.imageAttachment] : []);
+      const docItems = (parsed.documentAttachments && parsed.documentAttachments.length > 0)
+        ? parsed.documentAttachments
+        : [];
+
+      const itemsToSave: Array<{ filename: string; contentType: string; data: Uint8Array; isImage: boolean }> = [
+        ...imageItems.map(img => ({ filename: img.filename, contentType: img.contentType, data: img.data, isImage: true })),
+        ...docItems.map(doc => ({ filename: doc.filename, contentType: doc.contentType, data: doc.data, isImage: false }))
+      ];
+
+      const savedAttachments: Array<{ id: string; filename: string; content_type: string; size: number; url: string }> = [];
+
+      for (const item of itemsToSave) {
+        try {
+          const buffer = item.data;
+          const hash = await computeSha256(buffer);
+
+          const dup = await c.env.DB.prepare(
+            'SELECT id, filename FROM uploaded_files WHERE sha256 = ? AND size = ? LIMIT 1'
+          ).bind(hash, buffer.length).first<{ id: string; filename: string }>().catch(() => null);
+
+          if (dup) {
+            savedAttachments.push({
+              id: dup.id,
+              filename: dup.filename || item.filename,
+              content_type: item.contentType,
+              size: buffer.length,
+              url: `/api/files/${dup.id}`
+            });
+            continue;
+          }
+
+          const fileId = crypto.randomUUID();
+          let savedToR2 = false;
+          if (c.env.FILES_BUCKET) {
+            try {
+              await c.env.FILES_BUCKET.put(fileId, buffer, {
+                httpMetadata: {
+                  contentType: item.contentType,
+                  contentDisposition: `inline; filename="${encodeURIComponent(item.filename)}"`
+                }
+              });
+              savedToR2 = true;
+            } catch {}
+          }
+
+          if (savedToR2) {
+            try {
+              await c.env.DB.prepare(
+                `INSERT INTO uploaded_files (id, filename, content_type, size, sha256, created_at)
+                 VALUES (?, ?, ?, ?, ?, datetime('now'))`
+              ).bind(fileId, item.filename, item.contentType, buffer.length, hash).run();
+            } catch {
+              await c.env.DB.prepare(
+                `INSERT INTO uploaded_files (id, filename, content_type, size, created_at)
+                 VALUES (?, ?, ?, ?, datetime('now'))`
+              ).bind(fileId, item.filename, item.contentType, buffer.length).run();
+            }
+          } else {
+            try {
+              await c.env.DB.prepare(
+                `INSERT INTO uploaded_files (id, filename, content_type, size, content, sha256, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
+              ).bind(fileId, item.filename, item.contentType, buffer.length, buffer, hash).run();
+            } catch {
+              await c.env.DB.prepare(
+                `INSERT INTO uploaded_files (id, filename, content_type, size, content, created_at)
+                 VALUES (?, ?, ?, ?, ?, datetime('now'))`
+              ).bind(fileId, item.filename, item.contentType, buffer.length, buffer).run();
+            }
+          }
+
+          savedAttachments.push({
+            id: fileId,
+            filename: item.filename,
+            content_type: item.contentType,
+            size: buffer.length,
+            url: `/api/files/${fileId}`
+          });
+        } catch (saveErr) {
+          console.warn('Failed to save attachment in fetch-attachments:', saveErr);
+        }
+      }
+
+      const attachmentsJson = JSON.stringify(savedAttachments);
+      const firstImage = savedAttachments.find(a => a.content_type?.startsWith('image/'));
+      const posterUrl = firstImage ? firstImage.url : (email.poster_url || '');
+      const hasAtt = (savedAttachments.length > 0 || Boolean(posterUrl)) ? 1 : 0;
+
+      await c.env.DB.prepare(
+        `UPDATE user_cached_emails
+         SET attachments = ?,
+             poster_url = ?,
+             has_attachments = ?
+         WHERE id = ? AND user_id = ?`
+      ).bind(attachmentsJson, posterUrl, hasAtt, id, user.id).run();
+
+      return c.json({
+        success: true,
+        count: savedAttachments.length,
+        attachments: savedAttachments,
+        poster_url: posterUrl,
+        has_attachments: hasAtt === 1
+      });
+    } catch (imapErr: any) {
+      await client.close();
+      console.error('IMAP error during fetch-attachments:', imapErr);
+      return c.json({ detail: `连接邮箱拉取附件失败: ${imapErr.message || String(imapErr)}` }, 500);
+    }
+  } catch (err: any) {
+    console.error('Error in POST /emails/:id/fetch-attachments:', err);
+    return c.json({ detail: '抓取邮件附件失败' }, 500);
+  }
+});
+
 // 清空当前用户所有本地邮件缓存
 app.delete('/emails', async (c) => {
   try {
@@ -1000,6 +1224,10 @@ async function ensureSmtpTables(db: D1Database): Promise<void> {
 
   try {
     await db.prepare('ALTER TABLE system_smtp_configs ADD COLUMN use_imap_password BOOLEAN DEFAULT 0').run();
+  } catch {}
+
+  try {
+    await db.prepare("ALTER TABLE sent_emails ADD COLUMN body_html TEXT DEFAULT ''").run();
   } catch {}
 }
 
@@ -1211,6 +1439,7 @@ app.post('/send-seminar-notice', adminOnlyMiddleware, async (c) => {
 
     const subject = (body.subject || '').trim();
     const emailBody = (body.body || body.body_text || body.text || '').trim();
+    const emailHtml = (body.body_html || body.html || '').trim();
     const memberIds: number[] = Array.isArray(body.member_ids) ? body.member_ids : [];
     const externalEmailsRaw = body.external_emails;
     const directRecipients = Array.isArray(body.recipients) ? body.recipients : (typeof body.recipients === 'string' ? [body.recipients] : []);
@@ -1296,20 +1525,22 @@ app.post('/send-seminar-notice', adminOnlyMiddleware, async (c) => {
         fromName,
         to: allRecipients,
         subject,
-        text: emailBody
+        text: emailBody,
+        html: emailHtml || undefined
       }, 35000);
 
       // 6. 发信成功记录入库
       await c.env.DB.prepare(
-        `INSERT INTO sent_emails (user_id, subject, sender_name, sender_email, recipients, body_text, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'sent', datetime('now'))`
+        `INSERT INTO sent_emails (user_id, subject, sender_name, sender_email, recipients, body_text, body_html, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'sent', datetime('now'))`
       ).bind(
         user.id,
         subject,
         fromName,
         fromEmail,
         JSON.stringify(sendResult.accepted),
-        emailBody
+        emailBody,
+        emailHtml || ''
       ).run();
 
       return c.json({
@@ -1325,8 +1556,8 @@ app.post('/send-seminar-notice', adminOnlyMiddleware, async (c) => {
 
       // 发信失败记录留痕
       await c.env.DB.prepare(
-        `INSERT INTO sent_emails (user_id, subject, sender_name, sender_email, recipients, body_text, status, error_message, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'failed', ?, datetime('now'))`
+        `INSERT INTO sent_emails (user_id, subject, sender_name, sender_email, recipients, body_text, body_html, status, error_message, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'failed', ?, datetime('now'))`
       ).bind(
         user.id,
         subject,
@@ -1334,6 +1565,7 @@ app.post('/send-seminar-notice', adminOnlyMiddleware, async (c) => {
         fromEmail,
         JSON.stringify(allRecipients),
         emailBody,
+        emailHtml || '',
         sendErr.message || String(sendErr)
       ).run().catch(() => {});
 

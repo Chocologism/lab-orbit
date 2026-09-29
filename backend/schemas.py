@@ -24,7 +24,6 @@ class UserOut(BaseModel):
     email: str
     role: str
     can_manage_seminars: bool = False
-    tutorial_completed: bool = False
     avatar: Optional[str] = None
     bio: Optional[str] = None
     created_at: datetime
@@ -375,6 +374,7 @@ class ResourceBookOut(BaseModel):
     order_num: int
     favorite_count: int = 0
     created_at: datetime
+    updated_at: Optional[datetime] = None
     created_by_id: Optional[int] = None
 
     class Config:
@@ -417,6 +417,7 @@ class TalkInput(BaseModel):
     city: str = Field('', max_length=100)
     organizer: str = Field('', max_length=200)
     sub_type: str = Field('', max_length=50)
+    abstract_start_date: str = Field('', max_length=10)
     abstract_deadline: str = Field('', max_length=10)
     early_bird_deadline: str = Field('', max_length=10)
     registration_deadline: str = Field('', max_length=10)

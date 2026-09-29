@@ -3,11 +3,12 @@ import { computed, ref, watch } from 'vue'
 import BaseDialog from './BaseDialog.vue'
 import AppIcon from './AppIcon.vue'
 import WaveInput from './WaveInput.vue'
+import ThinHoundCheckbox from './ThinHoundCheckbox.vue'
 import { classifyPastedText, extractFieldsByRule, extractFieldsWithAi, resolveContentForParsing } from '../utils/pasteClassifier'
 import { isAiAssistantReady, loadAiConfig, isModelVisionCapable } from '../services/aiService'
 import { fileApi, talkApi, noticeApi, scheduleImportApi } from '../api/client'
 import { notify, confirmAction } from '../composables/feedback'
-import { shanghaiToday } from '../utils/schedule'
+import { shanghaiToday, normalizeScheduleDate } from '../utils/schedule'
 
 const props = defineProps({
   open: Boolean,
@@ -19,6 +20,11 @@ const emit = defineEmits(['close', 'saved', 'saved-to-pending'])
 const rawText = ref('')
 const selectedType = ref('talk') // 'talk' | 'conference' | 'notice'
 const isManualType = ref(false)
+
+// 官网深度抓取相关状态
+const scrapeUrlInput = ref('')
+const isScrapingUrl = ref(false)
+const detectedUrlInPaste = ref('')
 
 const uploadedImages = ref([]) // array of image URLs
 const uploadedFiles = ref([]) // array of { id, filename, url, size, content_type }
@@ -44,11 +50,13 @@ const cardForm = ref({
   location: '',
   notes: '',
   poster_url: '',
+  website_url: '',
   // conference
   sub_type: '研讨会',
   end_date: shanghaiToday(),
   city: '',
   organizer: '',
+  abstract_start_date: '',
   abstract_deadline: '',
   early_bird_deadline: '',
   registration_deadline: '',
@@ -62,6 +70,31 @@ const cardForm = ref({
   content: '',
   attachments: []
 })
+
+function mergeCardFormData(existing, fresh) {
+  const merged = { ...existing }
+  for (const [key, val] of Object.entries(fresh || {})) {
+    if (val === undefined || val === null) continue
+
+    if (typeof val === 'string') {
+      const trimmed = val.trim()
+      if (trimmed !== '') {
+        // 避免将已识别的高阶类型（如国际会议、年会）降级为默认研讨会
+        if (key === 'sub_type' && (merged.sub_type === '国际会议' || merged.sub_type === '年会') && trimmed === '研讨会') {
+          continue
+        }
+        merged[key] = trimmed
+      }
+    } else if (Array.isArray(val)) {
+      if (val.length > 0) {
+        merged[key] = val
+      }
+    } else {
+      merged[key] = val
+    }
+  }
+  return merged
+}
 
 function isPdfFile(file) {
   return file?.content_type === 'application/pdf' ||
@@ -91,6 +124,14 @@ function toggleAllImages(e) {
     selectedImageUrls.value = [...uploadedImages.value]
   } else {
     selectedImageUrls.value = []
+  }
+}
+
+function toggleImgUrl(url) {
+  if (selectedImageUrls.value.includes(url)) {
+    selectedImageUrls.value = selectedImageUrls.value.filter(u => u !== url)
+  } else {
+    selectedImageUrls.value.push(url)
   }
 }
 
@@ -135,6 +176,9 @@ watch(() => props.open, (val) => {
 })
 
 function resetState() {
+  scrapeUrlInput.value = ''
+  isScrapingUrl.value = false
+  detectedUrlInPaste.value = ''
   rawText.value = ''
   selectedType.value = 'talk'
   isManualType.value = false
@@ -157,14 +201,15 @@ function resetState() {
     location: '',
     notes: '',
     poster_url: '',
+    website_url: '',
     sub_type: '研讨会',
     end_date: shanghaiToday(),
     city: '',
     organizer: '',
+    abstract_start_date: '',
     abstract_deadline: '',
     early_bird_deadline: '',
     registration_deadline: '',
-    website_url: '',
     registration_url: '',
     handbook_url: '',
     category: 'general',
@@ -179,11 +224,86 @@ function handleTextInput() {
   if (rawText.value.trim().length > 0) {
     includeText.value = true
   }
+  const urlMatch = rawText.value.match(/https?:\/\/[^\s<>"'()]+/i)
+  if (urlMatch) {
+    detectedUrlInPaste.value = urlMatch[0]
+    if (!scrapeUrlInput.value) {
+      scrapeUrlInput.value = urlMatch[0]
+    }
+  } else {
+    detectedUrlInPaste.value = ''
+  }
+
   if (!isManualType.value && rawText.value.trim().length >= 8) {
     const detected = classifyPastedText(rawText.value)
     if (detected && detected !== selectedType.value) {
       selectedType.value = detected
     }
+  }
+}
+
+async function handleScrapeUrl(forcedUrl) {
+  const urlToFetch = (typeof forcedUrl === 'string' ? forcedUrl : scrapeUrlInput.value).trim()
+  if (!urlToFetch) {
+    notify('请输入会议或报告的官网链接或报名网址', 'warning')
+    return
+  }
+  if (!/^https?:\/\//i.test(urlToFetch)) {
+    notify('链接格式不正确，请以 http:// 或 https:// 开头', 'error')
+    return
+  }
+
+  isScrapingUrl.value = true
+  try {
+    const res = await scheduleImportApi.scrapeUrl(urlToFetch)
+    if (!res || !res.combined_text) {
+      throw new Error(res?.detail || '未能从该链接提取到有效内容')
+    }
+
+    // 1. 将整合的网页正文填入 rawText 并开启文本来源解析
+    rawText.value = res.combined_text
+    includeText.value = true
+
+    // 2. 自动填入官网与报名链接
+    cardForm.value.website_url = res.url || urlToFetch
+    if (res.registration_url) {
+      cardForm.value.registration_url = res.registration_url
+    }
+
+    // 3. 提取海报与横幅图片
+    if (Array.isArray(res.poster_candidates) && res.poster_candidates.length > 0) {
+      for (const imgUrl of res.poster_candidates) {
+        if (!uploadedImages.value.includes(imgUrl)) {
+          uploadedImages.value.push(imgUrl)
+        }
+        if (!selectedImageUrls.value.includes(imgUrl)) {
+          selectedImageUrls.value.push(imgUrl)
+        }
+      }
+    }
+    if (res.best_poster_url) {
+      cardForm.value.poster_url = res.best_poster_url
+    }
+
+    // 4. 自动研判活动类型（若用户未手动锁定类型）
+    if (!isManualType.value) {
+      const detected = classifyPastedText(res.combined_text)
+      if (detected) {
+        selectedType.value = detected
+      }
+    }
+
+    // 5. 自动执行字段提取与填入
+    await handleSmartExtract({ isFromScrape: true })
+
+    const pagesCount = res.pages_scraped?.length || 1
+    const postersCount = res.poster_candidates?.length || 0
+    notify(`已成功深度抓取官网及 ${pagesCount} 个相关页面与海报！已自动填入全部字段`)
+  } catch (err) {
+    notify(`官网抓取失败：${err.message || '网络连接超时或无法访问'}`, 'error')
+  } finally {
+    isScrapingUrl.value = false
+    detectedUrlInPaste.value = ''
   }
 }
 
@@ -266,14 +386,28 @@ async function executeRuleExtraction({ silent = false } = {}) {
       selectedFiles: activeFiles
     })
 
+    if (!isManualType.value && resolved.combinedText && resolved.combinedText.trim().length >= 8) {
+      const detected = classifyPastedText(resolved.combinedText)
+      if (detected && detected !== selectedType.value) {
+        selectedType.value = detected
+      }
+    }
+
     const extracted = extractFieldsByRule(resolved.combinedText, selectedType.value, {
       imageUrls: resolved.targetImages,
       files: resolved.targetFiles
     })
-    cardForm.value = {
-      ...cardForm.value,
-      ...extracted
-    }
+    if (extracted.date) extracted.date = normalizeScheduleDate(extracted.date)
+    if (extracted.end_date) extracted.end_date = normalizeScheduleDate(extracted.end_date)
+    const prevWebsite = cardForm.value.website_url
+    const prevReg = cardForm.value.registration_url
+    const prevPoster = cardForm.value.poster_url
+    cardForm.value = mergeCardFormData(cardForm.value, {
+      ...extracted,
+      website_url: extracted.website_url || prevWebsite || '',
+      registration_url: extracted.registration_url || prevReg || '',
+      poster_url: extracted.poster_url || prevPoster || ''
+    })
     hasExtracted.value = true
     return resolved
   } catch (err) {
@@ -284,7 +418,7 @@ async function executeRuleExtraction({ silent = false } = {}) {
   }
 }
 
-async function handleSmartExtract() {
+async function handleSmartExtract({ isFromScrape = false } = {}) {
   const activeFiles = uploadedFiles.value.filter(f => selectedFileIds.value.includes(f.id))
   const activeImages = uploadedImages.value.filter(img => selectedImageUrls.value.includes(img))
 
@@ -299,16 +433,18 @@ async function handleSmartExtract() {
   }
 
   // 1. 始终先执行基础规则快速识别填充，确保卡片具备结构化底稿
-  const resolved = await executeRuleExtraction({ silent: false })
+  const resolved = await executeRuleExtraction({ silent: isFromScrape })
   if (!resolved) return
 
   // 2. 检查用户是否配置了 AI 助手
   const isReady = isAiAssistantReady()
   if (!isReady) {
-    // 未配置 AI 的用户：友好弹出入库方式引导窗口（选择是待 AI 协同解析先入库，还是直接自动识别入库发布）
-    const extraPdfHint = resolved.pdfExtractedCount > 0 ? `（已自动读取 ${resolved.pdfExtractedCount} 个 PDF 正文）` : ''
-    notify(`已完成基础规则识别填充${extraPdfHint}，请选择后续入库方式`)
-    showNoAiDialog.value = true
+    // 未配置 AI 的用户：若非官网自动抓取，则友好弹出引导窗口
+    if (!isFromScrape) {
+      const extraPdfHint = resolved.pdfExtractedCount > 0 ? `（已自动读取 ${resolved.pdfExtractedCount} 个 PDF 正文）` : ''
+      notify(`已完成基础规则识别填充${extraPdfHint}，请选择后续入库方式`)
+      showNoAiDialog.value = true
+    }
     return
   }
 
@@ -328,17 +464,29 @@ async function handleSmartExtract() {
       imageUrls: resolved.targetImages,
       files: resolved.targetFiles
     })
-    cardForm.value = {
-      ...cardForm.value,
-      ...extracted
+    if (extracted.date) extracted.date = normalizeScheduleDate(extracted.date)
+    if (extracted.end_date) extracted.end_date = normalizeScheduleDate(extracted.end_date)
+    const prevWebsite = cardForm.value.website_url
+    const prevReg = cardForm.value.registration_url
+    const prevPoster = cardForm.value.poster_url
+    cardForm.value = mergeCardFormData(cardForm.value, {
+      ...extracted,
+      website_url: extracted.website_url || prevWebsite || '',
+      registration_url: extracted.registration_url || prevReg || '',
+      poster_url: extracted.poster_url || prevPoster || ''
+    })
+    if (!isFromScrape) {
+      notify(`AI 智能深度识别完成！已根据【${sourceSummaryText.value}】提取并润色卡片信息`)
     }
-    notify(`AI 智能深度识别完成！已根据【${sourceSummaryText.value}】提取并润色卡片信息`)
   } catch (err) {
-    notify(`AI 识别轻微异常（${err.message || '已保留规则识别结果'}），已填充基础字段`, 'warning')
+    if (!isFromScrape) {
+      notify(`AI 识别轻微异常（${err.message || '已保留规则识别结果'}），已填充基础字段`, 'warning')
+    }
   } finally {
     aiExtracting.value = false
   }
 }
+
 
 // 分支 A：未配置 AI 时，提交非 AI 结果进入待提交队列
 async function submitToPendingQueue() {
@@ -395,6 +543,8 @@ async function submitDirectly() {
 
   saving.value = true
   try {
+    let createdItem = null
+    let savedDate = ''
     if (selectedType.value === 'notice') {
       const payload = {
         title: cardForm.value.title || (activeImages.length > 0 ? '综合事务通知（附图）' : '综合事务通知'),
@@ -405,31 +555,41 @@ async function submitDirectly() {
         end_date: cardForm.value.end_date || '',
         attachments: JSON.stringify(cardForm.value.attachments || activeFiles || [])
       }
-      await noticeApi.create(payload)
+      createdItem = await noticeApi.create(payload)
+      savedDate = payload.start_date
       notify('通知已成功发布！')
     } else {
       const isConf = selectedType.value === 'conference'
+      const normDate = normalizeScheduleDate(cardForm.value.date || shanghaiToday())
+      const normEndDate = isConf ? normalizeScheduleDate(cardForm.value.end_date || cardForm.value.date || shanghaiToday()) : ''
       const payload = {
         ...cardForm.value,
         event_type: isConf ? 'conference' : 'talk',
         title: cardForm.value.title || (isConf ? (activeImages.length > 0 ? '学术会议（海报）' : '学术会议') : (activeImages.length > 0 ? '学术报告（海报）' : '学术报告')),
-        date: cardForm.value.date || shanghaiToday(),
+        date: normDate,
         time: isConf ? (cardForm.value.time || '全天') : (cardForm.value.time || '10:00'),
-        end_date: isConf ? (cardForm.value.end_date || cardForm.value.date || shanghaiToday()) : '',
+        end_date: normEndDate,
         poster_url: cardForm.value.poster_url || activeImages[0] || '',
         notes: cardForm.value.notes || effectiveText || (activeImages.length > 0 ? '详见随附海报' : '')
       }
-      await talkApi.create(payload)
+      createdItem = await talkApi.create(payload)
+      savedDate = normDate
       notify(isConf ? '学术会议已成功发布到日程！' : '学术报告已成功发布到日程！')
     }
     showNoAiDialog.value = false
-    emit('saved')
+    emit('saved', {
+      id: createdItem?.id,
+      type: selectedType.value,
+      date: savedDate,
+      title: cardForm.value.title
+    })
     emit('close')
   } catch (err) {
     notify(err.message || '发布失败', 'error')
   } finally {
     saving.value = false
   }
+
 }
 
 function handleClose() {
@@ -485,6 +645,57 @@ function handleClose() {
 
       <!-- 粘贴输入与附件上传区 -->
       <div class="input-panel">
+        <!-- 官网/报名链接一键深度抓取栏 (URL Smart Scraping Bar) -->
+        <div class="url-scrape-section">
+          <div class="url-scrape-bar">
+            <div class="url-input-wrapper">
+              <AppIcon name="search" :size="15" class="url-search-icon" />
+              <input
+                v-model="scrapeUrlInput"
+                type="url"
+                class="url-input-field"
+                placeholder="输入会议/报告官网链接或报名网址（例如 https://meeting.example.com）..."
+                :disabled="isScrapingUrl || aiExtracting"
+                @keydown.enter.prevent="handleScrapeUrl()"
+              />
+              <button
+                v-if="scrapeUrlInput"
+                type="button"
+                class="url-clear-btn"
+                title="清空链接"
+                @click="scrapeUrlInput = ''"
+              >
+                <AppIcon name="close" :size="13" />
+              </button>
+            </div>
+            <button
+              type="button"
+              class="button primary url-fetch-btn"
+              :disabled="!scrapeUrlInput.trim() || isScrapingUrl || aiExtracting"
+              @click="handleScrapeUrl()"
+            >
+              <AppIcon v-if="!isScrapingUrl" name="refresh" :size="14" />
+              <AppIcon v-else name="refresh" class="spin-icon" :size="14" />
+              <span>{{ isScrapingUrl ? '正在抓取官网与海报...' : '抓取官网并解析' }}</span>
+            </button>
+          </div>
+
+          <!-- 智能检测提示条：当用户在粘贴框输入或粘贴了包含网址的文本时 -->
+          <div v-if="detectedUrlInPaste && !isScrapingUrl" class="detected-url-banner">
+            <div class="banner-left">
+              <AppIcon name="sparkle" :size="15" />
+              <span>检测到活动网址：<strong class="detected-url-text">{{ detectedUrlInPaste }}</strong></span>
+            </div>
+            <button
+              type="button"
+              class="button small primary banner-action-btn"
+              @click="handleScrapeUrl(detectedUrlInPaste)"
+            >
+              一键抓取官网全文与海报
+            </button>
+          </div>
+        </div>
+
         <div class="textarea-wrapper">
           <label class="sr-only" for="smart-paste-textarea">粘贴原始文本</label>
           <textarea
@@ -582,8 +793,12 @@ function handleClose() {
 
           <div class="source-items-grid">
             <!-- 来源 1：文本内容 -->
-            <label class="source-card source-card-text" :class="{ 'is-selected': includeText }">
-              <input type="checkbox" v-model="includeText" />
+            <ThinHoundCheckbox
+              v-model="includeText"
+              :size="18"
+              class="source-card source-card-text"
+              :class="{ 'is-selected': includeText }"
+            >
               <div class="source-card-info">
                 <div class="source-card-header-row">
                   <AppIcon name="edit" :size="14" />
@@ -593,69 +808,66 @@ function handleClose() {
                   {{ rawText.trim() ? `已输入 ${rawText.trim().length} 字` : '暂未输入文本' }}
                 </span>
               </div>
-            </label>
+            </ThinHoundCheckbox>
 
             <!-- 来源 2：随附图片与海报 -->
             <div v-if="uploadedImages.length > 0" class="source-card source-card-group">
               <div class="group-title-row">
-                <label class="group-select-all-label">
-                  <input
-                    type="checkbox"
-                    :checked="isAllImagesSelected"
-                    :indeterminate.prop="isSomeImagesSelected && !isAllImagesSelected"
-                    @change="toggleAllImages"
-                  />
+                <ThinHoundCheckbox
+                  :checked="isAllImagesSelected"
+                  :size="16"
+                  class="group-select-all-label"
+                  @change="toggleAllImages"
+                >
                   <span>图片与海报 ({{ selectedImageUrls.length }}/{{ uploadedImages.length }})</span>
-                </label>
+                </ThinHoundCheckbox>
               </div>
               <div class="group-img-items">
-                <label
+                <div
                   v-for="(imgUrl, idx) in uploadedImages"
                   :key="idx"
                   class="img-pick-item"
                   :class="{ 'is-active': selectedImageUrls.includes(imgUrl) }"
                   :title="selectedImageUrls.includes(imgUrl) ? '已选中参与解析' : '未选中'"
                 >
-                  <input
-                    type="checkbox"
-                    :value="imgUrl"
+                  <ThinHoundCheckbox
                     v-model="selectedImageUrls"
+                    :value="imgUrl"
+                    :size="16"
+                    class="img-hound-check"
                   />
-                  <img :src="imgUrl" alt="海报" />
+                  <img :src="imgUrl" alt="海报" @click="toggleImgUrl(imgUrl)" />
                   <span class="img-order-tag">#{{ idx + 1 }}</span>
-                </label>
+                </div>
               </div>
             </div>
 
             <!-- 来源 3：随附文件（含 PDF 正文读取） -->
             <div v-if="uploadedFiles.length > 0" class="source-card source-card-group">
               <div class="group-title-row">
-                <label class="group-select-all-label">
-                  <input
-                    type="checkbox"
-                    :checked="isAllFilesSelected"
-                    :indeterminate.prop="isSomeFilesSelected && !isAllFilesSelected"
-                    @change="toggleAllFiles"
-                  />
+                <ThinHoundCheckbox
+                  :checked="isAllFilesSelected"
+                  :size="16"
+                  class="group-select-all-label"
+                  @change="toggleAllFiles"
+                >
                   <span>文件附件 ({{ selectedFileIds.length }}/{{ uploadedFiles.length }})</span>
-                </label>
+                </ThinHoundCheckbox>
               </div>
               <div class="group-file-items">
-                <label
+                <ThinHoundCheckbox
                   v-for="(f, idx) in uploadedFiles"
                   :key="f.id || idx"
+                  v-model="selectedFileIds"
+                  :value="f.id"
+                  :size="16"
                   class="file-pick-item"
                   :class="{ 'is-active': selectedFileIds.includes(f.id) }"
                 >
-                  <input
-                    type="checkbox"
-                    :value="f.id"
-                    v-model="selectedFileIds"
-                  />
                   <AppIcon :name="isPdfFile(f) ? 'article' : 'attachment'" :size="13" />
                   <span class="filename-span" :title="f.filename">{{ f.filename }}</span>
                   <span v-if="isPdfFile(f)" class="badge-mini purple" title="提取文档正文合并至解析">自动读PDF</span>
-                </label>
+                </ThinHoundCheckbox>
               </div>
             </div>
           </div>
@@ -719,6 +931,10 @@ function handleClose() {
             <input v-model="cardForm.poster_url" type="text" class="input-text" placeholder="上传图片后自动填充，亦可直接粘贴图片 URL" />
           </div>
           <div class="form-group full-width">
+            <label>活动官网 / 详情链接（可选）</label>
+            <input v-model="cardForm.website_url" type="text" class="input-text" placeholder="https://..." />
+          </div>
+          <div class="form-group full-width">
             <label>报告摘要 / 说明</label>
             <textarea v-model="cardForm.notes" rows="4" class="input-textarea" placeholder="报告摘要与背景说明..."></textarea>
           </div>
@@ -733,6 +949,7 @@ function handleClose() {
           <div class="form-group">
             <label>会议类型</label>
             <select v-model="cardForm.sub_type" class="input-select">
+              <option value="国际会议">国际会议</option>
               <option value="研讨会">研讨会</option>
               <option value="年会">年会</option>
               <option value="暑期学校">暑期学校</option>
@@ -761,6 +978,10 @@ function handleClose() {
             <input v-model="cardForm.organizer" type="text" class="input-text" placeholder="例如：中国天文学会、南京大学" />
           </div>
           <div class="form-group">
+            <label>摘要提交开始</label>
+            <input v-model="cardForm.abstract_start_date" type="date" class="input-text" />
+          </div>
+          <div class="form-group">
             <label>摘要提交截止</label>
             <input v-model="cardForm.abstract_deadline" type="date" class="input-text" />
           </div>
@@ -775,6 +996,10 @@ function handleClose() {
           <div class="form-group">
             <label>报名注册链接</label>
             <input v-model="cardForm.registration_url" type="text" class="input-text" placeholder="https://..." />
+          </div>
+          <div class="form-group full-width">
+            <label>会议海报图片链接（可选）</label>
+            <input v-model="cardForm.poster_url" type="text" class="input-text" placeholder="抓取网页或上传海报后自动填充，亦可直接输入图片 URL" />
           </div>
           <div class="form-group full-width">
             <label>会议简要说明 / 议程</label>
@@ -971,6 +1196,120 @@ function handleClose() {
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
+}
+
+.url-scrape-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.url-scrape-bar {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.url-input-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.url-search-icon {
+  position: absolute;
+  left: 0.75rem;
+  color: var(--text-muted, #94a3b8);
+  pointer-events: none;
+}
+
+.url-input-field {
+  width: 100%;
+  padding: 0.6rem 2.2rem 0.6rem 2.3rem;
+  background: var(--bg-input, rgba(15, 23, 42, 0.5));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  color: var(--text-primary, #f8fafc);
+  font-size: 0.88rem;
+  box-sizing: border-box;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.url-input-field:focus {
+  outline: none;
+  border-color: var(--accent, #0ea5e9);
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.15);
+}
+
+.url-clear-btn {
+  position: absolute;
+  right: 0.6rem;
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  padding: 0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.url-clear-btn:hover {
+  color: var(--text-primary, #f8fafc);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.url-fetch-btn {
+  white-space: nowrap;
+  padding: 0.6rem 1.1rem;
+  font-size: 0.88rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.detected-url-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.85rem;
+  background: rgba(14, 165, 233, 0.08);
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  border-radius: 8px;
+  font-size: 0.84rem;
+  color: var(--text-primary, #f8fafc);
+}
+
+.banner-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  overflow: hidden;
+  color: var(--accent, #0ea5e9);
+}
+
+.banner-left span {
+  color: var(--text-secondary, #cbd5e1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detected-url-text {
+  color: var(--accent, #0ea5e9);
+  font-weight: 500;
+}
+
+.banner-action-btn {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.75rem;
 }
 
 .paste-textarea {
@@ -1461,7 +1800,8 @@ function handleClose() {
   border-color: var(--accent, #0ea5e9);
 }
 
-.img-pick-item input[type="checkbox"] {
+.img-pick-item input[type="checkbox"],
+.img-hound-check {
   position: absolute;
   top: 3px;
   left: 3px;
@@ -1545,6 +1885,22 @@ function handleClose() {
   }
   .form-grid {
     grid-template-columns: 1fr;
+  }
+  .url-scrape-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .url-fetch-btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .detected-url-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .banner-action-btn {
+    width: 100%;
+    justify-content: center;
   }
 }
 </style>

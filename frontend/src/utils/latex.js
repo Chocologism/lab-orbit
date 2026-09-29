@@ -1,6 +1,41 @@
 import katex from 'katex'
 
 /**
+ * HTML 实体解码函数，全面解码数字实体 (如 &#34; 代表 ") 与各类具名实体
+ */
+export function decodeHtmlEntities(str) {
+  if (!str) return ''
+  let res = String(str)
+  for (let i = 0; i < 2; i++) {
+    const prev = res
+    res = res
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&ndash;/g, '–')
+      .replace(/&mdash;/g, '—')
+      .replace(/&lsquo;/g, '‘')
+      .replace(/&rsquo;/g, '’')
+      .replace(/&ldquo;/g, '“')
+      .replace(/&rdquo;/g, '”')
+      .replace(/&hellip;/g, '…')
+      .replace(/&prime;/g, '′')
+      .replace(/&Prime;/g, '″')
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+        try { return String.fromCodePoint(parseInt(hex, 16)) } catch { return _ }
+      })
+      .replace(/&#([0-9]+);/g, (_, dec) => {
+        try { return String.fromCodePoint(parseInt(dec, 10)) } catch { return _ }
+      })
+      .replace(/&amp;/g, '&')
+    if (res === prev) break
+  }
+  return res
+}
+
+/**
  * HTML 转义函数，确保非数学公式部分的文本不会引入 XSS
  */
 export function escapeHtml(str) {
@@ -98,15 +133,15 @@ export function preprocessAstroTex(text) {
     return str
   }
 
-  // 保护代码块与已有数学公式区域
-  const protectedPattern = /(```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$(?!\s)(?:\\\$|[^\$\n])+?(?<!\s)\$)/g
+  // 保护代码块与已有数学公式区域（采用 Safari 兼容正则，避免使用 lookbehind (?<!...)）
+  const protectedPattern = /(```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$(?!\s)(?:\\\$|[^\$\n])*?[^\s\$\n]\$)/g
   const parts = str.split(protectedPattern)
   return parts.map((part, i) => {
     // 奇数索引为已包裹的代码块或公式，直接原样保留
     if (i % 2 === 1) return part
     // 在普通正文区域，将裸露的天文角秒/角分/度数/时间小数宏自动转为行内公式
-    return part.replace(/(?<!\$|[a-zA-Z0-9\\])(\d*\\(?:farcs|farcm|fdg|fs|fm|fh)\d*)(?!\$|[a-zA-Z0-9])/g, (match) => {
-      return `$${match}$`
+    return part.replace(/(^|[^$a-zA-Z0-9\\])(\d*\\(?:farcs|farcm|fdg|fs|fm|fh)\d*)(?!\$|[a-zA-Z0-9])/g, (fullMatch, prefix, macro) => {
+      return `${prefix}$${macro}$`
     })
   }).join('')
 }
@@ -240,7 +275,7 @@ export function renderTexTextFormatting(escapedText, depth = 0) {
 export function renderLatex(text, options = {}) {
   if (!text) return ''
   
-  const textStr = String(text)
+  const textStr = decodeHtmlEntities(String(text))
   // 如果完全不包含 $、\ 或 {，无需 KaTeX 解析，直接转义返回，极大节省性能
   if (!textStr.includes('$') && !textStr.includes('\\') && !textStr.includes('{')) {
     return escapeHtml(textStr)
@@ -253,8 +288,8 @@ export function renderLatex(text, options = {}) {
   // 1. $$ ... $$ (块级)
   // 2. \[ ... \] (块级)
   // 3. \( ... \) (行内)
-  // 4. $...$ (行内，避免跨段落与空格混淆)
-  const delimiterRegex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$(?!\s)(?:\\\$|[^\$\n])+?(?<!\s)\$)/g
+  // 4. $...$ (行内，避免跨段落与空格混淆，采用 Safari 兼容的字符集边界而非 lookbehind)
+  const delimiterRegex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$(?!\s)(?:\\\$|[^\$\n])*?[^\s\$\n]\$)/g
 
   const parts = cleanText.split(delimiterRegex)
 

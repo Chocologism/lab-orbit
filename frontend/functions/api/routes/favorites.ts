@@ -24,6 +24,13 @@ app.get('', async (c) => {
 
       if (!paper) continue;
 
+      if (!paper.from_recommendation && !paper.from_seminar) {
+        const hasAccess = await c.env.DB.prepare(
+          'SELECT 1 FROM library_access WHERE paper_id = ? AND user_id = ?'
+        ).bind(paper.id, user.id).first();
+        if (!hasAccess) continue;
+      }
+
       let authorsList: string[] = [];
       try {
         authorsList = JSON.parse(paper.authors || '[]');
@@ -86,7 +93,17 @@ app.put('/:kind/:target{.*}', async (c) => {
       'SELECT * FROM library_papers WHERE arxiv_id = ? OR id = ? LIMIT 1'
     ).bind(target, target).first<any>();
 
-    if (!paper) {
+    if (paper) {
+      if (!paper.from_recommendation && !paper.from_seminar) {
+        const hasAccess = await c.env.DB.prepare(
+          'SELECT 1 FROM library_access WHERE paper_id = ? AND user_id = ?'
+        ).bind(paper.id, user.id).first();
+        if (!hasAccess) {
+          return c.json({ detail: '内容不存在或无权访问' }, 404);
+        }
+      }
+      target = paper.arxiv_id;
+    } else {
       const arxivPaper = await c.env.DB.prepare(
         'SELECT * FROM arxiv_papers WHERE arxiv_id = ? LIMIT 1'
       ).bind(target).first<any>();
@@ -94,9 +111,15 @@ app.put('/:kind/:target{.*}', async (c) => {
       if (!arxivPaper) {
         return c.json({ detail: '内容不存在或无权访问' }, 404);
       }
+      const audience = await c.env.DB.prepare('SELECT paper_id FROM recommendation_audiences WHERE paper_id = ?').bind(arxivPaper.id).first();
+      if (audience) {
+        const isOwner = arxivPaper.recommended_by_id === user.id;
+        const isRecipient = await c.env.DB.prepare('SELECT user_id FROM recommendation_recipients WHERE paper_id = ? AND user_id = ?').bind(arxivPaper.id, user.id).first();
+        if (!isOwner && !isRecipient) {
+          return c.json({ detail: '内容不存在或无权访问' }, 404);
+        }
+      }
       target = arxivPaper.arxiv_id;
-    } else {
-      target = paper.arxiv_id;
     }
   } else {
     const bookId = parseInt(target, 10);

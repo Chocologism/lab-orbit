@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 describe('useThemeStyle', () => {
-  const STORAGE_KEY = 'labhub_theme_style'
+  const STORAGE_KEY = 'cssbd_theme_style'
   let store = {}
   let attrs = {}
 
@@ -35,9 +35,9 @@ describe('useThemeStyle', () => {
     delete global.document
   })
 
-  it('defaults to clouds-static for first-time visitors when localStorage is empty', async () => {
+  it('defaults to earth-orbit for first-time visitors when localStorage is empty', async () => {
     const { currentThemeStyle } = await import('./useThemeStyle')
-    expect(currentThemeStyle.value).toBe('clouds-static')
+    expect(currentThemeStyle.value).toBe('earth-orbit')
   })
 
   it('allows changing theme style and persists to localStorage and DOM', async () => {
@@ -61,24 +61,66 @@ describe('useThemeStyle', () => {
     const { useThemeStyle, currentColorScheme, currentBgType, colorSchemes, bgOptions } = await import('./useThemeStyle')
     const { setColorScheme, setBgType } = useThemeStyle()
 
-    expect(colorSchemes).toHaveLength(2)
-    expect(colorSchemes.map(s => s.id)).toEqual(['classic-cyan', 'nebula-purple'])
+    expect(colorSchemes).toHaveLength(3)
+    expect(colorSchemes.map(s => s.id)).toEqual(['obsidian-gray', 'classic-cyan', 'nebula-purple'])
     expect(colorSchemes[0].colors).toBeDefined()
     expect(colorSchemes[0].colors.length).toBeGreaterThanOrEqual(3)
 
-    expect(bgOptions).toHaveLength(4)
-    expect(bgOptions.map(b => b.id)).toEqual(['galaxy', 'vanta-fog', 'clouds-static', 'custom-local'])
+    expect(bgOptions).toHaveLength(5)
+    expect(bgOptions.map(b => b.id)).toEqual(['earth-orbit', 'clouds-static', 'galaxy', 'vanta-fog', 'custom-local'])
 
-    // Change color scheme to nebula-purple
-    setColorScheme('nebula-purple')
-    expect(currentColorScheme.value).toBe('nebula-purple')
-    expect(localStorage.setItem).toHaveBeenCalledWith('labhub_color_scheme', 'nebula-purple')
-    expect(document.documentElement.setAttribute).toHaveBeenCalledWith('data-color-scheme', 'nebula-purple')
+    // Change color scheme to obsidian-gray
+    setColorScheme('obsidian-gray')
+    expect(currentColorScheme.value).toBe('obsidian-gray')
+    expect(localStorage.setItem).toHaveBeenCalledWith('cssbd_color_scheme', 'obsidian-gray')
+    expect(document.documentElement.setAttribute).toHaveBeenCalledWith('data-color-scheme', 'obsidian-gray')
 
-    // Change background type to custom-local
-    setBgType('custom-local')
-    expect(currentBgType.value).toBe('custom-local')
-    expect(localStorage.setItem).toHaveBeenCalledWith('labhub_bg_type', 'custom-local')
-    expect(document.documentElement.setAttribute).toHaveBeenCalledWith('data-bg-type', 'custom-local')
+    // Change background type to earth-orbit
+    setBgType('earth-orbit')
+    expect(currentBgType.value).toBe('earth-orbit')
+    expect(localStorage.setItem).toHaveBeenCalledWith('cssbd_bg_type', 'earth-orbit')
+    expect(document.documentElement.setAttribute).toHaveBeenCalledWith('data-bg-type', 'earth-orbit')
+  })
+
+  it('supports toggling glass styles between liquid and frosted', async () => {
+    const { useThemeStyle, currentGlassStyle, glassOptions, setGlassStyle } = await import('./useThemeStyle')
+    expect(glassOptions).toHaveLength(2)
+    expect(glassOptions.map(g => g.id)).toEqual(['liquid', 'frosted'])
+
+    setGlassStyle('frosted')
+    expect(currentGlassStyle.value).toBe('frosted')
+    expect(localStorage.setItem).toHaveBeenCalledWith('cssbd_glass_style', 'frosted')
+    expect(document.documentElement.setAttribute).toHaveBeenCalledWith('data-glass-style', 'frosted')
+
+    setGlassStyle('liquid')
+    expect(currentGlassStyle.value).toBe('liquid')
+    expect(localStorage.setItem).toHaveBeenCalledWith('cssbd_glass_style', 'liquid')
+    expect(document.documentElement.setAttribute).toHaveBeenCalledWith('data-glass-style', 'liquid')
+  })
+
+  it('migrates previous default users on legacy themes to obsidian-gray and earth-orbit', async () => {
+    const { migratePreviousDefaultUsers, DEFAULT_MIGRATION_KEY } = await import('./useThemeStyle')
+    store['cssbd_color_scheme'] = 'classic-cyan'
+    store['cssbd_bg_type'] = 'clouds-static'
+    delete store[DEFAULT_MIGRATION_KEY]
+
+    migratePreviousDefaultUsers()
+
+    expect(store['cssbd_color_scheme']).toBe('obsidian-gray')
+    expect(store['cssbd_bg_type']).toBe('earth-orbit')
+    expect(store[DEFAULT_MIGRATION_KEY]).toBe('1')
+  })
+
+  it('preserves user custom color scheme and local media during migration', async () => {
+    const { migratePreviousDefaultUsers, DEFAULT_MIGRATION_KEY } = await import('./useThemeStyle')
+    store['cssbd_color_scheme'] = 'custom'
+    store['cssbd_bg_type'] = 'custom-local'
+    delete store[DEFAULT_MIGRATION_KEY]
+
+    migratePreviousDefaultUsers()
+
+    expect(store['cssbd_color_scheme']).toBe('custom')
+    expect(store['cssbd_bg_type']).toBe('custom-local')
+    expect(store[DEFAULT_MIGRATION_KEY]).toBe('1')
   })
 })

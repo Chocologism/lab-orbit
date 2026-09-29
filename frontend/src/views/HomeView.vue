@@ -8,15 +8,15 @@ import SilentLizardButton from '../components/SilentLizardButton.vue'
 import NoticeMarquee from '../components/NoticeMarquee.vue'
 
 import { arxivApi, libraryApi, resourceApi, seminarApi, talkApi } from '../api/client'
+import { refreshArxivUnread, getCachedArxivUnread, clearArxivUnread, markArxivFeedViewed, ARXIV_UNREAD_EVENT } from '../utils/arxivUnread'
 import { addDays, monday, nextSeminar, shanghaiToday, sortSeminars } from '../utils/schedule'
 import { getHoliday } from '../utils/holidays'
+import { isMidAutumnFestival } from '../utils/midAutumn'
 import { LiquidGlass } from '../libs/liquidglass'
 import { useWeekDrag } from '../composables/useWeekDrag'
-import { currentBgType, currentColorScheme } from '../composables/useThemeStyle'
-import { useSiteConfig } from '../composables/useSiteConfig'
-
-const { siteConfig } = useSiteConfig()
+import { currentBgType, currentColorScheme, currentGlassStyle } from '../composables/useThemeStyle'
 const router = useRouter()
+const isMidAutumn = computed(() => isMidAutumnFestival())
 const today = ref(shanghaiToday()), focus = ref(today.value), now = ref(Date.now())
 const forecastDashboardRef = ref(null)
 const forecastRightRef = ref(null)
@@ -73,7 +73,7 @@ async function load() {
 }
 // Initialize ybouane/liquidglass: Desktop gets full WebGL liquid glass, mobile uses hardware-accelerated CSS glass
 const setupLiquidGlass = () => {
-  if (window.innerWidth <= 768) {
+  if (currentGlassStyle.value !== 'liquid' || window.innerWidth <= 768) {
     if (liquidGlassInstance) {
       try { liquidGlassInstance.destroy() } catch (e) {}
       liquidGlassInstance = null
@@ -96,16 +96,15 @@ const setupLiquidGlass = () => {
       root: forecastDashboardRef.value,
       glassElements: glassCards,
       defaults: {
-        blurAmount: 0.25,
+        blurAmount: 0.28,
         cornerRadius: 20,
         zRadius: 20,
-        refraction: 0.3,
-        chromAberration: 0.04,
+        refraction: 0.35,
+        chromAberration: 0.05,
         edgeHighlight: 0.08,
-        specular: 0.1,
-        fresnel: 0.28,
-        opacity: 0.72,
-        brightness: 0.0,
+        specular: 0.0,
+        fresnel: 1.0,
+        brightness: -0.05,
         shadowOpacity: 0.0,
         shadowSpread: 0,
         shadowOffsetY: 0,
@@ -139,14 +138,67 @@ const onAtmosphereMediaReady = () => {
   })
 }
 
+const onBgDimChanged = () => {
+  nextTick(() => {
+    liquidGlassInstance?.markChanged()
+  })
+}
+
 watch([currentBgType, currentColorScheme], () => {
   nextTick(() => {
     liquidGlassInstance?.markChanged()
   })
 })
 
+const onGlassStyleChanged = (e) => {
+  const style = e?.detail?.style || currentGlassStyle.value
+  if (style === 'liquid') {
+    nextTick(() => {
+      setupLiquidGlass()
+    })
+  } else {
+    if (liquidGlassInstance) {
+      try { liquidGlassInstance.destroy() } catch (e) {}
+      liquidGlassInstance = null
+      liquidGlassActive.value = false
+    }
+  }
+}
+
+watch(currentGlassStyle, (val) => {
+  if (val === 'liquid') {
+    nextTick(() => {
+      setupLiquidGlass()
+    })
+  } else {
+    if (liquidGlassInstance) {
+      try { liquidGlassInstance.destroy() } catch (e) {}
+      liquidGlassInstance = null
+      liquidGlassActive.value = false
+    }
+  }
+})
+
+const unreadArxivCount = ref(0)
+const hasDirectArxiv = ref(false)
+
+function handleArxivUnreadState(e) {
+  const summary = e?.detail || getCachedArxivUnread()
+  unreadArxivCount.value = Number(summary.unreadCount || 0)
+  hasDirectArxiv.value = Boolean(summary.hasDirect)
+}
+
 onMounted(() => {
   load()
+  const initialArxiv = getCachedArxivUnread()
+  unreadArxivCount.value = initialArxiv.unreadCount
+  hasDirectArxiv.value = initialArxiv.hasDirect
+  window.addEventListener(ARXIV_UNREAD_EVENT, handleArxivUnreadState)
+  refreshArxivUnread().then(s => {
+    unreadArxivCount.value = s.unreadCount
+    hasDirectArxiv.value = s.hasDirect
+  })
+
   const weatherCtrl = new AbortController()
   const weatherTimeout = setTimeout(() => weatherCtrl.abort(), 1500)
   fetch('https://api.open-meteo.com/v1/forecast?latitude=32.12&longitude=118.96&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=1&timezone=Asia%2FShanghai', { signal: weatherCtrl.signal })
@@ -170,15 +222,20 @@ onMounted(() => {
   window.addEventListener('agenda-updated', onAgendaUpdated)
   window.addEventListener('local-bg-changed', onLocalBgChanged)
   window.addEventListener('atmosphere-media-ready', onAtmosphereMediaReady)
+  window.addEventListener('glass-style-changed', onGlassStyleChanged)
+  window.addEventListener('bg-dim-changed', onBgDimChanged)
 })
 onBeforeUnmount(() => {
   alive = false
   clearInterval(clock)
   if (focusTimer) clearTimeout(focusTimer)
   window.removeEventListener('resize', setupLiquidGlass)
+  window.removeEventListener(ARXIV_UNREAD_EVENT, handleArxivUnreadState)
   window.removeEventListener('agenda-updated', onAgendaUpdated)
   window.removeEventListener('local-bg-changed', onLocalBgChanged)
   window.removeEventListener('atmosphere-media-ready', onAtmosphereMediaReady)
+  window.removeEventListener('glass-style-changed', onGlassStyleChanged)
+  window.removeEventListener('bg-dim-changed', onBgDimChanged)
   if (liquidGlassInstance) {
     try {
       liquidGlassInstance.destroy()
@@ -229,51 +286,170 @@ const events = computed(() => [
   ...(data.seminars || []).filter(s => s.status !== 'cancelled').map(s => ({ ...s, type: 'seminar', title: s.topic })),
   ...deduplicatedTalks.value
 ])
+/**
+ * 某项会议存在 3 个时间节点：摘要投递截止时间、注册报名截止时间（含早鸟）和会议开始时间。
+ * 一项会议是否出现在首页，以及在首页出现的顺序，按这三个日期中未过期的最早时间计算。
+ * （这三项日期任意一项已过时之后就不再用以作为在首页显示的依据）
+ */
+function getConferencePriorityInfo(conf, todayVal) {
+  const candidates = []
+
+  // 1. 摘要投递截止时间（未过时）
+  if (conf.abstract_deadline && conf.abstract_deadline >= todayVal) {
+    candidates.push({
+      date: conf.abstract_deadline,
+      type: 'abstract',
+      label: '摘要投递',
+      badgeLabel: '摘要'
+    })
+  }
+
+  // 2. 注册报名截止时间 / 早鸟优惠截止时间（未过时）
+  const regDates = []
+  if (conf.early_bird_deadline && conf.early_bird_deadline >= todayVal) {
+    regDates.push({
+      date: conf.early_bird_deadline,
+      type: 'early_bird',
+      label: '早鸟优惠',
+      badgeLabel: '早鸟'
+    })
+  }
+  if (conf.registration_deadline && conf.registration_deadline >= todayVal) {
+    regDates.push({
+      date: conf.registration_deadline,
+      type: 'registration',
+      label: '注册报名',
+      badgeLabel: '报名'
+    })
+  }
+  if (regDates.length > 0) {
+    regDates.sort((a, b) => a.date.localeCompare(b.date))
+    candidates.push(regDates[0])
+  }
+
+  // 3. 会议开始时间（未过时）
+  if (conf.date && conf.date >= todayVal) {
+    candidates.push({
+      date: conf.date,
+      type: 'start',
+      label: '会议开幕',
+      badgeLabel: '开幕'
+    })
+  } else if ((conf.end_date || conf.date) && (conf.end_date || conf.date) >= todayVal) {
+    candidates.push({
+      date: conf.end_date || conf.date,
+      type: 'ongoing',
+      label: '进行中',
+      badgeLabel: '进行中'
+    })
+  }
+
+  if (candidates.length === 0) {
+    return null
+  }
+
+  candidates.sort((a, b) => a.date.localeCompare(b.date))
+  const earliest = candidates[0]
+
+  return {
+    priorityDate: earliest.date,
+    priorityType: earliest.type,
+    priorityLabel: earliest.label,
+    badgeLabel: earliest.badgeLabel
+  }
+}
+
 const upcomingConferences = computed(() => {
-  const todayVal = today.value
-  const confs = deduplicatedTalks.value.filter(t => {
+  const todayVal = today.value || shanghaiToday()
+  const list = []
+
+  for (const t of deduplicatedTalks.value) {
     const isConf = t.event_type === 'conference' || (t.end_date && t.end_date !== t.date)
-    if (!isConf) return false
-    const endDate = t.end_date || t.date
-    return endDate >= todayVal
+    if (!isConf) continue
+
+    const priorityInfo = getConferencePriorityInfo(t, todayVal)
+    if (!priorityInfo) continue
+
+    list.push({
+      ...t,
+      _priority: priorityInfo
+    })
+  }
+
+  // 优先级高的排在左边（最早的有效时间节点在前）
+  list.sort((a, b) => {
+    const pComp = a._priority.priorityDate.localeCompare(b._priority.priorityDate)
+    if (pComp !== 0) return pComp
+    const dComp = (a.date || '').localeCompare(b.date || '')
+    if (dComp !== 0) return dComp
+    return a.id - b.id
   })
-  confs.sort((a, b) => a.date.localeCompare(b.date))
-  return confs.slice(0, 2)
+
+  // 首页最多展示 4 张会议卡片
+  return list.slice(0, 4)
 })
 
 function formatHomeConfDate(conf) {
   if (!conf?.date) return ''
+  const todayYear = (today.value || shanghaiToday()).slice(0, 4)
   const start = conf.date
   const end = conf.end_date || conf.date
-  if (start === end) return start.slice(5).replace('-', '.')
   const [sy, sm, sd] = start.split('-')
   const [ey, em, ed] = end.split('-')
-  if (sy === ey && sm === em) {
-    return `${sm}.${sd} - ${ed}`
+
+  // 若不是本年度会议，加上两位年份前缀（如 '27.01.15）
+  const yearPrefix = sy !== todayYear ? `'${sy.slice(2)}.` : ''
+
+  if (start === end) {
+    return `${yearPrefix}${sm}.${sd}`
   }
-  return `${sm}.${sd} - ${em}.${ed}`
+  if (sy === ey && sm === em) {
+    return `${yearPrefix}${sm}.${sd} - ${ed}`
+  }
+  return `${yearPrefix}${sm}.${sd} - ${em}.${ed}`
 }
 
-function getHomeConfUrgentDeadline(conf) {
-  const todayVal = today.value
-  const deadlines = [
-    { label: '摘要投递', val: conf.abstract_deadline },
-    { label: '早鸟优惠', val: conf.early_bird_deadline },
-    { label: '报名截止', val: conf.registration_deadline }
-  ].filter(d => Boolean(d.val && d.val >= todayVal))
+function getHomeConfDeadlineBadge(conf) {
+  const todayVal = today.value || shanghaiToday()
+  const priority = conf._priority || getConferencePriorityInfo(conf, todayVal)
+  if (!priority) return null
 
-  if (deadlines.length === 0) return null
-  deadlines.sort((a, b) => a.val.localeCompare(b.val))
-  const closest = deadlines[0]
-  const [y1, m1, d1] = closest.val.split('-').map(Number)
+  const targetDate = priority.priorityDate
+  const [y1, m1, d1] = targetDate.split('-').map(Number)
   const [y2, m2, d2] = todayVal.split('-').map(Number)
   const diff = Math.round((Date.UTC(y1, m1 - 1, d1) - Date.UTC(y2, m2 - 1, d2)) / (1000 * 60 * 60 * 24))
-  if (diff <= 7) {
+
+  // 如果优先级依据是截止日期（摘要或报名）
+  if (priority.priorityType === 'abstract' || priority.priorityType === 'early_bird' || priority.priorityType === 'registration') {
+    const prefix = priority.badgeLabel
+    if (diff <= 7) {
+      return {
+        text: diff === 0 ? `${prefix}今天截止` : diff === 1 ? `${prefix}明天截止` : `${prefix}仅剩 ${diff} 天`,
+        isUrgent: true
+      }
+    }
+    const shortDate = `${targetDate.slice(5, 7)}.${targetDate.slice(8, 10)}`
     return {
-      text: diff === 0 ? `${closest.label}今天截止` : diff === 1 ? `${closest.label}明天截止` : `${closest.label}仅剩 ${diff} 天`,
+      text: `${prefix} ${shortDate} 截止`,
+      isUrgent: false
+    }
+  }
+
+  // 如果优先级依据是会议开幕时间
+  if (priority.priorityType === 'start') {
+    if (diff <= 7) {
+      return {
+        text: diff === 0 ? '今天开幕' : diff === 1 ? '明天开幕' : `${diff} 天后开幕`,
+        isUrgent: true
+      }
+    }
+  } else if (priority.priorityType === 'ongoing') {
+    return {
+      text: '正在举行',
       isUrgent: true
     }
   }
+
   return null
 }
 const weekEvents = computed(() => week.value.flatMap(day => daysEvents(day)))
@@ -338,7 +514,7 @@ function onDayClick(e, day) {
 </script>
 <template>
   <div class="forecast-home">
-    <header id="tour-home-marquee" class="forecast-topline">
+    <header class="forecast-topline">
       <NoticeMarquee />
       <span class="home-date">{{ prettyDate }}</span>
     </header>
@@ -350,9 +526,18 @@ function onDayClick(e, day) {
       :class="{ 'liquid-glass-active': liquidGlassActive }"
     >
       <section class="forecast-main">
-        <div id="tour-home-actions" class="forecast-intro">
-          <h1>{{ siteConfig.labName }}</h1>
-          <p class="group-name-en">{{ siteConfig.siteSlogan || siteConfig.labShortName }}</p>
+        <div class="forecast-intro">
+          <h1 class="group-title-heading">
+            <span>宇宙结构与巡天大数据研究团组</span>
+            <img
+              v-if="isMidAutumn"
+              src="/assets/icons/moon.svg"
+              alt="中秋明月"
+              class="mid-autumn-moon-badge"
+              title="中秋快乐"
+            />
+          </h1>
+          <p class="group-name-en">Cosmological Structure and Big Data Research Group</p>
           <div class="forecast-actions">
             <router-link :to="calendarLink(today)" class="perfect-goat-btn">
               <span class="goat-text">打开学术日程</span>
@@ -375,7 +560,7 @@ function onDayClick(e, day) {
           </div>
         </div>
         <PersonalAgenda />
-        <section id="tour-home-week" class="home-week" aria-label="每周科研日程">
+        <section class="home-week" aria-label="每周科研日程">
           <header class="home-section-heading">
             <div>
               <span class="eyebrow">YOUR WEEK, AT A GLANCE</span>
@@ -499,25 +684,30 @@ function onDayClick(e, day) {
             </router-link>
           </div>
 
-          <div v-if="upcomingConferences.length > 0" class="home-conf-grid">
+          <div v-if="upcomingConferences.length > 0" class="home-conf-grid" :class="`grid-cols-${upcomingConferences.length}`">
             <router-link
               v-for="conf in upcomingConferences"
               :key="conf.id"
               :to="{ path: '/seminars', query: { tab: 'conferences', conferenceId: conf.id } }"
               class="home-conf-card-item"
+              :title="conf.title"
             >
               <div class="home-conf-item-top">
                 <span class="conf-item-date mono">{{ formatHomeConfDate(conf) }}</span>
                 <span v-if="conf.city" class="conf-item-city">{{ conf.city }}</span>
                 <span v-else-if="conf.sub_type" class="conf-item-badge">{{ conf.sub_type }}</span>
-                <span v-if="getHomeConfUrgentDeadline(conf)" class="conf-item-urgent">
-                  <AppIcon name="warning" :size="12" />
-                  <span>{{ getHomeConfUrgentDeadline(conf).text }}</span>
+                <span
+                  v-if="getHomeConfDeadlineBadge(conf)"
+                  class="conf-item-urgent"
+                  :class="{ 'is-urgent': getHomeConfDeadlineBadge(conf).isUrgent }"
+                >
+                  <AppIcon :name="getHomeConfDeadlineBadge(conf).isUrgent ? 'warning' : 'clock'" :size="11" />
+                  <span>{{ getHomeConfDeadlineBadge(conf).text }}</span>
                 </span>
               </div>
               <h3 class="home-conf-item-title">{{ conf.title }}</h3>
               <div class="home-conf-item-location" v-if="conf.location || conf.organizer || conf.speaker">
-                <AppIcon name="location" :size="13" />
+                <AppIcon name="location" :size="12" />
                 <span>{{ conf.location || conf.organizer || conf.speaker }}</span>
               </div>
             </router-link>
@@ -535,7 +725,6 @@ function onDayClick(e, day) {
         aria-label="近期组会与工作区入口"
       >
         <router-link
-          id="tour-home-next-meeting"
           :to="next ? { path: '/seminars', query: { seminar: next.id } } : '/seminars'"
           class="glass-card next-meeting liquid-glass-card"
         >
@@ -571,8 +760,9 @@ function onDayClick(e, day) {
             :key="item.to"
             :to="item.to"
             class="glass-card quick-destination liquid-glass-card"
+            @click="item.to === '/arxiv' && markArxivFeedViewed()"
           >
-            <div><span class="destination-label"><AppIcon :name="item.icon" :size="17" />{{ item.label }}</span><p>{{ item.note }}</p></div><span class="destination-count">{{ item.count }}<AppIcon name="external" :size="16" /></span>
+            <div><span class="destination-label"><AppIcon :name="item.icon" :size="17" />{{ item.label }}</span><p>{{ item.note }}</p></div><span class="destination-count"><span v-if="item.to === '/arxiv' && unreadArxivCount > 0" class="home-arxiv-badge" :class="{ 'is-gold': hasDirectArxiv, 'is-red': !hasDirectArxiv }">{{ unreadArxivCount > 99 ? '99+' : unreadArxivCount }}</span>{{ item.count }}<AppIcon name="external" :size="16" /></span>
           </router-link>
         </div>
       </aside>
@@ -581,6 +771,38 @@ function onDayClick(e, day) {
 </template>
 
 <style scoped>
+.group-title-heading {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.mid-autumn-moon-badge {
+  display: inline-block;
+  width: clamp(34px, 3.8vw, 54px);
+  height: clamp(34px, 3.8vw, 54px);
+  flex-shrink: 0;
+  vertical-align: middle;
+  filter: drop-shadow(0 0 14px rgba(255, 240, 140, 0.65));
+  animation: mid-autumn-moon-glow 4s ease-in-out infinite alternate;
+  user-select: none;
+  pointer-events: none;
+}
+@keyframes mid-autumn-moon-glow {
+  0% {
+    filter: drop-shadow(0 0 8px rgba(255, 230, 100, 0.45));
+    transform: scale(1);
+  }
+  100% {
+    filter: drop-shadow(0 0 18px rgba(255, 245, 160, 0.85));
+    transform: scale(1.05);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mid-autumn-moon-badge {
+    animation: none;
+  }
+}
 .home-week-slider-wrapper {
   position: relative;
   overflow: hidden;
@@ -622,6 +844,7 @@ function onDayClick(e, day) {
   font-size: 12.5px;
   font-weight: 600;
   backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   pointer-events: none;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   transition: border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
@@ -643,8 +866,8 @@ function onDayClick(e, day) {
 .home-conf-section {
   display: flex;
   flex-direction: column;
-  padding: 16px 20px;
-  gap: 12px;
+  padding: 12px 16px;
+  gap: 10px;
   margin-top: 0;
 }
 
@@ -659,14 +882,14 @@ function onDayClick(e, day) {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 600;
   color: var(--text);
 }
 
 .conf-top-link {
   color: var(--soft);
-  font-size: 12.5px;
+  font-size: 12px;
   text-decoration: none;
   display: flex;
   align-items: center;
@@ -680,20 +903,37 @@ function onDayClick(e, day) {
 
 .home-conf-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.home-conf-grid.grid-cols-1 {
+  grid-template-columns: 1fr;
+}
+
+.home-conf-grid.grid-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.home-conf-grid.grid-cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.home-conf-grid.grid-cols-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .home-conf-card-item {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
+  gap: 5px;
+  padding: 9px 11px;
   background: var(--surface, rgba(255, 255, 255, 0.03));
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  border-radius: 12px;
+  border-radius: 11px;
   text-decoration: none;
   color: inherit;
+  min-width: 0;
   transition: all 0.2s ease;
 }
 
@@ -706,48 +946,57 @@ function onDayClick(e, day) {
 .home-conf-item-top {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .conf-item-date {
-  font-size: 12.5px;
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--accent);
+  white-space: nowrap;
 }
 
 .conf-item-city {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
-  padding: 1px 6px;
+  padding: 1px 5px;
   border-radius: 4px;
   background: rgba(56, 189, 248, 0.12);
   color: #38bdf8;
   border: 1px solid rgba(56, 189, 248, 0.2);
+  white-space: nowrap;
 }
 
 .conf-item-badge {
-  font-size: 11px;
-  padding: 1px 6px;
+  font-size: 10px;
+  padding: 1px 5px;
   border-radius: 4px;
   background: var(--surface-hover, rgba(255, 255, 255, 0.08));
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .conf-item-urgent {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 500;
-  color: #f59e0b;
+  color: var(--soft);
   margin-left: auto;
+  white-space: nowrap;
+}
+
+.conf-item-urgent.is-urgent {
+  color: #f59e0b;
 }
 
 .home-conf-item-title {
-  font-size: 13.5px;
+  font-size: 12.5px;
   font-weight: 500;
-  line-height: 1.45;
+  line-height: 1.36;
   margin: 0;
   color: var(--text);
   overflow: hidden;
@@ -755,28 +1004,48 @@ function onDayClick(e, day) {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  min-height: 2.72em;
 }
 
 .home-conf-item-location {
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 12px;
+  gap: 4px;
+  font-size: 11px;
   color: var(--soft);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-top: auto;
 }
 
 .conf-mini-empty {
-  padding: 14px 0;
+  padding: 12px 0;
   color: var(--soft);
-  font-size: 13px;
+  font-size: 12.5px;
   text-align: center;
 }
 
 .conf-mini-empty p {
   margin: 0;
+}
+
+@media (max-width: 768px) {
+  .home-conf-grid.grid-cols-3,
+  .home-conf-grid.grid-cols-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .home-conf-grid,
+  .home-conf-grid.grid-cols-2,
+  .home-conf-grid.grid-cols-3,
+  .home-conf-grid.grid-cols-4 {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
 }
 
 @media (max-width: 768px) {
@@ -1018,6 +1287,62 @@ function onDayClick(e, day) {
     color: var(--accent);
     font-weight: 600;
   }
+
+  /* 手机端专用：卡片边框与按钮质感深度适配 */
+  .home-primary-links .glass-card,
+  .forecast-right .glass-card,
+  .personal-agenda .glass-card,
+  .glass-card {
+    border-color: var(--line) !important;
+  }
+
+  [data-color-scheme="obsidian-gray"] .forecast-actions .perfect-goat-btn,
+  [data-color-scheme="obsidian-gray"] .forecast-actions :deep(.btn-silent-lizard) {
+    background: linear-gradient(135deg, #a6b7cc 0%, #7d90a6 100%) !important;
+    border-color: #b0c0d4 !important;
+    color: #070e18 !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 16px rgba(166, 183, 204, 0.35) !important;
+    font-weight: 600;
+  }
+  [data-color-scheme="obsidian-gray"] .forecast-actions .perfect-goat-btn .goat-text {
+    color: #070e18 !important;
+  }
+  [data-color-scheme="obsidian-gray"] .forecast-actions .perfect-goat-btn .goat-icon {
+    background: rgba(7, 14, 24, 0.18) !important;
+    color: #070e18 !important;
+  }
+
+  [data-color-scheme="nebula-purple"] .forecast-actions .perfect-goat-btn,
+  [data-color-scheme="nebula-purple"] .forecast-actions :deep(.btn-silent-lizard) {
+    background: linear-gradient(135deg, #c084fc 0%, #9333ea 100%) !important;
+    border-color: #c084fc !important;
+    color: #070314 !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 18px rgba(192, 132, 252, 0.45) !important;
+    font-weight: 600;
+  }
+  [data-color-scheme="nebula-purple"] .forecast-actions .perfect-goat-btn .goat-text {
+    color: #070314 !important;
+  }
+  [data-color-scheme="nebula-purple"] .forecast-actions .perfect-goat-btn .goat-icon {
+    background: rgba(7, 3, 20, 0.22) !important;
+    color: #070314 !important;
+  }
+
+  [data-color-scheme="classic-cyan"] .forecast-actions .perfect-goat-btn,
+  [data-color-scheme="classic-cyan"] .forecast-actions :deep(.btn-silent-lizard) {
+    background: linear-gradient(135deg, #c5e6df 0%, #7dbfb3 100%) !important;
+    border-color: #c5e6df !important;
+    color: #081f28 !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 16px rgba(197, 230, 223, 0.35) !important;
+    font-weight: 600;
+  }
+  [data-color-scheme="classic-cyan"] .forecast-actions .perfect-goat-btn .goat-text {
+    color: #081f28 !important;
+  }
+  [data-color-scheme="classic-cyan"] .forecast-actions .perfect-goat-btn .goat-icon {
+    background: rgba(8, 31, 40, 0.22) !important;
+    color: #081f28 !important;
+  }
 }
 
 /* perfect-goat-80 按钮方案 (From Uiverse.io by R1SH4BH81，未触发动效前与右侧推荐文献按钮外观保持一致) */
@@ -1042,7 +1367,7 @@ function onDayClick(e, day) {
   cursor: pointer;
   text-decoration: none;
   box-sizing: border-box;
-  box-shadow: 0 0 14px rgba(184, 155, 248, 0.35);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent, #b89bf8) 35%, transparent);
   transition: all 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
   user-select: none;
   white-space: nowrap;
@@ -1072,11 +1397,12 @@ function onDayClick(e, day) {
   will-change: transform;
 }
 .perfect-goat-btn:hover {
-  background-color: rgba(184, 155, 248, 0.16);
+  background-color: color-mix(in srgb, var(--accent, #b89bf8) 16%, transparent);
   color: var(--accent, #b89bf8);
   border-color: var(--accent, #b89bf8);
-  box-shadow: 0 0 24px rgba(184, 155, 248, 0.5);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--accent, #b89bf8) 50%, transparent);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 .perfect-goat-btn:hover .goat-text {
   color: var(--accent, #b89bf8);
@@ -1148,5 +1474,33 @@ function onDayClick(e, day) {
 [data-theme-style="vanta-fog"] .perfect-goat-btn:hover .goat-icon {
   background: var(--accent, #c5e6df) !important;
   color: #0e2b31 !important;
+}
+
+.home-arxiv-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.home-arxiv-badge.is-red {
+  background: #ef4444;
+  background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(225, 29, 72, 0.45);
+}
+.home-arxiv-badge.is-gold {
+  background: #f59e0b;
+  background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
+  color: #1c1917;
+  font-weight: 800;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.6), 0 0 10px rgba(251, 191, 36, 0.4);
 }
 </style>

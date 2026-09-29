@@ -265,6 +265,24 @@ export async function demoAxiosAdapter(config) {
       return respond(needFill)
     }
 
+    if (cleanUrl === '/api/seminars/mine/upcoming-presentations') {
+      const today = new Date().toISOString().split('T')[0]
+      const cur = getStored('labhub_user', DEMO_MEMBERS[0])
+      const mine = seminars.filter(s => s.status === 'upcoming' && s.date >= today).map(s => ({
+        id: s.id,
+        date: s.date,
+        time: s.time,
+        topic: s.topic,
+        speaker: s.speaker || s.presenter_name,
+        role: 'presenter'
+      }))
+      return respond(mine)
+    }
+
+    if (cleanUrl === '/api/seminars/link-presentation-paper') {
+      return respond({ success: true, message: '已关联文献到组会' })
+    }
+
     if (cleanUrl === '/api/seminars/settings') {
       return respond({ day_of_week: 5, start_time: '14:30', location: '科研实验楼 5-516 会议室' })
     }
@@ -344,6 +362,18 @@ export async function demoAxiosAdapter(config) {
   // 4. arXiv 文献订阅流 (Arxiv Papers)
   if (cleanUrl.startsWith('/api/arxiv')) {
     let papers = getStored(STORAGE_KEYS.PAPERS, DEMO_ARXIV_PAPERS)
+
+    if (cleanUrl === '/api/arxiv/unread-summary') {
+      return respond({ unreadCount: 0, hasDirect: false })
+    }
+
+    if (cleanUrl === '/api/arxiv/mark-viewed' || cleanUrl === '/api/arxiv/mark-all-read') {
+      return respond({ ok: true })
+    }
+
+    if (cleanUrl.match(/\/api\/arxiv\/\d+\/translate/) && method === 'post') {
+      return respond({ ok: true, message: '翻译已保存' })
+    }
 
     if (cleanUrl.startsWith('/api/arxiv/feed')) {
       return respond(papers)
@@ -931,6 +961,60 @@ export async function demoAxiosAdapter(config) {
   }
   if (cleanUrl === '/api/files') {
     return respond({ url: 'https://example.com/file.pdf', filename: 'file.pdf' })
+  }
+
+  // 13. Zotero 协同归档
+  if (cleanUrl.startsWith('/api/zotero')) {
+    if (cleanUrl === '/api/zotero/config') {
+      if (method === 'get') {
+        const cfg = getStored('laborbit_demo_zotero_config', { configured: false, user_id: '', default_collection: '', has_api_key: false })
+        return respond(cfg)
+      }
+      if (method === 'put') {
+        const cfg = { configured: true, user_id: body.user_id || 'demo_user', default_collection: body.default_collection || '', has_api_key: true }
+        setStored('laborbit_demo_zotero_config', cfg)
+        return respond({ ok: true, message: '配置已保存' })
+      }
+      if (method === 'delete') {
+        setStored('laborbit_demo_zotero_config', { configured: false, user_id: '', default_collection: '', has_api_key: false })
+        return respond({ ok: true })
+      }
+    }
+    if (cleanUrl === '/api/zotero/collections') {
+      return respond([
+        { key: 'col1', name: '银河系动力学', parentCollection: false },
+        { key: 'col2', name: '暗物质晕数值模拟', parentCollection: false },
+        { key: 'col3', name: '巡天望远镜管线', parentCollection: 'col1' }
+      ])
+    }
+    if (cleanUrl === '/api/zotero/push') {
+      return respond({ ok: true, item_key: 'ITEM_MOCK_123', message: '文献已成功推送到您的 Zotero 库！' })
+    }
+  }
+
+  // 14. 通告评分与深度网页抓取
+  if (cleanUrl.match(/\/api\/notices\/\d+\/rate/)) {
+    return respond({ ok: true })
+  }
+  if (cleanUrl === '/api/talks/scrape-url' || cleanUrl === '/api/schedule-imports/scrape-url') {
+    return respond({
+      success: true,
+      data: {
+        title: 'International Conference on Astrophysics and Data Science 2027',
+        event_type: 'conference',
+        sub_type: '国际会议',
+        date: '2027-06-15',
+        end_date: '2027-06-19',
+        city: '上海',
+        organizer: 'TDLI & Shanghai Jiao Tong University',
+        abstract_start_date: '2026-10-01',
+        abstract_deadline: '2027-01-15',
+        early_bird_deadline: '2027-03-31',
+        registration_deadline: '2027-05-15',
+        website_url: body.url || 'https://example.com/conf',
+        notes: '深入探讨引力透镜、高能天体物理与机器学习巡天技术前沿。'
+      }
+    })
   }
 
   // 13. 通用兜底响应：防止未处理的接口报错中断页面

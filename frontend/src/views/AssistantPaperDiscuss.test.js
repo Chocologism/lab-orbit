@@ -8,39 +8,43 @@ describe('AssistantView Paper Discussion integration', () => {
   const content = fs.readFileSync(filePath, 'utf8')
   const parsed = parse(content)
 
-  it('contains session-paper-banner in template when paperContext exists', () => {
+  it('decouples paper discussions into dedicated arxiv copilot tab and removes session-paper-banner from ordinary chat', () => {
     const template = parsed.descriptor.template?.content || ''
-    expect(template).toContain('class="session-paper-banner"')
-    expect(template).toContain('v-if="currentSession?.paperContext"')
-    expect(template).toContain('currentSession.paperContext.arxivId')
-    expect(template).toContain('currentSession.paperContext.title')
-    expect(template).toContain('banner-quick-actions')
-    expect(template).toContain('创新点剖析')
-    expect(template).toContain('学术翻译')
+    // Ordinary chat template should no longer have the legacy paper banner
+    expect(template).not.toContain('class="session-paper-banner"')
+    expect(template).not.toContain('v-if="currentSession?.paperContext"')
+    // Arxiv copilot component is mounted in arxiv mode
+    expect(template).toContain('<ArxivPaperCopilot')
+    expect(template).toContain(':initial-paper-id="arxivPaperId"')
   })
 
-  it('binds is-paper and session-arxiv-tag in sidebar session list', () => {
+  it('uses clean chat icons for sidebar session list without old paperContext tagging', () => {
     const template = parsed.descriptor.template?.content || ''
-    expect(template).toContain(":class=\"{ 'is-paper': Boolean(session.paperContext) }\"")
-    expect(template).toContain('session.paperContext ? \'article\' : \'chat\'')
-    expect(template).toContain('class="session-arxiv-tag"')
+    expect(template).not.toContain(":class=\"{ 'is-paper': Boolean(session.paperContext) }\"")
+    expect(template).not.toContain('session.paperContext ? \'article\' : \'chat\'')
+    expect(template).not.toContain('class="session-arxiv-tag"')
+    expect(template).toContain('class="session-lead-icon"')
   })
 
-  it('defines paper fetching and route discuss handler functions in script setup', () => {
+  it('uses SlidingSegmented for mode switcher without alphaxiv-pill text and bound to activeMode', () => {
+    const template = parsed.descriptor.template?.content || ''
+    expect(template).toContain('<SlidingSegmented class="assistant-mode-tabs" :active-key="activeMode">')
+    expect(template).toContain('普通对话')
+    expect(template).toContain('与 arXiv 对话')
+    expect(template).not.toContain('alphaXiv 伴读')
+  })
+
+  it('directly activates arxiv mode on discussArxiv or paperId query in script setup', () => {
     const script = parsed.descriptor.scriptSetup?.content || ''
-    expect(script).toContain('function fetchPaperContentForSession')
-    expect(script).toContain('function retryFetchPaperContent')
-    expect(script).toContain('function handleRouteDiscussArxiv')
-    expect(script).toContain('fetchArxivPaperFulltext')
-    expect(script).toContain('paperContext: currentSession.value?.paperContext || null')
+    expect(script).toContain("activeMode.value = 'arxiv'")
+    expect(script).toContain('cleanArxivId(route.query.paperId || route.query.discussArxiv)')
+    expect(script).toContain("paperContext: null")
   })
 
-  it('styles session-paper-banner and handles responsive layout', () => {
+  it('binds mode tab active styling to var(--accent)', () => {
     const style = parsed.descriptor.styles[0]?.content || ''
-    expect(style).toContain('.session-paper-banner')
-    expect(style).toContain('.paper-arxiv-pill')
-    expect(style).toContain('.quick-action-pill')
-    expect(style).toContain('.session-lead-icon.is-paper')
-    expect(style).toContain('.session-arxiv-tag')
+    expect(style).toContain('.assistant-mode-tabs')
+    expect(style).toContain('.mode-tab-btn.active')
+    expect(style).toContain('color: var(--accent)')
   })
 })

@@ -102,8 +102,8 @@ def list_notices(
     query = db.query(Notice)
     now = datetime.now()
     today_str = now.strftime('%Y-%m-%d')
-    two_weeks_ago_str = (now - timedelta(days=14)).strftime('%Y-%m-%d')
-    two_weeks_ago_dt = now - timedelta(days=14)
+    seven_days_ago_str = (now - timedelta(days=7)).strftime('%Y-%m-%d')
+    seven_days_ago_dt = now - timedelta(days=7)
 
     if marquee_only:
         query = query.filter(or_(
@@ -111,8 +111,8 @@ def list_notices(
             and_(
                 or_(Notice.end_date == '', Notice.end_date.is_(None)),
                 or_(
-                    and_(Notice.start_date != '', Notice.start_date >= two_weeks_ago_str),
-                    and_(Notice.start_date == '', Notice.created_at >= two_weeks_ago_dt)
+                    and_(Notice.start_date != '', Notice.start_date >= seven_days_ago_str),
+                    and_(Notice.start_date == '', Notice.created_at >= seven_days_ago_dt)
                 )
             )
         ))

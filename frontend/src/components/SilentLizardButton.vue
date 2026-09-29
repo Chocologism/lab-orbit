@@ -42,7 +42,7 @@ defineEmits(['click'])
   color: var(--accent-ink, #070314);
   border: 2px solid var(--accent, #b89bf8);
   border-radius: 12px;
-  box-shadow: 0 0 14px rgba(184, 155, 248, 0.35);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent, #b89bf8) 35%, transparent);
   transition: all 0.3s ease-in-out;
   cursor: pointer;
   white-space: nowrap;
@@ -136,11 +136,12 @@ defineEmits(['click'])
 }
 
 .btn-silent-lizard:hover {
-  background: rgba(184, 155, 248, 0.16);
+  background: color-mix(in srgb, var(--accent, #b89bf8) 16%, transparent);
   color: var(--accent, #b89bf8);
   border-color: var(--accent, #b89bf8);
-  box-shadow: 0 0 24px rgba(184, 155, 248, 0.5);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--accent, #b89bf8) 50%, transparent);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .btn-silent-lizard:hover .star-1 {

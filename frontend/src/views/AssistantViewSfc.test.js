@@ -15,7 +15,7 @@ describe('AssistantView SFC bindings integrity', () => {
     const excludedProperties = new Set(['target'])
 
     const refUsage = new Set()
-    for (const m of parsed.descriptor.scriptSetup.content.matchAll(/(?<!\.)\b([a-zA-Z0-9_$]+)\.value\b/g)) {
+    for (const m of parsed.descriptor.scriptSetup.content.matchAll(/(?:^|[^.])\b([a-zA-Z0-9_$]+)\.value\b/g)) {
       if (!excludedProperties.has(m[1])) {
         refUsage.add(m[1])
       }

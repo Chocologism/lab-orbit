@@ -4,12 +4,35 @@ import { authMiddleware } from '../middleware/auth';
 
 const app = new Hono<{ Bindings: Env; Variables: { user: UserRow } }>();
 
-app.use('*', authMiddleware);
+app.use('*', async (c, next) => {
+  const path = c.req.path;
+  if (path.includes('/proxy-markdown') || path.includes('/proxy-pdf')) {
+    return next();
+  }
+  return authMiddleware(c, next);
+});
 
-import { extractArxivId, extractDoi, fetchArxivMetadata, fetchDoiMetadata, ensureArxivSeminarIdColumn } from '../utils/papers';
+import { extractArxivId, extractAllArxivIds, extractDoi, fetchArxivMetadata, fetchDoiMetadata, ensureArxivSeminarIdColumn, ensureArxivTranslationColumns, ensureArxivFeedViewsTable, decodeHtmlEntities } from '../utils/papers';
 
 function getBeijingDateStr(): string {
   const d = new Date();
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  return formatter.format(d);
+}
+
+function getBeijingDateFromTimestamp(timestampStr: string): string {
+  if (!timestampStr) return '';
+  let str = String(timestampStr).trim();
+  if (str && !str.endsWith('Z') && !str.includes('+')) {
+    str = str.replace(' ', 'T') + 'Z';
+  }
+  const d = new Date(str);
+  if (isNaN(d.getTime())) return '';
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
@@ -23,6 +46,45 @@ app.post('/preview', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const input = (body.url_or_id || '').trim();
 
+  // 1. 若输入中包含多篇 arXiv 编号或链接，批量抓取并返回
+  const allArxivIds = extractAllArxivIds(input);
+  if (allArxivIds.length > 1) {
+    try {
+      const results = await Promise.allSettled(
+        allArxivIds.map(async (id) => {
+          return await fetchArxivMetadata(id);
+        })
+      );
+      const papers: any[] = [];
+      for (let i = 0; i < results.length; i++) {
+        const res = results[i];
+        if (res.status === 'fulfilled' && res.value) {
+          papers.push(res.value);
+        } else {
+          papers.push({
+            arxiv_id: allArxivIds[i],
+            title: `arXiv:${allArxivIds[i]}`,
+            authors: [],
+            abstract: '',
+            published_date: '',
+            primary_category: 'astro-ph',
+            pdf_url: `https://arxiv.org/pdf/${allArxivIds[i]}.pdf`,
+            source_url: `https://arxiv.org/abs/${allArxivIds[i]}`,
+            journal: ''
+          });
+        }
+      }
+      return c.json({
+        is_batch: true,
+        count: papers.length,
+        papers,
+        ...papers[0]
+      });
+    } catch (e: any) {
+      return c.json({ detail: `批量抓取 arXiv 文献失败: ${e.message}` }, 400);
+    }
+  }
+
   const doi = extractDoi(input);
   if (doi && !input.includes('arxiv.org')) {
     try {
@@ -33,7 +95,7 @@ app.post('/preview', async (c) => {
     }
   }
 
-  const arxivId = extractArxivId(input);
+  const arxivId = allArxivIds[0] || extractArxivId(input);
   if (arxivId) {
     try {
       const data = await fetchArxivMetadata(arxivId);
@@ -54,6 +116,42 @@ app.post('/preview', async (c) => {
 
   return c.json({ detail: '未能识别有效的 arXiv ID 或 DOI 链接' }, 400);
 });
+
+async function canUserViewPaper(db: any, paperId: number, paperOwnerId: number, userId: number): Promise<boolean> {
+  const audience = await db.prepare('SELECT paper_id FROM recommendation_audiences WHERE paper_id = ?').bind(paperId).first();
+  if (!audience) return true;
+  if (paperOwnerId === userId) return true;
+  const recipient = await db.prepare('SELECT user_id FROM recommendation_recipients WHERE paper_id = ? AND user_id = ?').bind(paperId, userId).first();
+  return Boolean(recipient);
+}
+
+async function syncLibraryRecommendationAccess(db: any, libraryId: number) {
+  const sources = await db.prepare('SELECT is_public, user_ids FROM library_recommendation_sources WHERE library_id = ?').bind(libraryId).all<{ is_public: number; user_ids: string }>();
+  const rows = sources.results || [];
+  const hasPublic = rows.some((r: any) => r.is_public === 1);
+  if (hasPublic) {
+    await db.prepare('UPDATE library_papers SET from_recommendation = 1 WHERE id = ?').bind(libraryId).run();
+  } else {
+    await db.prepare('UPDATE library_papers SET from_recommendation = 0 WHERE id = ?').bind(libraryId).run();
+  }
+
+  const accessUserIds = new Set<number>();
+  for (const r of rows) {
+    if (r.is_public === 0 && r.user_ids) {
+      try {
+        const uids: number[] = JSON.parse(r.user_ids);
+        if (Array.isArray(uids)) {
+          uids.forEach(uid => accessUserIds.add(uid));
+        }
+      } catch {}
+    }
+  }
+
+  await db.prepare('DELETE FROM library_access WHERE paper_id = ?').bind(libraryId).run();
+  for (const uid of accessUserIds) {
+    await db.prepare('INSERT OR IGNORE INTO library_access (paper_id, user_id) VALUES (?, ?)').bind(libraryId, uid).run();
+  }
+}
 
 async function formatPaperOut(db: any, p: any, currentUserId: number) {
   let authorsList: string[] = [];
@@ -139,27 +237,31 @@ async function formatPaperOut(db: any, p: any, currentUserId: number) {
   }
   const todayStr = getBeijingDateStr();
   const isSeminarToday = Boolean(targetSeminarId && targetSeminarDate && targetSeminarDate === todayStr);
-  const isTeacherPinned = Boolean(p.is_pinned && recommender.identity === 'teacher');
+  const paperRecommendDate = getBeijingDateFromTimestamp(p.created_at);
+  const isRecommendedToday = Boolean(paperRecommendDate && paperRecommendDate === todayStr);
+  const isTeacherPinned = Boolean(p.is_pinned && recommender.identity === 'teacher' && isRecommendedToday);
   const effectiveIsPinned = isTeacherPinned || isSeminarToday;
 
   return {
     id: p.id,
     arxiv_id: p.arxiv_id,
-    title: p.title,
+    title: decodeHtmlEntities(p.title || ''),
     journal: journalName,
     source_url: p.source_url || '',
     authors: authorsList,
-    abstract: p.abstract || '',
+    abstract: decodeHtmlEntities(p.abstract || ''),
     primary_category: primaryCategory,
     published_date: p.published_date || '',
     pdf_url: p.pdf_url || '',
-    recommend_comment: p.recommend_comment || '',
+    recommend_comment: decodeHtmlEntities(p.recommend_comment || ''),
     is_pinned: effectiveIsPinned,
     is_teacher_pinned: isTeacherPinned,
     is_seminar_today: isSeminarToday,
     seminar_id: targetSeminarId ? Number(targetSeminarId) : null,
     seminar_date: targetSeminarDate,
     created_at: p.created_at || '',
+    recommend_date: paperRecommendDate,
+    is_recommended_today: isRecommendedToday,
     visibility: isDirect ? 'direct' : 'public',
     recommender,
     recipients,
@@ -169,6 +271,10 @@ async function formatPaperOut(db: any, p: any, currentUserId: number) {
     like_count: likeCount,
     is_liked_by_me: isLikedByMe,
     is_liked: isLikedByMe,
+    title_zh: decodeHtmlEntities(p.title_zh || ''),
+    abstract_zh: decodeHtmlEntities(p.abstract_zh || ''),
+    translated_by_id: p.translated_by_id || null,
+    translated_at: p.translated_at || '',
   };
 }
 
@@ -234,16 +340,37 @@ app.post('/recommend', async (c) => {
     const libRes = await c.env.DB.prepare(
       `INSERT INTO library_papers 
        (arxiv_id, title, authors, abstract, primary_category, published_date, pdf_url, metadata_status, from_recommendation, journal, source_url, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', 1, ?, ?, datetime('now'))`
-    ).bind(arxiv_id, title, authors, abstract, primary_category, published_date, pdf_url, journal, source_url).run();
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?, datetime('now'))`
+    ).bind(arxiv_id, title, authors, abstract, primary_category, published_date, pdf_url, is_direct ? 0 : 1, journal, source_url).run();
     libPaper = { id: libRes.meta.last_row_id as number };
+  } else {
+    if (!is_direct) {
+      await c.env.DB.prepare('UPDATE library_papers SET from_recommendation = 1 WHERE id = ?').bind(libPaper.id).run();
+    }
   }
 
   // Record recommendation source for library
+  const userIdsForSource = is_direct ? Array.from(new Set([user.id, ...recipient_ids])) : [];
   await c.env.DB.prepare(
     `INSERT INTO library_recommendation_sources (library_id, recommendation_id, is_public, user_ids)
      VALUES (?, ?, ?, ?)`
-  ).bind(libPaper.id, paperId, is_direct ? 0 : 1, JSON.stringify(recipient_ids)).run();
+  ).bind(libPaper.id, paperId, is_direct ? 0 : 1, JSON.stringify(userIdsForSource)).run();
+
+  if (is_direct) {
+    for (const uid of userIdsForSource) {
+      await c.env.DB.prepare('INSERT OR IGNORE INTO library_access (paper_id, user_id) VALUES (?, ?)').bind(libPaper.id, uid).run();
+    }
+  }
+  await syncLibraryRecommendationAccess(c.env.DB, libPaper.id);
+
+  await ensureArxivFeedViewsTable(c.env.DB);
+  await c.env.DB.prepare(`
+    INSERT INTO arxiv_feed_views (user_id, last_paper_id, last_viewed_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(user_id) DO UPDATE SET
+      last_paper_id = MAX(COALESCE(arxiv_feed_views.last_paper_id, 0), excluded.last_paper_id),
+      last_viewed_at = datetime('now')
+  `).bind(user.id, paperId).run().catch(() => {});
 
   const rawPaper = await c.env.DB.prepare(
     `SELECT p.*, u.name as recommender_name, u.real_name as recommender_real_name, u.role as recommender_role, u.identity as recommender_identity, u.avatar as recommender_avatar
@@ -261,6 +388,7 @@ app.get('/feed', async (c) => {
   const scope = c.req.query('scope') || 'all';
 
   await ensureArxivSeminarIdColumn(c.env.DB);
+  await ensureArxivTranslationColumns(c.env.DB);
   const todayStr = getBeijingDateStr();
 
   // 批量并发查询：将原先 O(N) 的 200+ 次串行网络往返缩减为 1 次并行查询
@@ -386,27 +514,31 @@ app.get('/feed', async (c) => {
     const targetSeminarId = p.effective_seminar_id ? Number(p.effective_seminar_id) : (p.seminar_id ? Number(p.seminar_id) : null);
     const targetSeminarDate = p.seminar_date ? String(p.seminar_date).trim() : null;
     const isSeminarToday = Boolean(targetSeminarId && targetSeminarDate && targetSeminarDate === todayStr);
-    const isTeacherPinned = Boolean(p.is_pinned && recommender.identity === 'teacher');
+    const paperRecommendDate = getBeijingDateFromTimestamp(p.created_at);
+    const isRecommendedToday = Boolean(paperRecommendDate && paperRecommendDate === todayStr);
+    const isTeacherPinned = Boolean(p.is_pinned && recommender.identity === 'teacher' && isRecommendedToday);
     const effectiveIsPinned = isTeacherPinned || isSeminarToday;
 
     const item = {
       id: p.id,
       arxiv_id: p.arxiv_id,
-      title: p.title,
+      title: decodeHtmlEntities(p.title || ''),
       journal: (p.journal || '').trim(),
       source_url: p.source_url || '',
       authors: authorsList,
-      abstract: p.abstract || '',
+      abstract: decodeHtmlEntities(p.abstract || ''),
       primary_category: (p.primary_category || '').trim(),
       published_date: p.published_date || '',
       pdf_url: p.pdf_url || '',
-      recommend_comment: p.recommend_comment || '',
+      recommend_comment: decodeHtmlEntities(p.recommend_comment || ''),
       is_pinned: effectiveIsPinned,
       is_teacher_pinned: isTeacherPinned,
       is_seminar_today: isSeminarToday,
       seminar_id: targetSeminarId,
       seminar_date: targetSeminarDate,
       created_at: p.created_at || '',
+      recommend_date: paperRecommendDate,
+      is_recommended_today: isRecommendedToday,
       visibility: isDirect ? 'direct' : 'public',
       recommender,
       recipients,
@@ -416,15 +548,18 @@ app.get('/feed', async (c) => {
       like_count: likeInfo.count,
       is_liked_by_me: likeInfo.isLiked,
       is_liked: likeInfo.isLiked,
+      title_zh: decodeHtmlEntities(p.title_zh || ''),
+      abstract_zh: decodeHtmlEntities(p.abstract_zh || ''),
+      translated_by_id: p.translated_by_id || null,
+      translated_at: p.translated_at || '',
       comments: commentsMap.get(p.id) || [],
     };
 
     // Visibility permission check
     if (item.visibility === 'direct') {
       const isRecommender = item.recommender.id === user.id;
-      const isAdmin = user.role === 'admin';
       const isRecipient = item.recipients.some((r: any) => r.id === user.id);
-      if (!isRecommender && !isAdmin && !isRecipient) {
+      if (!isRecommender && !isRecipient) {
         continue;
       }
     }
@@ -470,6 +605,103 @@ app.get('/feed', async (c) => {
   return c.json(formattedList);
 });
 
+app.get('/unread-summary', async (c) => {
+  const user = c.get('user');
+  try {
+    await ensureArxivFeedViewsTable(c.env.DB);
+
+    const viewRecord = await c.env.DB.prepare(
+      'SELECT last_paper_id, last_viewed_at FROM arxiv_feed_views WHERE user_id = ?'
+    ).bind(user.id).first<{ last_paper_id: number; last_viewed_at: string }>();
+
+    let list: any[] = [];
+    if (viewRecord && viewRecord.last_paper_id !== null && viewRecord.last_paper_id !== undefined) {
+      // 用户已有查看记录：统计自上次查看后新出现的文献推荐
+      const { results } = await c.env.DB.prepare(
+        `SELECT 
+           p.id,
+           CASE WHEN ra.paper_id IS NOT NULL THEN 1 ELSE 0 END AS is_direct
+         FROM arxiv_papers p
+         LEFT JOIN recommendation_audiences ra ON ra.paper_id = p.id
+         LEFT JOIN recommendation_recipients rr ON rr.paper_id = p.id AND rr.user_id = ?
+         WHERE p.recommended_by_id != ?
+           AND p.id > ?
+           AND (ra.paper_id IS NULL OR rr.user_id IS NOT NULL)`
+      ).bind(user.id, user.id, viewRecord.last_paper_id).all();
+      list = (results || []) as any[];
+    } else {
+      // 尚未有查看记录的新用户：首次统计未读文献
+      const { results } = await c.env.DB.prepare(
+        `SELECT 
+           p.id,
+           CASE WHEN ra.paper_id IS NOT NULL THEN 1 ELSE 0 END AS is_direct
+         FROM arxiv_papers p
+         LEFT JOIN paper_read_marks rm ON rm.paper_id = p.id AND rm.user_id = ?
+         LEFT JOIN recommendation_audiences ra ON ra.paper_id = p.id
+         LEFT JOIN recommendation_recipients rr ON rr.paper_id = p.id AND rr.user_id = ?
+         WHERE p.recommended_by_id != ?
+           AND rm.id IS NULL
+           AND (ra.paper_id IS NULL OR rr.user_id IS NOT NULL)`
+      ).bind(user.id, user.id, user.id).all();
+      list = (results || []) as any[];
+    }
+
+    const unreadCount = list.length;
+    const hasDirect = list.some(r => Number(r.is_direct) === 1);
+
+    return c.json({
+      unread_count: unreadCount,
+      has_direct: hasDirect,
+      last_paper_id: viewRecord?.last_paper_id ?? null
+    });
+  } catch (err: any) {
+    console.error('Error getting unread summary:', err);
+    return c.json({ unread_count: 0, has_direct: false });
+  }
+});
+
+app.post('/mark-viewed', async (c) => {
+  const user = c.get('user');
+  try {
+    await ensureArxivFeedViewsTable(c.env.DB);
+    const maxPaper = await c.env.DB.prepare('SELECT MAX(id) as max_id FROM arxiv_papers').first<{ max_id: number }>();
+    const maxId = maxPaper?.max_id || 0;
+
+    await c.env.DB.prepare(`
+      INSERT INTO arxiv_feed_views (user_id, last_paper_id, last_viewed_at)
+      VALUES (?, ?, datetime('now'))
+      ON CONFLICT(user_id) DO UPDATE SET
+        last_paper_id = excluded.last_paper_id,
+        last_viewed_at = datetime('now')
+    `).bind(user.id, maxId).run();
+
+    return c.json({ success: true, last_paper_id: maxId });
+  } catch (err: any) {
+    console.error('Error marking feed as viewed:', err);
+    return c.json({ success: false, detail: err.message }, 500);
+  }
+});
+
+app.post('/mark-all-read', async (c) => {
+  const user = c.get('user');
+  try {
+    await c.env.DB.prepare(`
+      INSERT OR IGNORE INTO paper_read_marks (paper_id, user_id, created_at)
+      SELECT p.id, ?, datetime('now')
+      FROM arxiv_papers p
+      LEFT JOIN recommendation_audiences ra ON ra.paper_id = p.id
+      LEFT JOIN recommendation_recipients rr ON rr.paper_id = p.id AND rr.user_id = ?
+      WHERE p.recommended_by_id != ?
+        AND (ra.paper_id IS NULL OR rr.user_id IS NOT NULL)
+    `).bind(user.id, user.id, user.id).run();
+
+    return c.json({ success: true });
+  } catch (err: any) {
+    console.error('Error marking all as read:', err);
+    return c.json({ success: false, detail: err.message }, 500);
+  }
+});
+
 app.put('/:id/visibility', async (c) => {
   const user = c.get('user');
   const paperId = parseInt(c.req.param('id'), 10);
@@ -477,8 +709,12 @@ app.put('/:id/visibility', async (c) => {
 
   const paper = await c.env.DB.prepare('SELECT * FROM arxiv_papers WHERE id = ?').bind(paperId).first<any>();
   if (!paper) return c.json({ detail: '未找到该文献' }, 404);
-  if (paper.recommended_by_id !== user.id && user.role !== 'admin') {
-    return c.json({ detail: '只有推荐人本人或管理员可以编辑此推荐' }, 403);
+  const canView = await canUserViewPaper(c.env.DB, paperId, paper.recommended_by_id, user.id);
+  if (!canView) {
+    return c.json({ detail: '未找到该文献' }, 404);
+  }
+  if (paper.recommended_by_id !== user.id) {
+    return c.json({ detail: '只有推荐人本人可以编辑可见范围' }, 403);
   }
 
   // Update recommend_comment if provided in payload
@@ -503,6 +739,16 @@ app.put('/:id/visibility', async (c) => {
     await c.env.DB.prepare('DELETE FROM recommendation_audiences WHERE paper_id = ?').bind(paperId).run();
   }
 
+  // Synchronize library archiving provenance
+  const libSource = await c.env.DB.prepare('SELECT library_id FROM library_recommendation_sources WHERE recommendation_id = ?').bind(paperId).first<{ library_id: number }>();
+  if (libSource) {
+    const userIdsForSource = visibility === 'direct' ? Array.from(new Set([paper.recommended_by_id, ...recipient_ids])) : [];
+    await c.env.DB.prepare(
+      'UPDATE library_recommendation_sources SET is_public = ?, user_ids = ? WHERE recommendation_id = ?'
+    ).bind(visibility === 'direct' ? 0 : 1, JSON.stringify(userIdsForSource), paperId).run();
+    await syncLibraryRecommendationAccess(c.env.DB, libSource.library_id);
+  }
+
   const rawPaper = await c.env.DB.prepare(
     `SELECT p.*, u.name as recommender_name, u.real_name as recommender_real_name, u.role as recommender_role, u.identity as recommender_identity, u.avatar as recommender_avatar
      FROM arxiv_papers p
@@ -521,6 +767,10 @@ app.put('/:id', async (c) => {
 
   const paper = await c.env.DB.prepare('SELECT * FROM arxiv_papers WHERE id = ?').bind(paperId).first<any>();
   if (!paper) return c.json({ detail: '未找到该文献' }, 404);
+  const canView = await canUserViewPaper(c.env.DB, paperId, paper.recommended_by_id, user.id);
+  if (!canView) {
+    return c.json({ detail: '未找到该文献' }, 404);
+  }
   if (paper.recommended_by_id !== user.id && user.role !== 'admin') {
     return c.json({ detail: '只有文献上传者本人或管理员可以编辑文献' }, 403);
   }
@@ -565,6 +815,15 @@ app.post('/:id/like', async (c) => {
   const user = c.get('user');
   const paperId = parseInt(c.req.param('id'), 10);
 
+  const paper = await c.env.DB.prepare('SELECT id, recommended_by_id FROM arxiv_papers WHERE id = ?').bind(paperId).first<any>();
+  if (!paper) {
+    return c.json({ detail: '未找到该文献' }, 404);
+  }
+  const canView = await canUserViewPaper(c.env.DB, paperId, paper.recommended_by_id, user.id);
+  if (!canView) {
+    return c.json({ detail: '未找到该文献' }, 404);
+  }
+
   const existing = await c.env.DB.prepare(
     'SELECT id FROM paper_likes WHERE paper_id = ? AND user_id = ?'
   ).bind(paperId, user.id).first();
@@ -591,6 +850,15 @@ app.post('/:id/read-toggle', async (c) => {
   const user = c.get('user');
   const paperId = parseInt(c.req.param('id'), 10);
 
+  const paper = await c.env.DB.prepare('SELECT id, recommended_by_id FROM arxiv_papers WHERE id = ?').bind(paperId).first<any>();
+  if (!paper) {
+    return c.json({ detail: '未找到该文献' }, 404);
+  }
+  const canView = await canUserViewPaper(c.env.DB, paperId, paper.recommended_by_id, user.id);
+  if (!canView) {
+    return c.json({ detail: '未找到该文献' }, 404);
+  }
+
   const existing = await c.env.DB.prepare(
     'SELECT id FROM paper_read_marks WHERE paper_id = ? AND user_id = ?'
   ).bind(paperId, user.id).first();
@@ -606,6 +874,58 @@ app.post('/:id/read-toggle', async (c) => {
   }
 });
 
+app.post('/:id/translate', async (c) => {
+  const user = c.get('user');
+  const paperId = parseInt(c.req.param('id'), 10);
+  const body = await c.req.json().catch(() => ({}));
+  const title_zh = (body.title_zh || '').trim();
+  const abstract_zh = (body.abstract_zh || '').trim();
+
+  if (!title_zh && !abstract_zh) {
+    return c.json({ detail: '翻译标题或摘要不能为空' }, 400);
+  }
+
+  await ensureArxivTranslationColumns(c.env.DB);
+
+  const paper = await c.env.DB.prepare('SELECT id, arxiv_id, recommended_by_id, title_zh, abstract_zh FROM arxiv_papers WHERE id = ?').bind(paperId).first<any>();
+  if (!paper) {
+    return c.json({ detail: '未找到该文献' }, 404);
+  }
+  const canView = await canUserViewPaper(c.env.DB, paperId, paper.recommended_by_id, user.id);
+  if (!canView) {
+    return c.json({ detail: '未找到该文献' }, 404);
+  }
+
+  const hasExistingTranslation = Boolean((paper.title_zh || '').trim() && (paper.abstract_zh || '').trim());
+  if (hasExistingTranslation && user.role !== 'admin') {
+    return c.json({ detail: '该文献已有团队共享译本，仅管理员可重新翻译' }, 403);
+  }
+
+  const arxivId = (paper.arxiv_id || '').trim();
+  if (arxivId) {
+    await c.env.DB.prepare(
+      `UPDATE arxiv_papers 
+       SET title_zh = ?, abstract_zh = ?, translated_by_id = ?, translated_at = datetime('now')
+       WHERE id = ? OR arxiv_id = ?`
+    ).bind(title_zh, abstract_zh, user.id, paperId, arxivId).run();
+  } else {
+    await c.env.DB.prepare(
+      `UPDATE arxiv_papers 
+       SET title_zh = ?, abstract_zh = ?, translated_by_id = ?, translated_at = datetime('now')
+       WHERE id = ?`
+    ).bind(title_zh, abstract_zh, user.id, paperId).run();
+  }
+
+  return c.json({
+    success: true,
+    paper_id: paperId,
+    title_zh,
+    abstract_zh,
+    translated_by_id: user.id,
+    translated_at: new Date().toISOString()
+  });
+});
+
 app.get('/:id/comments', async (c) => {
   const user = c.get('user');
   const paperId = parseInt(c.req.param('id'), 10);
@@ -616,15 +936,9 @@ app.get('/:id/comments', async (c) => {
     return c.json({ detail: '未找到该文献' }, 404);
   }
 
-  // 检查定向可见范围权限（定向推荐文献需为推荐人、管理员或接收人）
-  const directAudience = await c.env.DB.prepare('SELECT paper_id FROM recommendation_audiences WHERE paper_id = ?').bind(paperId).first();
-  if (directAudience) {
-    const isOwner = paper.recommended_by_id === user.id;
-    const isAdmin = user.role === 'admin';
-    const isRecipient = await c.env.DB.prepare('SELECT id FROM recommendation_recipients WHERE paper_id = ? AND user_id = ?').bind(paperId, user.id).first();
-    if (!isOwner && !isAdmin && !isRecipient) {
-      return c.json({ detail: '无权查看该文献的讨论' }, 403);
-    }
+  const canView = await canUserViewPaper(c.env.DB, paperId, paper.recommended_by_id, user.id);
+  if (!canView) {
+    return c.json({ detail: '未找到该文献' }, 404);
   }
 
   let query = `
@@ -684,8 +998,12 @@ app.post('/:id/comments', async (c) => {
     return c.json({ detail: '讨论内容过长，请精简在 500 字以内' }, 400);
   }
 
-  const paper = await c.env.DB.prepare('SELECT id FROM arxiv_papers WHERE id = ?').bind(paperId).first();
+  const paper = await c.env.DB.prepare('SELECT id, recommended_by_id FROM arxiv_papers WHERE id = ?').bind(paperId).first<any>();
   if (!paper) {
+    return c.json({ detail: '未找到该文献' }, 404);
+  }
+  const canView = await canUserViewPaper(c.env.DB, paperId, paper.recommended_by_id, user.id);
+  if (!canView) {
     return c.json({ detail: '未找到该文献' }, 404);
   }
 
@@ -721,6 +1039,14 @@ app.delete('/comments/:commentId', async (c) => {
     return c.json({ detail: '未找到该讨论留言' }, 404);
   }
 
+  const paper = await c.env.DB.prepare('SELECT id, recommended_by_id FROM arxiv_papers WHERE id = ?').bind(comment.paper_id).first<any>();
+  if (paper) {
+    const canView = await canUserViewPaper(c.env.DB, paper.id, paper.recommended_by_id, user.id);
+    if (!canView) {
+      return c.json({ detail: '未找到该讨论留言' }, 404);
+    }
+  }
+
   if (comment.user_id !== user.id && user.role !== 'admin') {
     return c.json({ detail: '无权删除他人的讨论留言' }, 403);
   }
@@ -733,13 +1059,26 @@ app.delete('/:id', async (c) => {
   const user = c.get('user');
   const paperId = parseInt(c.req.param('id'), 10);
 
-  const paper = await c.env.DB.prepare('SELECT * FROM arxiv_papers WHERE id = ?').bind(paperId).first<{ recommended_by_id: number }>();
+  const paper = await c.env.DB.prepare('SELECT * FROM arxiv_papers WHERE id = ?').bind(paperId).first<{ id: number; recommended_by_id: number }>();
   if (!paper) return c.json({ detail: '文献不存在' }, 404);
 
-  if (paper.recommended_by_id !== user.id && user.role !== 'admin') {
-    return c.json({ detail: '仅推荐人或管理员可以删除推荐' }, 403);
+  const canView = await canUserViewPaper(c.env.DB, paperId, paper.recommended_by_id, user.id);
+  if (!canView) {
+    return c.json({ detail: '文献不存在' }, 404);
   }
 
+  const directAudience = await c.env.DB.prepare('SELECT paper_id FROM recommendation_audiences WHERE paper_id = ?').bind(paperId).first();
+  if (directAudience) {
+    if (paper.recommended_by_id !== user.id) {
+      return c.json({ detail: '仅推荐人本人可以删除定向推荐' }, 403);
+    }
+  } else {
+    if (paper.recommended_by_id !== user.id && user.role !== 'admin') {
+      return c.json({ detail: '仅推荐人或管理员可以删除推荐' }, 403);
+    }
+  }
+
+  const libSource = await c.env.DB.prepare('SELECT library_id FROM library_recommendation_sources WHERE recommendation_id = ?').bind(paperId).first<{ library_id: number }>();
   await c.env.DB.prepare('DELETE FROM paper_comments WHERE paper_id = ?').bind(paperId).run();
   await c.env.DB.prepare('DELETE FROM paper_likes WHERE paper_id = ?').bind(paperId).run();
   await c.env.DB.prepare('DELETE FROM paper_read_marks WHERE paper_id = ?').bind(paperId).run();
@@ -748,7 +1087,51 @@ app.delete('/:id', async (c) => {
   await c.env.DB.prepare('DELETE FROM library_recommendation_sources WHERE recommendation_id = ?').bind(paperId).run();
   await c.env.DB.prepare('DELETE FROM arxiv_papers WHERE id = ?').bind(paperId).run();
 
+  if (libSource) {
+    await syncLibraryRecommendationAccess(c.env.DB, libSource.library_id);
+  }
+
   return c.json({ message: '推荐文献已成功删除' });
+});
+
+app.get('/proxy-markdown/:id', async (c) => {
+  const rawId = c.req.param('id');
+  const cleanId = extractArxivId(rawId) || rawId.trim();
+  try {
+    const res = await fetch(`https://www.alphaxiv.org/abs/${cleanId}.md`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LabHub/1.0)' }
+    });
+    if (res.ok) {
+      const text = await res.text();
+      return c.text(text, 200, {
+        'Content-Type': 'text/markdown; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+    }
+    return c.json({ error: `alphaXiv returned ${res.status}` }, res.status as any);
+  } catch (e: any) {
+    return c.json({ error: e.message || 'Failed to fetch markdown' }, 502);
+  }
+});
+
+app.get('/proxy-pdf/:id', async (c) => {
+  const rawId = c.req.param('id');
+  const cleanId = extractArxivId(rawId) || rawId.trim();
+  try {
+    const res = await fetch(`https://arxiv.org/pdf/${cleanId}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LabHub/1.0)' }
+    });
+    if (res.ok) {
+      const buf = await res.arrayBuffer();
+      return c.body(buf, 200, {
+        'Content-Type': 'application/pdf',
+        'Access-Control-Allow-Origin': '*'
+      });
+    }
+    return c.json({ error: `arXiv returned ${res.status}` }, res.status as any);
+  } catch (e: any) {
+    return c.json({ error: e.message || 'Failed to fetch PDF' }, 502);
+  }
 });
 
 export default app;

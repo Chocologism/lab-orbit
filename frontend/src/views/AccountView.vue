@@ -1,422 +1,17 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { authApi, accountApi } from '../api/client'
+import { authApi, accountApi, zoteroApi } from '../api/client'
 import UserAvatar from '../components/UserAvatar.vue'
 import { getMemberPresence, presenceNow } from '../composables/usePresence'
 import LoadingState from '../components/LoadingState.vue'
 import AppIcon from '../components/AppIcon.vue'
 import BaseDialog from '../components/BaseDialog.vue'
 import ThinHoundCheckbox from '../components/ThinHoundCheckbox.vue'
+import ZoteroCollectionTree from '../components/ZoteroCollectionTree.vue'
 import { notify } from '../composables/feedback'
-import { useThemeStyle } from '../composables/useThemeStyle'
-import { useCustomFont } from '../composables/useCustomFont'
 import { useAdminMode, applyViewMode } from '../composables/useAdminMode'
-import {
-  saveLocalBackground,
-  getLocalBackgroundMeta,
-  removeLocalBackground
-} from '../utils/localBgStorage'
-import {
-  saveLocalFont,
-  getLocalFontMeta,
-  removeLocalFont,
-  removeAllLocalFonts,
-  copyLocalFont,
-  getFontMode,
-  setFontMode
-} from '../utils/localFontStorage'
-import { useTutorial } from '../composables/useTutorial'
-import { useSiteConfig } from '../composables/useSiteConfig'
-import { systemApi } from '../api/client'
 
-const { openTutorial } = useTutorial()
-const { siteConfig, updateLocalConfig } = useSiteConfig()
-
-const systemConfig = reactive({
-  lab_name: '',
-  lab_short_name: 'LabOrbit',
-  site_slogan: '',
-  institution: '',
-  default_location: '',
-  ai_system_prompt: '',
-})
-const systemConfigLoading = ref(false)
-const systemConfigSaving = ref(false)
-
-async function loadSystemConfig() {
-  systemConfigLoading.value = true
-  try {
-    const res = await systemApi.getSettings()
-    if (res) {
-      systemConfig.lab_name = res.lab_name || ''
-      systemConfig.lab_short_name = res.lab_short_name || 'LabOrbit'
-      systemConfig.site_slogan = res.site_slogan || ''
-      systemConfig.institution = res.institution || ''
-      systemConfig.default_location = res.default_location || ''
-      systemConfig.ai_system_prompt = res.ai_system_prompt || ''
-    }
-  } catch (err) {
-    console.warn('获取系统全站配置失败:', err)
-  } finally {
-    systemConfigLoading.value = false
-  }
-}
-
-async function saveSystemConfig() {
-  systemConfigSaving.value = true
-  try {
-    await systemApi.updateSettings(systemConfig)
-    updateLocalConfig(systemConfig)
-    notify('课题组全站配置已成功更新')
-  } catch (err) {
-    notify(err.message || '更新设置失败', 'error')
-  } finally {
-    systemConfigSaving.value = false
-  }
-}
-
-const {
-  currentColorScheme,
-  currentBgType,
-  colorSchemes,
-  bgOptions,
-  customColorScheme,
-  customPresetTemplates,
-  setColorScheme,
-  setBgType,
-  saveCustomColorScheme,
-  deriveThemePalette,
-  applyPreviewPaletteToDOM,
-  applyThemeToDOM
-} = useThemeStyle()
-
-function handleColorSchemeSelect(scheme) {
-  if (currentColorScheme.value === scheme.id) return
-  setColorScheme(scheme.id)
-  notify(`已切换为「${scheme.name}」配色`)
-}
-
-const showCustomThemeModal = ref(false)
-
-const themeSnapshot = reactive({
-  scheme: 'classic-cyan',
-  customScheme: null,
-  isSaved: false
-})
-
-const customThemeForm = reactive({
-  name: customColorScheme.value?.name || '自定义配色',
-  primaryColor: customColorScheme.value?.primaryColor || '#38bdf8',
-  baseColor: customColorScheme.value?.baseColor || '#071326',
-  panelColor: customColorScheme.value?.panelHex || '#0d203d',
-  autoDerive: customColorScheme.value?.autoDerive !== false
-})
-
-function isValidHex(hex) {
-  return typeof hex === 'string' && /^#[0-9a-fA-F]{6}$/.test(hex.trim())
-}
-
-const previewPalette = computed(() => {
-  return deriveThemePalette(
-    isValidHex(customThemeForm.primaryColor) ? customThemeForm.primaryColor : '#38bdf8',
-    isValidHex(customThemeForm.baseColor) ? customThemeForm.baseColor : '#071326',
-    customThemeForm.autoDerive ? null : (isValidHex(customThemeForm.panelColor) ? customThemeForm.panelColor : null)
-  )
-})
-
-function openCustomThemeModal() {
-  themeSnapshot.scheme = currentColorScheme.value
-  themeSnapshot.customScheme = customColorScheme.value ? { ...customColorScheme.value } : null
-  themeSnapshot.isSaved = false
-
-  customThemeForm.name = customColorScheme.value?.name || '自定义配色'
-  customThemeForm.primaryColor = customColorScheme.value?.primaryColor || '#38bdf8'
-  customThemeForm.baseColor = customColorScheme.value?.baseColor || '#071326'
-  customThemeForm.panelColor = customColorScheme.value?.panelHex || '#0d203d'
-  customThemeForm.autoDerive = customColorScheme.value?.autoDerive !== false
-  showCustomThemeModal.value = true
-
-  // 立即将当前预览配色广播应用到全局 DOM，实现边框、卡片、侧边栏全站同步预览
-  if (previewPalette.value) {
-    applyPreviewPaletteToDOM(previewPalette.value)
-  }
-}
-
-function closeCustomThemeModal() {
-  if (!themeSnapshot.isSaved) {
-    // 未保存直接关闭，回滚至打开前的方案快照
-    if (themeSnapshot.scheme === 'custom' && themeSnapshot.customScheme) {
-      saveCustomColorScheme(themeSnapshot.customScheme)
-    }
-    applyThemeToDOM(themeSnapshot.scheme, currentBgType.value)
-  }
-  showCustomThemeModal.value = false
-}
-
-function applyPresetTemplate(tpl) {
-  customThemeForm.name = tpl.name
-  customThemeForm.primaryColor = tpl.primaryColor
-  customThemeForm.baseColor = tpl.baseColor
-  customThemeForm.panelColor = tpl.panelHex || '#0d203d'
-  customThemeForm.autoDerive = true
-}
-
-// 弹窗打开期间，表单任意颜色变动或模板切换均实时同步全局 DOM 变量
-watch(previewPalette, (newVal) => {
-  if (showCustomThemeModal.value && newVal) {
-    applyPreviewPaletteToDOM(newVal)
-  }
-})
-
-const previewDialogStyle = computed(() => {
-  if (!previewPalette.value) return {}
-  const p = previewPalette.value
-  return {
-    '--panel-solid': p.panelHex,
-    '--panel': p.panelColor,
-    '--surface': p.surfaceColor,
-    '--line': p.lineColor,
-    '--accent': p.primaryColor,
-    '--accent-strong': p.accentStrong,
-    '--accent-ink': p.accentInk,
-    '--focus': p.primaryColor,
-    '--raised': p.raised,
-    '--glass': p.glass,
-    '--bg': p.baseColor,
-    backgroundColor: `${p.panelHex} !important`,
-    borderColor: `${p.lineColor} !important`,
-    boxShadow: `0 28px 80px rgba(0, 0, 0, 0.7), 0 0 28px ${p.lineColor}`
-  }
-})
-
-watch(() => customThemeForm.autoDerive, (val) => {
-  if (!val && (!customThemeForm.panelColor || !isValidHex(customThemeForm.panelColor))) {
-    customThemeForm.panelColor = previewPalette.value?.panelHex || '#0d203d'
-  }
-})
-
-function handleSelectCustomScheme() {
-  if (currentColorScheme.value === 'custom') {
-    openCustomThemeModal()
-    return
-  }
-  setColorScheme('custom')
-  notify(`已切换为「${customColorScheme.value?.name || '自定义'}」配色`)
-}
-
-function handleSaveAndApplyCustomTheme() {
-  const finalPrimary = customThemeForm.primaryColor.trim()
-  const finalBase = customThemeForm.baseColor.trim()
-  if (!isValidHex(finalPrimary) || !isValidHex(finalBase)) {
-    notify('请输入有效的 16 进制颜色代码（如 #38bdf8）')
-    return
-  }
-  if (!customThemeForm.autoDerive && !isValidHex(customThemeForm.panelColor.trim())) {
-    notify('请输入有效的面板色 16 进制代码（如 #0d203d）')
-    return
-  }
-
-  const ok = saveCustomColorScheme({
-    name: customThemeForm.name.trim() || '自定义配色',
-    primaryColor: finalPrimary,
-    baseColor: finalBase,
-    panelColor: customThemeForm.autoDerive ? null : customThemeForm.panelColor.trim(),
-    panelHex: customThemeForm.autoDerive ? previewPalette.value.panelHex : customThemeForm.panelColor.trim(),
-    autoDerive: customThemeForm.autoDerive
-  })
-
-  if (ok) {
-    themeSnapshot.isSaved = true
-    setColorScheme('custom')
-    applyThemeToDOM('custom', currentBgType.value)
-    notify(`自定义配色「${customThemeForm.name.trim() || '自定义配色'}」已保存并应用`)
-    showCustomThemeModal.value = false
-  } else {
-    notify('保存配色方案失败')
-  }
-}
-
-function handleResetCustomTheme() {
-  const defaultTpl = customPresetTemplates?.[0]
-  if (defaultTpl) {
-    applyPresetTemplate(defaultTpl)
-  }
-}
-
-function handleBgTypeSelect(bg) {
-  if (currentBgType.value === bg.id) {
-    if (bg.id === 'custom-local' && !localBgMeta.value) {
-      triggerLocalFileInput()
-    }
-    return
-  }
-  setBgType(bg.id)
-  notify(`已切换为「${bg.name}」背景`)
-  if (bg.id === 'custom-local' && !localBgMeta.value) {
-    triggerLocalFileInput()
-  }
-}
-
-const localBgMeta = ref(null)
-const localBgUploading = ref(false)
-const localFileInputRef = ref(null)
-
-async function loadLocalBgInfo() {
-  localBgMeta.value = await getLocalBackgroundMeta()
-}
-
-function triggerLocalFileInput() {
-  localFileInputRef.value?.click()
-}
-
-function formatFileSize(bytes) {
-  if (!bytes || bytes <= 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i]
-}
-
-async function onLocalFileSelected(e) {
-  const file = e.target.files?.[0]
-  if (!file) return
-  localBgUploading.value = true
-  try {
-    const meta = await saveLocalBackground(file)
-    localBgMeta.value = meta
-    setBgType('custom-local')
-    notify(`本地${meta.type === 'video' ? '视频' : '图片'}背景「${meta.name}」已加载`)
-  } catch (err) {
-    notify(err.message || '加载本地文件失败', 'error')
-  } finally {
-    localBgUploading.value = false
-    if (e.target) e.target.value = ''
-  }
-}
-
-async function onRemoveLocalBg() {
-  if (!confirm('确定要清除已保存的本地背景媒体吗？')) return
-  await removeLocalBackground()
-  localBgMeta.value = null
-  setBgType('clouds-static')
-  notify('已清除本地背景，恢复为云山日光背景')
-}
-
-const {
-  currentFontInfo,
-  fontConfig,
-  isFontLoading,
-  clearCustomFont
-} = useCustomFont()
-
-const currentFontMode = ref(getFontMode())
-const unifiedFontMeta = ref(null)
-const enFontMeta = ref(null)
-const zhFontMeta = ref(null)
-const targetUploadSlot = ref('unified')
-const localFontUploading = ref(false)
-const localFontInputRef = ref(null)
-
-const hasAnyCustomFont = computed(() => {
-  if (currentFontMode.value === 'unified') {
-    return Boolean(unifiedFontMeta.value)
-  }
-  return Boolean(enFontMeta.value || zhFontMeta.value)
-})
-
-async function loadLocalFontInfo() {
-  currentFontMode.value = getFontMode()
-  const [unified, en, zh] = await Promise.all([
-    getLocalFontMeta('unified'),
-    getLocalFontMeta('en'),
-    getLocalFontMeta('zh')
-  ])
-  unifiedFontMeta.value = unified
-  enFontMeta.value = en
-  zhFontMeta.value = zh
-}
-
-function switchFontMode(mode) {
-  setFontMode(mode)
-  currentFontMode.value = mode
-  notify(mode === 'split' ? '已切换为中英分离模式，可分别配置西文与中文字体' : '已切换为统一模式，中英文采用同一字体')
-}
-
-function triggerSlotUpload(slot = 'unified') {
-  targetUploadSlot.value = slot
-  localFontInputRef.value?.click()
-}
-
-async function onLocalFontSelected(e) {
-  const file = e.target.files?.[0]
-  if (!file) return
-  localFontUploading.value = true
-  const slot = targetUploadSlot.value || 'unified'
-  try {
-    const meta = await saveLocalFont(file, slot)
-    if (slot === 'unified') unifiedFontMeta.value = meta
-    else if (slot === 'en') enFontMeta.value = meta
-    else if (slot === 'zh') zhFontMeta.value = meta
-    const slotName = slot === 'en' ? '英文字体' : (slot === 'zh' ? '中文字体' : '统一字体')
-    notify(`本地${slotName}「${meta.name}」已载入并即刻生效`)
-  } catch (err) {
-    notify(err.message || '载入本地字体失败', 'error')
-  } finally {
-    localFontUploading.value = false
-    if (e.target) e.target.value = ''
-  }
-}
-
-async function onCopyFont(fromSlot, toSlot) {
-  localFontUploading.value = true
-  try {
-    const ok = await copyLocalFont(fromSlot, toSlot)
-    if (ok) {
-      const meta = await getLocalFontMeta(toSlot)
-      if (toSlot === 'en') enFontMeta.value = meta
-      else if (toSlot === 'zh') zhFontMeta.value = meta
-      else if (toSlot === 'unified') unifiedFontMeta.value = meta
-      notify('已成功同步为相同字体文件！')
-    }
-  } catch (err) {
-    notify(err.message || '同步字体失败', 'error')
-  } finally {
-    localFontUploading.value = false
-  }
-}
-
-async function onRemoveSlotFont(slot) {
-  await removeLocalFont(slot)
-  if (slot === 'unified') unifiedFontMeta.value = null
-  else if (slot === 'en') enFontMeta.value = null
-  else if (slot === 'zh') zhFontMeta.value = null
-  const slotName = slot === 'en' ? '英文字体' : (slot === 'zh' ? '中文字体' : '统一字体')
-  notify(`已清除${slotName}，恢复系统默认`)
-}
-
-async function onRestoreAllDefaultFonts() {
-  if (hasAnyCustomFont.value) {
-    if (!confirm('确定要恢复系统默认字体方案并清除所有本地自定义字体吗？')) return
-  }
-  await removeAllLocalFonts()
-  clearCustomFont()
-  unifiedFontMeta.value = null
-  enFontMeta.value = null
-  zhFontMeta.value = null
-  notify('已恢复为系统默认字体方案')
-}
-
-function getInitialUser() {
-  try {
-    const raw = localStorage.getItem('labhub_user')
-    return raw ? JSON.parse(raw) : null
-  } catch {
-    return null
-  }
-}
-
-const initialUser = getInitialUser()
-const user = ref(initialUser), loading = ref(!initialUser), error = ref(''), busy = ref(false), members = ref([]), permissionBusy = ref(false)
+const user = ref(null), loading = ref(true), error = ref(''), busy = ref(false), members = ref([]), permissionBusy = ref(false)
 
 const { currentMode: adminViewMode, isAdminMode, isUserMode, setAdminMode: saveAdminMode } = useAdminMode()
 
@@ -452,49 +47,12 @@ async function handleSwitchAdminMode(targetMode) {
   }
 }
 
-const realName = ref(initialUser?.real_name || initialUser?.name || ''), nickname = ref(initialUser?.nickname || ''), email = ref(initialUser?.email || ''), identity = ref(initialUser?.identity || 'student'), currentPassword = ref(''), newPassword = ref(''), confirmPassword = ref('')
+const realName = ref(''), nickname = ref(''), email = ref(''), identity = ref('student'), currentPassword = ref(''), newPassword = ref(''), confirmPassword = ref('')
 // 邀请码管理
 const inviteCodes = ref([]), inviteCodeBusy = ref(false)
 const newCode = ref(''), newNote = ref(''), newInviteRole = ref('student'), newInviteIdentity = ref('student')
-function updated(data) {
-  user.value = data
-  try {
-    localStorage.setItem('labhub_user', JSON.stringify(data))
-  } catch {}
-  window.dispatchEvent(new Event('account-updated'))
-}
-async function load() {
-  error.value = ''
-  if (!user.value) {
-    loading.value = true
-  }
-  try {
-    const data = await authApi.getMe()
-    user.value = data
-    try {
-      localStorage.setItem('labhub_user', JSON.stringify(data))
-    } catch {}
-    realName.value = data.real_name || data.name || ''
-    nickname.value = data.nickname || ''
-    email.value = data.email || ''
-    identity.value = data.identity || 'student'
-    if (data.role === 'admin') {
-      members.value = await authApi.getMembers()
-      inviteCodes.value = await authApi.getInviteCodes()
-      loadSystemConfig()
-    }
-  } catch(e) {
-    error.value = e.message
-    if (!user.value) {
-      const token = localStorage.getItem('labhub_token')
-      if (!token && !window.location.pathname.includes('/login')) {
-        window.location.href = '/login'
-      }
-    }
-  } finally {
-    loading.value = false
-  }
-}
+function updated(data) { user.value = data; localStorage.setItem('labhub_user', JSON.stringify(data)); localStorage.setItem('cssbd_user', JSON.stringify(data)); window.dispatchEvent(new Event('account-updated')) }
+async function load() { error.value = ''; loading.value = true; try { const data = await authApi.getMe(); user.value = data; realName.value = data.real_name || data.name; nickname.value = data.nickname; email.value = data.email; identity.value = data.identity || 'student'; if (data.role === 'admin') { members.value = await authApi.getMembers(); inviteCodes.value = await authApi.getInviteCodes() } } catch(e) { error.value = e.message } finally { loading.value = false } }
 const updatingSeminarMemberId = ref(null)
 
 async function toggleSeminarPermission(member) {
@@ -559,7 +117,7 @@ async function saveCredentials() {
   busy.value = true; error.value = ''
   try {
     const data = await accountApi.credentials({ current_password: currentPassword.value, ...(email.value.trim().toLowerCase() !== user.value.email ? {email: email.value} : {}), ...(newPassword.value ? {new_password: newPassword.value} : {}) })
-    localStorage.setItem('labhub_token', data.access_token); updated(data.user)
+    localStorage.setItem('labhub_token', data.access_token); localStorage.setItem('cssbd_token', data.access_token); updated(data.user)
     currentPassword.value = ''; newPassword.value = ''; confirmPassword.value = ''; notify('账户已更新，其他登录会话已失效')
   } catch(e) { error.value = e.message } finally { busy.value = false }
 }
@@ -622,12 +180,129 @@ async function uploadAvatar(event) {
   }
 }
 
+// Zotero 文献库直连设置
+const zoteroConfig = ref({
+  configured: false,
+  user_id: '',
+  default_collection: '',
+  has_api_key: false
+})
+const zoteroForm = reactive({
+  user_id: '',
+  api_key: '',
+  default_collection: ''
+})
+const zoteroCollections = ref([])
+const zoteroLoading = ref(false)
+const zoteroSaving = ref(false)
+const zoteroClearing = ref(false)
+const zoteroError = ref('')
+
+async function loadZoteroConfig() {
+  zoteroLoading.value = true
+  zoteroError.value = ''
+  try {
+    const data = await zoteroApi.getConfig()
+    if (data) {
+      zoteroConfig.value = data
+      zoteroForm.user_id = data.user_id || ''
+      zoteroForm.default_collection = data.default_collection || ''
+      if (data.configured) {
+        await loadZoteroCollections()
+      }
+    }
+  } catch (err) {
+    // 静默降级
+  } finally {
+    zoteroLoading.value = false
+  }
+}
+
+async function loadZoteroCollections() {
+  try {
+    const collections = await zoteroApi.getCollections()
+    zoteroCollections.value = Array.isArray(collections) ? collections : []
+  } catch (err) {
+    console.warn('获取 Zotero 目录失败:', err)
+  }
+}
+
+async function handleSaveZotero() {
+  if (!zoteroForm.user_id || !zoteroForm.user_id.trim()) {
+    notify('请输入 Zotero User ID', 'warning')
+    return
+  }
+  if (!zoteroConfig.value.has_api_key && (!zoteroForm.api_key || !zoteroForm.api_key.trim())) {
+    notify('首次绑定请输入 Zotero API Key', 'warning')
+    return
+  }
+
+  zoteroSaving.value = true
+  zoteroError.value = ''
+  try {
+    const res = await zoteroApi.saveConfig({
+      user_id: zoteroForm.user_id.trim(),
+      api_key: zoteroForm.api_key ? zoteroForm.api_key.trim() : undefined,
+      default_collection: zoteroForm.default_collection || ''
+    })
+    zoteroConfig.value = {
+      configured: true,
+      user_id: res.user_id,
+      default_collection: res.default_collection,
+      has_api_key: true
+    }
+    zoteroForm.api_key = ''
+    notify('Zotero 直连配置验证成功并已保存')
+    await loadZoteroCollections()
+  } catch (err) {
+    zoteroError.value = err.message || 'Zotero 凭证验证失败，请检查 User ID 与 API Key 权限'
+    notify(zoteroError.value, 'error')
+  } finally {
+    zoteroSaving.value = false
+  }
+}
+
+async function handleRefreshZoteroCollections() {
+  if (!zoteroConfig.value.configured) return
+  zoteroLoading.value = true
+  try {
+    await loadZoteroCollections()
+    notify('已成功刷新 Zotero 文献分类目录')
+  } catch (err) {
+    notify(err.message || '刷新分类目录失败', 'error')
+  } finally {
+    zoteroLoading.value = false
+  }
+}
+
+async function handleClearZotero() {
+  if (!confirm('确定要清除已绑定的 Zotero API 配置吗？解绑后将恢复为本地 RIS 导出模式。')) return
+  zoteroClearing.value = true
+  try {
+    await zoteroApi.clearConfig()
+    zoteroConfig.value = {
+      configured: false,
+      user_id: '',
+      default_collection: '',
+      has_api_key: false
+    }
+    zoteroForm.user_id = ''
+    zoteroForm.api_key = ''
+    zoteroForm.default_collection = ''
+    zoteroCollections.value = []
+    notify('已成功解绑 Zotero 账户')
+  } catch (err) {
+    notify(err.message || '清除配置失败', 'error')
+  } finally {
+    zoteroClearing.value = false
+  }
+}
+
 let memberPollTimer = null
 
 onMounted(() => {
   load()
-  loadLocalBgInfo()
-  loadLocalFontInfo()
+  loadZoteroConfig()
 
   memberPollTimer = setInterval(async () => {
     if (user.value?.role === 'admin' && typeof document !== 'undefined' && document.visibilityState === 'visible') {
@@ -1126,13 +801,6 @@ async function deleteMember(member) {
   min-width: 0;
 }
 
-button.danger {
-  color: var(--danger, #e53e3e) !important;
-}
-
-button.danger:hover {
-  background: rgba(229,62,62,0.08) !important;
-}
 
 .account-shortcuts-grid {
   display: grid;
@@ -1177,6 +845,12 @@ button.danger:hover {
 }
 
 .shortcut-icon-box.cyan {
+  background: rgba(184, 155, 248, 0.14);
+  color: var(--accent);
+  border: 1px solid rgba(184, 155, 248, 0.25);
+}
+
+.shortcut-icon-box.purple {
   background: rgba(184, 155, 248, 0.14);
   color: var(--accent);
   border: 1px solid rgba(184, 155, 248, 0.25);
@@ -1710,6 +1384,208 @@ button.danger:hover {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.bg-dim-control-card {
+  margin-top: 20px;
+  padding: 18px 22px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.bg-dim-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.bg-dim-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bg-dim-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-bright, #ffffff);
+}
+
+.bg-dim-value-badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(var(--primary-rgb, 10, 194, 210), 0.15);
+  border: 1px solid rgba(var(--primary-rgb, 10, 194, 210), 0.35);
+  color: var(--primary, #0ac2d2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bg-dim-desc {
+  font-size: 12px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.bg-dim-reset-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  align-self: flex-start;
+}
+
+.bg-dim-slider-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+
+.dim-tick-label {
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* curly-chipmunk-73 style custom range slider */
+.bg-dim-slider {
+  --base: var(--accent, var(--primary, #0ac2d2));
+  --light: color-mix(in sRGB, var(--base) 65%, #fff);
+  --lighter: color-mix(in sRGB, var(--base) 25%, #ffffff);
+  --dark: color-mix(in sRGB, var(--base) 90%, #000);
+  --transparent: color-mix(in sRGB, var(--base) 0%, transparent);
+
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  font-size: 13px;
+  flex: 1;
+  width: 100%;
+  height: 26px;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 4px solid #ffffff;
+  border-radius: 9999px;
+  box-shadow:
+    0 0 12px rgba(0, 0, 0, 0.4),
+    0 2px 6px rgba(0, 0, 0, 0.25),
+    inset 0 1px 2px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  outline: none;
+  box-sizing: border-box;
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+
+  /* Bulletproof filled track using CSS gradients driven by --val */
+  background:
+    /* Top horizontal glossy white reflection bar along the filled liquid */
+    linear-gradient(var(--light), var(--light)) 14px 2px / calc(max(0%, var(--val) - 24px)) 2.5px no-repeat,
+    /* Left specular light dot */
+    radial-gradient(circle at 8px 5px, var(--light) 2px, transparent 2.5px) no-repeat,
+    /* Filled liquid base color from 0% to --val, with bottom dark shade */
+    linear-gradient(
+      to bottom,
+      var(--base) 0%,
+      var(--base) 70%,
+      var(--dark) 85%
+    ) 0 0 / var(--val) 100% no-repeat,
+    /* Unfilled portion from --val to 100% in pastel softer tone */
+    linear-gradient(
+      to bottom,
+      var(--lighter) 0%,
+      var(--lighter) 75%,
+      color-mix(in sRGB, var(--lighter) 85%, #000) 100%
+    );
+}
+
+.bg-dim-slider:hover,
+.bg-dim-slider:focus-visible {
+  border-color: #ffffff;
+  box-shadow:
+    0 0 16px rgba(0, 0, 0, 0.5),
+    0 3px 8px rgba(0, 0, 0, 0.3),
+    0 0 14px rgba(var(--primary-rgb, 10, 194, 210), 0.5);
+}
+
+/* WebKit Track: transparent so the styled input capsule background shines through */
+.bg-dim-slider::-webkit-slider-runnable-track {
+  -webkit-appearance: none;
+  height: 100%;
+  background: transparent;
+  border: none;
+}
+
+/* WebKit Thumb: 3D glossy bubble button */
+.bg-dim-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  width: 18px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 5px 4px, #ffffff 2px, transparent 2.5px),
+    radial-gradient(circle at 6px 5px, var(--light) 3px, transparent 3.5px),
+    linear-gradient(135deg, var(--light), var(--base));
+  box-shadow:
+    inset -1.5px -1.5px 3px rgba(0, 0, 0, 0.4),
+    inset 1.5px 1.5px 3px rgba(255, 255, 255, 0.8),
+    0 1px 4px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  border: 1.5px solid rgba(255, 255, 255, 0.9);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  margin-top: 0px;
+}
+
+.bg-dim-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.12);
+  box-shadow:
+    inset -1.5px -1.5px 3px rgba(0, 0, 0, 0.4),
+    inset 1.5px 1.5px 3px rgba(255, 255, 255, 0.9),
+    0 0 10px var(--light),
+    0 2px 6px rgba(0, 0, 0, 0.6);
+}
+
+/* Firefox Track: transparent */
+.bg-dim-slider::-moz-range-track {
+  height: 100%;
+  background: transparent;
+  border: none;
+}
+
+/* Firefox Thumb: 3D glossy bubble button */
+.bg-dim-slider::-moz-range-thumb {
+  height: 18px;
+  width: 18px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 5px 4px, #ffffff 2px, transparent 2.5px),
+    radial-gradient(circle at 6px 5px, var(--light) 3px, transparent 3.5px),
+    linear-gradient(135deg, var(--light), var(--base));
+  box-shadow:
+    inset -1.5px -1.5px 3px rgba(0, 0, 0, 0.4),
+    inset 1.5px 1.5px 3px rgba(255, 255, 255, 0.8),
+    0 1px 4px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  border: 1.5px solid rgba(255, 255, 255, 0.9);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.bg-dim-slider::-moz-range-thumb:hover {
+  transform: scale(1.12);
+  box-shadow:
+    inset -1.5px -1.5px 3px rgba(0, 0, 0, 0.4),
+    inset 1.5px 1.5px 3px rgba(255, 255, 255, 0.9),
+    0 0 10px var(--light),
+    0 2px 6px rgba(0, 0, 0, 0.6);
 }
 
 .local-bg-control-box {
@@ -2395,518 +2271,199 @@ button.danger:hover {
   gap: 10px;
   line-height: 1.5;
 }
+
+.account-nav-anchors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.anchor-pill {
+  min-height: 28px;
+  padding: 3px 12px;
+  font-size: 12px;
+  border-radius: 999px;
+  text-decoration: none;
+  color: var(--soft);
+}
+
+.anchor-pill:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.anchor-pill.highlight-glass {
+  border-color: rgba(184, 155, 248, 0.4);
+  color: var(--accent);
+  background: var(--glass);
+}
+
+.zotero-account-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.zotero-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.zotero-status-badge.is-connected {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.35);
+  color: #4ade80;
+}
+
+.zotero-form-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field-hint {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.field-hint a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.full-width-field {
+  width: 100%;
+}
+
+.zotero-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.danger-text {
+  color: #f87171 !important;
+}
+
+.danger-text:hover {
+  border-color: #ef4444 !important;
+}
 </style>
-<template><div class="personal-page account-page"><header class="page-heading"><div><p class="eyebrow">YOUR ACCOUNT</p><h1>账户设置</h1></div></header><LoadingState v-if="loading" /><p v-if="error" class="error-banner" role="alert">{{ error }} <button v-if="!user" class="button secondary" @click="load">重试</button></p><template v-if="user && !loading">
+<template><div class="personal-page account-page"><header class="page-heading"><div><p class="eyebrow">YOUR ACCOUNT</p><h1>账户设置</h1></div><div class="account-nav-anchors"><a href="#section-profile" class="button secondary small anchor-pill">个人资料</a><a href="#section-security" class="button secondary small anchor-pill">邮箱密码</a><a href="#section-zotero" class="button secondary small anchor-pill">Zotero 直连</a><router-link to="/style" class="button secondary small anchor-pill highlight-glass">个性风格 →</router-link></div></header><LoadingState v-if="loading" /><p v-if="error" class="error-banner" role="alert">{{ error }} <button v-if="!user" class="button secondary" @click="load">重试</button></p><template v-if="user && !loading">
 <section class="panel account-section"><h2>头像设置</h2><div class="avatar-editor"><div class="account-avatar"><UserAvatar :user="user" /></div><label class="button secondary avatar-upload">上传头像<input type="file" accept="image/png,image/jpeg,image/webp" aria-label="上传头像" :disabled="busy" @change="uploadAvatar" /></label><span class="muted">支持 PNG、JPEG 或 WebP，限制在 200 KB 以内（上传大图将自动压缩裁切）。</span></div></section>
-<form class="panel account-section form-grid" @submit.prevent="saveProfile"><h2>个人资料</h2><div class="form-row"><label>姓名<input v-model="realName" maxlength="100" required autocomplete="name" /></label><label>昵称<input v-model="nickname" maxlength="50" placeholder="可选，用于页面显示" /></label><label>组内身份<input :value="identity === 'teacher' ? '导师 / PI' : '学生 / 组员'" disabled aria-label="组内身份由管理员设置" /></label></div><div class="form-actions"><button class="button primary" :disabled="busy">保存资料</button></div></form>
-<form class="panel account-section form-grid" @submit.prevent="saveCredentials"><h2>邮箱与密码</h2><label>登录邮箱<input v-model="email" type="email" required autocomplete="email" maxlength="100" /></label><label>当前密码<input v-model="currentPassword" type="password" required autocomplete="current-password" /></label><div class="form-row"><label>新密码<input v-model="newPassword" type="password" minlength="8" autocomplete="new-password" placeholder="不修改密码时留空" /></label><label>确认新密码<input v-model="confirmPassword" type="password" :required="!!newPassword" autocomplete="new-password" /></label></div><p class="muted">新密码至少 8 个字符。修改邮箱或密码需要验证当前密码。</p><div class="form-actions"><button class="button primary" :disabled="busy">保存账户设置</button></div></form>
-<section id="tour-appearance-settings" class="panel account-section theme-settings-section">
+<form id="section-profile" class="panel account-section form-grid" @submit.prevent="saveProfile"><h2>个人资料</h2><div class="form-row"><label>姓名<input v-model="realName" maxlength="100" required autocomplete="name" /></label><label>昵称<input v-model="nickname" maxlength="50" placeholder="可选，用于页面显示" /></label><label>组内身份<input :value="identity === 'teacher' ? '导师 / PI' : '学生 / 组员'" disabled aria-label="组内身份由管理员设置" /></label></div><div class="form-actions"><button class="button primary" :disabled="busy">保存资料</button></div></form>
+<form id="section-security" class="panel account-section form-grid" @submit.prevent="saveCredentials"><h2>邮箱与密码</h2><label>登录邮箱<input v-model="email" type="email" required autocomplete="email" maxlength="100" /></label><label>当前密码<input v-model="currentPassword" type="password" required autocomplete="current-password" /></label><div class="form-row"><label>新密码<input v-model="newPassword" type="password" minlength="8" autocomplete="new-password" placeholder="不修改密码时留空" /></label><label>确认新密码<input v-model="confirmPassword" type="password" :required="!!newPassword" autocomplete="new-password" /></label></div><p class="muted">新密码至少 8 个字符。修改邮箱或密码需要验证当前密码。</p><div class="form-actions"><button class="button primary" :disabled="busy">保存账户设置</button></div></form>
+<section id="section-zotero" class="panel account-section zotero-account-section">
   <div class="section-title-row">
     <div>
-      <h2>界面配色方案</h2>
+      <h2>Zotero 文献库直连设置</h2>
+      <p class="muted">
+        绑定个人 Zotero Web API 凭证后，可直接在「文献推荐流」中一键将论文（包含元数据、官方 arXiv PDF 附件、推荐理由及精校中文翻译笔记）直推入您的 Zotero 云端文献库与分类目录。
+      </p>
     </div>
-  </div>
-  <div class="theme-cards-grid">
-    <div
-      v-for="scheme in colorSchemes"
-      :key="scheme.id"
-      class="theme-card"
-      :class="{ 'is-active': currentColorScheme === scheme.id }"
-      @click="handleColorSchemeSelect(scheme)"
-      tabindex="0"
-      role="button"
-      :aria-pressed="currentColorScheme === scheme.id"
-      @keydown.enter="handleColorSchemeSelect(scheme)"
-      @keydown.space.prevent="handleColorSchemeSelect(scheme)"
-    >
-      <div class="theme-card-header">
-        <div class="theme-card-title-group">
-          <h3 class="theme-title">{{ scheme.name }}</h3>
-          <p class="theme-subtitle">{{ scheme.subtitle }}</p>
-        </div>
-        <div class="theme-active-indicator" v-if="currentColorScheme === scheme.id">
-          <span class="active-dot"></span> 当前生效
-        </div>
-      </div>
-      <p class="theme-card-desc">{{ scheme.description }}</p>
-      <div class="theme-card-footer">
-        <div class="theme-palette-preview" title="配色基准色标：底色、主交互高亮、卡片暗调">
-          <span
-            v-for="(c, idx) in scheme.colors"
-            :key="idx"
-            class="color-dot"
-            :style="{ backgroundColor: c }"
-            :title="c"
-          ></span>
-        </div>
-        <button
-          type="button"
-          class="button select-theme-btn"
-          :class="currentColorScheme === scheme.id ? 'primary' : 'secondary'"
-          @click.stop="handleColorSchemeSelect(scheme)"
-        >
-          {{ currentColorScheme === scheme.id ? '使用中' : '应用配色' }}
-        </button>
-      </div>
-    </div>
-
-    <!-- 自定义配色卡片 -->
-    <div
-      class="theme-card custom-theme-card"
-      :class="{ 'is-active': currentColorScheme === 'custom' }"
-      @click="handleSelectCustomScheme"
-      tabindex="0"
-      role="button"
-      :aria-pressed="currentColorScheme === 'custom'"
-      @keydown.enter="handleSelectCustomScheme"
-      @keydown.space.prevent="handleSelectCustomScheme"
-    >
-      <div class="theme-card-header">
-        <div class="theme-card-title-group">
-          <h3 class="theme-title">{{ customColorScheme?.name || '自定义配色' }}</h3>
-          <p class="theme-subtitle">个性化色调与暗色智能推导</p>
-        </div>
-        <div class="theme-active-indicator" v-if="currentColorScheme === 'custom'">
-          <span class="active-dot"></span> 当前生效
-        </div>
-      </div>
-      <p class="theme-card-desc">自主定制高亮强调色与背景深色，系统智能推导文字对比度与面板半透明质感。</p>
-      <div class="theme-card-footer">
-        <div class="theme-palette-preview" title="当前自定义主色、底色与面板色">
-          <span
-            class="color-dot"
-            :style="{ backgroundColor: customColorScheme?.baseColor || '#071326' }"
-            :title="customColorScheme?.baseColor"
-          ></span>
-          <span
-            class="color-dot"
-            :style="{ backgroundColor: customColorScheme?.primaryColor || '#38bdf8' }"
-            :title="customColorScheme?.primaryColor"
-          ></span>
-          <span
-            class="color-dot"
-            :style="{ backgroundColor: customColorScheme?.panelHex || customColorScheme?.panelColor || '#0d203d' }"
-            :title="customColorScheme?.panelHex || customColorScheme?.panelColor"
-          ></span>
-        </div>
-        <div class="custom-card-actions">
-          <button
-            type="button"
-            class="button secondary edit-theme-btn"
-            @click.stop="openCustomThemeModal"
-          >
-            编辑
-          </button>
-          <button
-            type="button"
-            class="button select-theme-btn"
-            :class="currentColorScheme === 'custom' ? 'primary' : 'secondary'"
-            @click.stop="handleSelectCustomScheme"
-          >
-            {{ currentColorScheme === 'custom' ? '使用中' : '应用配色' }}
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="panel account-section theme-settings-section">
-  <div class="section-title-row">
-    <div>
-      <h2>界面背景效果</h2>
-    </div>
-  </div>
-  <div class="theme-cards-grid">
-    <div
-      v-for="bg in bgOptions"
-      :key="bg.id"
-      class="theme-card"
-      :class="{ 'is-active': currentBgType === bg.id }"
-      @click="handleBgTypeSelect(bg)"
-      tabindex="0"
-      role="button"
-      :aria-pressed="currentBgType === bg.id"
-      @keydown.enter="handleBgTypeSelect(bg)"
-      @keydown.space.prevent="handleBgTypeSelect(bg)"
-    >
-      <div class="theme-card-header">
-        <div class="theme-card-title-group">
-          <h3 class="theme-title">{{ bg.name }}</h3>
-          <p class="theme-subtitle">{{ bg.subtitle }}</p>
-        </div>
-        <div class="theme-active-indicator" v-if="currentBgType === bg.id">
-          <span class="active-dot"></span> 当前生效
-        </div>
-      </div>
-      <p class="theme-card-desc">{{ bg.description }}</p>
-      <div class="theme-card-footer">
-        <div class="bg-card-hint muted" style="font-size: 11px;">
-          <template v-if="bg.id === 'custom-local'">
-            {{ localBgMeta ? `已载入: ${localBgMeta.name}` : '未选择本地文件' }}
-          </template>
-        </div>
-        <button
-          type="button"
-          class="button select-theme-btn"
-          :class="currentBgType === bg.id ? 'primary' : 'secondary'"
-          @click.stop="handleBgTypeSelect(bg)"
-        >
-          {{ currentBgType === bg.id ? '使用中' : '应用背景' }}
-        </button>
-      </div>
+    <div class="zotero-status-badge" :class="{ 'is-connected': zoteroConfig.configured }">
+      <AppIcon :name="zoteroConfig.configured ? 'check' : 'database'" :size="14" />
+      <span>{{ zoteroConfig.configured ? '已连接云端文献库' : '未连接 (本地 RIS 模式)' }}</span>
     </div>
   </div>
 
-  <!-- 本地背景管理面板 -->
-  <div class="local-bg-control-box">
-    <input
-      ref="localFileInputRef"
-      type="file"
-      accept="image/*,video/*,.mov,.mp4,.webm,.m4v,.mkv"
-      aria-label="选择本地背景图片或视频"
-      style="display: none;"
-      @change="onLocalFileSelected"
-    />
-    <div class="local-bg-header">
-      <div class="action_has has_saved local-bg-icon" aria-hidden="true" title="本地持久化存储">
-        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20" stroke-linejoin="round" stroke-linecap="round" stroke-width="2" viewBox="0 0 24 24" stroke="currentColor" fill="none">
-          <path d="m19,21H5c-1.1,0-2-.9-2-2V5c0-1.1.9-2,2-2h11l5,5v11c0,1.1-.9,2-2,2Z" stroke-linejoin="round" stroke-linecap="round" data-path="box"></path>
-          <path d="M7 3L7 8L15 8" stroke-linejoin="round" stroke-linecap="round" data-path="line-top"></path>
-          <path d="M17 20L17 13L7 13L7 20" stroke-linejoin="round" stroke-linecap="round" data-path="line-bottom"></path>
-        </svg>
-      </div>
-      <div class="local-bg-title-wrap">
-        <strong>本地图片 / 视频背景（纯前端本地持久化）</strong>
-        <p class="muted">所选媒体仅存储于当前浏览器 IndexedDB 本地数据库</p>
-      </div>
-    </div>
-
-    <div v-if="localBgMeta" class="local-bg-status-card">
-      <div class="local-bg-meta-info">
-        <span class="badge" :class="localBgMeta.type === 'video' ? 'cyan' : 'amber'">
-          {{ localBgMeta.type === 'video' ? '本地视频' : '本地图片' }}
+  <form class="form-grid zotero-form-grid" @submit.prevent="handleSaveZotero">
+    <div class="form-row">
+      <label>
+        <span class="label-text">Zotero User ID (用户 ID)</span>
+        <input
+          v-model="zoteroForm.user_id"
+          type="text"
+          required
+          autocomplete="off"
+          placeholder="例如: 11280390"
+        />
+        <span class="field-hint">
+          前往 <a href="https://www.zotero.org/settings/keys" target="_blank" rel="noopener">Zotero Feeds/API 密钥管理页</a> 顶部可查看您的 User ID。
         </span>
-        <span class="local-bg-filename mono" :title="localBgMeta.name">{{ localBgMeta.name }}</span>
-        <span class="muted" style="font-size: 12px;">({{ formatFileSize(localBgMeta.size) }})</span>
-      </div>
-      <div class="local-bg-actions">
-        <button
-          type="button"
-          class="button small secondary"
-          :disabled="localBgUploading"
-          @click="triggerLocalFileInput"
-        >
-          更换文件
-        </button>
-        <button
-          type="button"
-          class="button small danger"
-          :disabled="localBgUploading"
-          @click="onRemoveLocalBg"
-        >
-          清除
-        </button>
+      </label>
+
+      <label>
+        <span class="label-text">Zotero API Key (密钥)</span>
+        <input
+          v-model="zoteroForm.api_key"
+          type="password"
+          autocomplete="new-password"
+          :placeholder="zoteroConfig.has_api_key ? '已保存密钥（留空保持不变）' : '粘贴您的 Personal API Key'"
+        />
+        <span class="field-hint">
+          需勾选“Allow library access”并允许读取和修改个人文献库。
+        </span>
+      </label>
+    </div>
+
+    <div class="form-row">
+      <div class="full-width-field">
+        <ZoteroCollectionTree
+          v-model="zoteroForm.default_collection"
+          :collections="zoteroCollections"
+          label="默认推送分类集合"
+          :initially-expanded="false"
+        />
+        <span class="field-hint">
+          推送到 Zotero 时默认预选的文献分类文件夹。在文献卡片推送弹窗中仍可随时临时切换。
+        </span>
       </div>
     </div>
 
-    <div v-else class="local-bg-upload-zone" @click="triggerLocalFileInput">
-      <div class="upload-zone-content">
-        <div class="action_has has_saved upload-icon" aria-hidden="true">
-          <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20" stroke-linejoin="round" stroke-linecap="round" stroke-width="2" viewBox="0 0 24 24" stroke="currentColor" fill="none">
-            <path d="m19,21H5c-1.1,0-2-.9-2-2V5c0-1.1.9-2,2-2h11l5,5v11c0,1.1-.9,2-2,2Z" stroke-linejoin="round" stroke-linecap="round" data-path="box"></path>
-            <path d="M7 3L7 8L15 8" stroke-linejoin="round" stroke-linecap="round" data-path="line-top"></path>
-            <path d="M17 20L17 13L7 13L7 20" stroke-linejoin="round" stroke-linecap="round" data-path="line-bottom"></path>
-          </svg>
-        </div>
-        <span class="upload-text">{{ localBgUploading ? '正在读取本地媒体...' : '点击选择本地图片或视频作为背景' }}</span>
-        <span class="muted upload-tip">支持 MP4 / WebM / MOV 视频或 PNG / JPG / WebP 图片，自动适配满屏且静音循环播放</span>
-      </div>
-    </div>
-  </div>
-</section>
+    <p v-if="zoteroError" class="inline-error" role="alert">{{ zoteroError }}</p>
 
-<section class="panel account-section theme-settings-section">
-  <div class="section-title-row font-section-title-row">
-    <div>
-      <h2>界面字体方案</h2>
-    </div>
-    <!-- 统一模式 / 分离模式 切换 -->
-    <div class="font-mode-segmented" role="tablist" aria-label="字体模式选择">
+    <div class="form-actions zotero-form-actions">
       <button
-        type="button"
-        class="font-mode-pill"
-        :class="{ active: currentFontMode === 'unified' }"
-        role="tab"
-        :aria-selected="currentFontMode === 'unified'"
-        @click="switchFontMode('unified')"
+        type="submit"
+        class="button primary"
+        :disabled="zoteroSaving || zoteroLoading || !zoteroForm.user_id"
       >
-        <AppIcon name="font" :size="13" />
-        <span>统一模式（中英相同）</span>
+        {{ zoteroSaving ? '验证并保存中…' : (zoteroConfig.configured ? '保存并更新配置' : '验证连接并保存') }}
       </button>
+
       <button
+        v-if="zoteroConfig.configured"
         type="button"
-        class="font-mode-pill"
-        :class="{ active: currentFontMode === 'split' }"
-        role="tab"
-        :aria-selected="currentFontMode === 'split'"
-        @click="switchFontMode('split')"
+        class="button secondary"
+        :disabled="zoteroLoading"
+        @click="handleRefreshZoteroCollections"
       >
-        <AppIcon name="translate" :size="13" />
-        <span>分离模式（中英各异）</span>
+        <AppIcon name="refresh" :size="14" />
+        <span>刷新分类目录</span>
+      </button>
+
+      <button
+        v-if="zoteroConfig.configured"
+        type="button"
+        class="button secondary danger-text"
+        :disabled="zoteroClearing"
+        @click="handleClearZotero"
+      >
+        {{ zoteroClearing ? '正在解除…' : '解除绑定' }}
       </button>
     </div>
-  </div>
-
-  <input
-    ref="localFontInputRef"
-    type="file"
-    accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf"
-    aria-label="选择本地字体文件"
-    style="display: none;"
-    @change="onLocalFontSelected"
-  />
-
-  <!-- 实时排版渲染预览面板 -->
-  <div class="font-preview-stage" :class="{ 'is-custom': hasAnyCustomFont }">
-    <div class="font-preview-header">
-      <span class="font-preview-label">实时字体排版渲染预览（整站即刻生效）</span>
-      <div class="preview-badges">
-        <template v-if="currentFontMode === 'unified'">
-          <span class="badge" :class="unifiedFontMeta ? 'cyan' : ''">
-            {{ unifiedFontMeta ? `统一字体: ${unifiedFontMeta.name}` : '系统默认黑体' }}
-          </span>
-        </template>
-        <template v-else>
-          <span class="badge" :class="enFontMeta ? 'blue' : ''">
-            {{ enFontMeta ? `西文: ${enFontMeta.name}` : '西文: 系统默认' }}
-          </span>
-          <span class="badge" :class="zhFontMeta ? 'amber' : ''">
-            {{ zhFontMeta ? `中文: ${zhFontMeta.name}` : '中文: 系统默认' }}
-          </span>
-        </template>
-      </div>
-    </div>
-    <div class="font-preview-body">
-      <div class="font-preview-row">
-        <span class="preview-tag muted">中文排版</span>
-        <p class="font-preview-line-title">{{ siteConfig.labName }}</p>
-      </div>
-      <div class="font-preview-row">
-        <span class="preview-tag muted">西文排版</span>
-        <p class="font-preview-line-en">{{ siteConfig.siteSlogan || siteConfig.labShortName }}</p>
-      </div>
-      <div class="font-preview-row">
-        <span class="preview-tag muted">科学数字与符号</span>
-        <p class="font-preview-line-digits mono">0123456789 · Redshift z = 2.45 · Lambda-CDM Cosmology</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- A. 统一模式视图 -->
-  <div v-if="currentFontMode === 'unified'" class="theme-cards-grid font-cards-grid">
-    <!-- 方案 1：系统现代黑体（默认方案） -->
-    <div
-      class="theme-card font-option-card"
-      :class="{ 'is-active': !unifiedFontMeta }"
-      @click="onRestoreAllDefaultFonts"
-      tabindex="0"
-      role="button"
-      :aria-pressed="!unifiedFontMeta"
-      @keydown.enter="onRestoreAllDefaultFonts"
-      @keydown.space.prevent="onRestoreAllDefaultFonts"
-    >
-      <div class="theme-card-header">
-        <div class="theme-card-title-group">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <h3 class="theme-title">系统默认黑体</h3>
-            <span class="badge">系统内置</span>
-          </div>
-          <p class="theme-subtitle">Inter · 苹方 · 微软雅黑</p>
-        </div>
-        <div class="theme-active-indicator" v-if="!unifiedFontMeta">
-          <span class="active-dot"></span> 当前生效
-        </div>
-      </div>
-      <p class="theme-card-desc">原生跨平台高品质无衬线字体栈，加载零延迟，兼容性最佳</p>
-      <div class="theme-card-footer">
-        <div class="bg-card-hint muted" style="font-size: 11px;">
-          零额外开销 · 免下载
-        </div>
-        <button
-          type="button"
-          class="button select-theme-btn"
-          :class="!unifiedFontMeta ? 'primary' : 'secondary'"
-          @click.stop="onRestoreAllDefaultFonts"
-        >
-          {{ !unifiedFontMeta ? '使用中' : '恢复默认' }}
-        </button>
-      </div>
-    </div>
-
-    <!-- 方案 2：本地统一字体（中英相同） -->
-    <div
-      class="theme-card font-option-card"
-      :class="{ 'is-active': !!unifiedFontMeta }"
-      @click="triggerSlotUpload('unified')"
-      tabindex="0"
-      role="button"
-      :aria-pressed="!!unifiedFontMeta"
-      @keydown.enter="triggerSlotUpload('unified')"
-      @keydown.space.prevent="triggerSlotUpload('unified')"
-    >
-      <div class="theme-card-header">
-        <div class="theme-card-title-group">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <h3 class="theme-title">本地统一字体</h3>
-            <span class="badge amber">中英相同</span>
-          </div>
-          <p class="theme-subtitle">{{ unifiedFontMeta ? unifiedFontMeta.name : '未载入本地字体文件' }}</p>
-        </div>
-        <div class="theme-active-indicator" v-if="!!unifiedFontMeta">
-          <span class="active-dot"></span> 当前生效
-        </div>
-      </div>
-      <p class="theme-card-desc">纯本地存储（IndexedDB），中英文使用同一字体文件，支持 WOFF2 / WOFF / TTF / OTF。</p>
-      <div class="theme-card-footer">
-        <div class="bg-card-hint muted" style="font-size: 11px;">
-          {{ unifiedFontMeta ? `${unifiedFontMeta.format.toUpperCase()} · ${formatFileSize(unifiedFontMeta.size)}` : '点击选择字体文件' }}
-        </div>
-        <div style="display: flex; gap: 6px;">
-          <button
-            type="button"
-            class="button select-theme-btn"
-            :class="!!unifiedFontMeta ? 'primary' : 'secondary'"
-            @click.stop="triggerSlotUpload('unified')"
-          >
-            {{ !!unifiedFontMeta ? '更换字体' : '选择字体' }}
-          </button>
-          <button
-            v-if="unifiedFontMeta"
-            type="button"
-            class="button small danger"
-            @click.stop="onRemoveSlotFont('unified')"
-          >
-            清除
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- B. 分离模式视图（中英各异） -->
-  <div v-else class="split-font-grid">
-    <!-- 槽位 1：英文字体 / 西文字体 -->
-    <div class="split-font-card" :class="{ 'has-file': !!enFontMeta }">
-      <div class="split-font-card-header">
-        <div class="slot-badge-wrap">
-          <span class="badge blue">西文 / 数字字体</span>
-          <span v-if="enFontMeta" class="active-pill"><span class="active-dot"></span>已生效</span>
-          <span v-else class="muted slot-fallback-hint">使用系统默认 (Inter)</span>
-        </div>
-        <h3 class="slot-title">{{ enFontMeta ? enFontMeta.name : '未设置英文字体' }}</h3>
-        <p class="slot-desc">渲染英文、数字、拉丁字符及物理公式常量符号</p>
-      </div>
-
-      <div v-if="enFontMeta" class="slot-info-box">
-        <div class="slot-file-meta mono">
-          <span class="badge">{{ enFontMeta.format.toUpperCase() }}</span>
-          <span class="muted">{{ formatFileSize(enFontMeta.size) }}</span>
-        </div>
-        <div class="slot-action-row">
-          <button type="button" class="button small secondary" :disabled="localFontUploading" @click="triggerSlotUpload('en')">
-            更换英文字体
-          </button>
-          <button
-            v-if="zhFontMeta && zhFontMeta.name !== enFontMeta.name"
-            type="button"
-            class="button small secondary ghost"
-            title="将当前英文字体同时应用为中文字体"
-            :disabled="localFontUploading"
-            @click="onCopyFont('en', 'zh')"
-          >
-            中英共用此字体
-          </button>
-          <button type="button" class="button small danger" :disabled="localFontUploading" @click="onRemoveSlotFont('en')">
-            清除
-          </button>
-        </div>
-      </div>
-      <div v-else class="slot-empty-box" @click="triggerSlotUpload('en')">
-        <span class="upload-text">{{ localFontUploading ? '载入中…' : '点击选择西文/数字字体文件' }}</span>
-        <span class="muted" style="font-size: 11px;">如 JetBrains Mono、Roboto、Inter、Fira Code 等</span>
-        <button
-          v-if="zhFontMeta"
-          type="button"
-          class="button small secondary ghost sync-hint-btn"
-          @click.stop="onCopyFont('zh', 'en')"
-        >
-          采用已有中文字体（{{ zhFontMeta.name }}）
-        </button>
-      </div>
-    </div>
-
-    <!-- 槽位 2：中文字体 -->
-    <div class="split-font-card" :class="{ 'has-file': !!zhFontMeta }">
-      <div class="split-font-card-header">
-        <div class="slot-badge-wrap">
-          <span class="badge amber">中文字体</span>
-          <span v-if="zhFontMeta" class="active-pill"><span class="active-dot"></span>已生效</span>
-          <span v-else class="muted slot-fallback-hint">使用系统默认 (苹方/微软雅黑)</span>
-        </div>
-        <h3 class="slot-title">{{ zhFontMeta ? zhFontMeta.name : '未设置中文字体' }}</h3>
-        <p class="slot-desc">渲染中文字符与全角标点</p>
-      </div>
-
-      <div v-if="zhFontMeta" class="slot-info-box">
-        <div class="slot-file-meta mono">
-          <span class="badge">{{ zhFontMeta.format.toUpperCase() }}</span>
-          <span class="muted">{{ formatFileSize(zhFontMeta.size) }}</span>
-        </div>
-        <div class="slot-action-row">
-          <button type="button" class="button small secondary" :disabled="localFontUploading" @click="triggerSlotUpload('zh')">
-            更换中文字体
-          </button>
-          <button
-            v-if="enFontMeta && enFontMeta.name !== zhFontMeta.name"
-            type="button"
-            class="button small secondary ghost"
-            title="将当前中文字体同时应用为英文字体"
-            :disabled="localFontUploading"
-            @click="onCopyFont('zh', 'en')"
-          >
-            中英共用此字体
-          </button>
-          <button type="button" class="button small danger" :disabled="localFontUploading" @click="onRemoveSlotFont('zh')">
-            清除
-          </button>
-        </div>
-      </div>
-      <div v-else class="slot-empty-box" @click="triggerSlotUpload('zh')">
-        <span class="upload-text">{{ localFontUploading ? '载入中…' : '点击选择中文字体文件' }}</span>
-        <span class="muted" style="font-size: 11px;">如 思源黑体、霞鹜文楷、得意黑、鸿蒙黑体等</span>
-        <button
-          v-if="enFontMeta"
-          type="button"
-          class="button small secondary ghost sync-hint-btn"
-          @click.stop="onCopyFont('en', 'zh')"
-        >
-          采用已有英文字体（{{ enFontMeta.name }}）
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <div v-if="hasAnyCustomFont" class="font-section-footer">
-    <button type="button" class="button small ghost" @click="onRestoreAllDefaultFonts">
-      <AppIcon name="undo" :size="12" /> 恢复系统默认字体方案
-    </button>
-  </div>
+  </form>
 </section>
 <section class="panel account-section">
   <div class="section-title-row">
     <h2>常用快捷入口</h2>
-    <span class="muted" style="font-size:12px;">快速前往文献收藏与反馈中心</span>
+    <span class="muted" style="font-size:12px;">快速前往文献收藏、个性风格与反馈中心</span>
   </div>
   <div class="account-shortcuts-grid">
     <router-link to="/favorites" class="account-shortcut-card">
@@ -2914,6 +2471,14 @@ button.danger:hover {
       <div class="shortcut-info">
         <strong class="shortcut-title">我的收藏</strong>
         <span class="shortcut-desc muted">查看与检索个人星标收藏的学术论文与文献</span>
+      </div>
+      <span class="shortcut-arrow">→</span>
+    </router-link>
+    <router-link to="/style" class="account-shortcut-card">
+      <div class="shortcut-icon-box purple"><AppIcon name="style" :size="18" /></div>
+      <div class="shortcut-info">
+        <strong class="shortcut-title">个性风格</strong>
+        <span class="shortcut-desc muted">定制系统界面配色、卡片玻璃质感、背景动效与专属字体方案</span>
       </div>
       <span class="shortcut-arrow">→</span>
     </router-link>
@@ -2925,14 +2490,6 @@ button.danger:hover {
       </div>
       <span class="shortcut-arrow">→</span>
     </router-link>
-    <div class="account-shortcut-card" role="button" tabindex="0" @click="openTutorial({ role: user?.role, mandatory: false })">
-      <div class="shortcut-icon-box" style="background: rgba(168, 85, 247, 0.15); color: #9333ea;"><AppIcon name="sparkles" :size="18" /></div>
-      <div class="shortcut-info">
-        <strong class="shortcut-title">新手功能导览教程</strong>
-        <span class="shortcut-desc muted">回顾平台核心功能图文导引{{ user?.role === 'admin' ? '（含管理员专属管理功能）' : '' }}</span>
-      </div>
-      <span class="shortcut-arrow">→</span>
-    </div>
   </div>
 </section>
 
@@ -2967,20 +2524,21 @@ button.danger:hover {
     </div>
   </div>
 </section>
-</template>
-
-<!-- 成员管理（管理员专属） -->
-<section v-if="user?.role === 'admin'" id="tour-member-management" class="panel account-section">
+</template><section v-if="user?.role === 'admin'" class="panel account-section">
   <div class="section-title-row">
-    <div>
-      <h2>成员权限管理</h2>
-      <span class="muted" style="font-size:12px;">管理组内成员身份与组会排期权限</span>
+    <div class="member-section-heading">
+      <h2>成员权限与身份设置</h2>
+      <span class="muted member-count-text">（共 {{ members.length }} 位组员）</span>
+      <span class="badge success online-count-badge">
+        <span class="presence-dot-inline"></span>
+        当前在线 {{ onlineCount }} / {{ members.length }} 人
+      </span>
     </div>
-    <div style="display: flex; gap: 8px; align-items: center;">
-      <button type="button" class="button small primary" @click="openCreateMemberModal">
-        <AppIcon name="user-plus" :size="14" />新增成员
-      </button>
+    <div style="display: flex; align-items: center; gap: 10px;">
       <span class="badge cyan">管理员功能</span>
+      <button type="button" class="button small primary" @click="openCreateMemberModal">
+        <AppIcon name="plus" :size="15" />添加成员
+      </button>
     </div>
   </div>
   <div class="members-perm-list">
@@ -3043,7 +2601,7 @@ button.danger:hover {
 </section>
 
 <!-- 邀请码管理 -->
-<section v-if="user?.role === 'admin'" id="tour-invite-codes" class="panel account-section">
+<section v-if="user?.role === 'admin'" class="panel account-section">
   <div class="section-title-row">
     <h2>注册邀请码管理</h2>
     <span class="badge cyan">管理员功能</span>
@@ -3103,58 +2661,6 @@ button.danger:hover {
   </form>
 </section>
 
-<!-- 课题组全站品牌与系统配置（管理员专属） -->
-<section v-if="user?.role === 'admin'" id="tour-system-branding" class="panel account-section">
-  <div class="section-title-row">
-    <div>
-      <h2>课题组品牌与系统配置</h2>
-      <span class="muted" style="font-size:12px;">动态定制全站标题、缩写标识、标语与学术助理提示词</span>
-    </div>
-    <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #9333ea;">管理员专享</span>
-  </div>
-
-  <form @submit.prevent="saveSystemConfig" style="display: flex; flex-direction: column; gap: 16px; margin-top: 12px;">
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-      <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
-        <span>课题组 / 团队全称 <strong style="color: #ef4444">*</strong></span>
-        <input v-model="systemConfig.lab_name" required placeholder="如：智能感知与计算科学研究组" />
-      </label>
-      <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
-        <span>英文缩写 / 标识 <strong style="color: #ef4444">*</strong></span>
-        <input v-model="systemConfig.lab_short_name" required placeholder="如：LabOrbit / AISYS" />
-      </label>
-    </div>
-
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-      <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
-        <span>全站副标题 / Slogan</span>
-        <input v-model="systemConfig.site_slogan" placeholder="课题组内部科研协作与知识管理平台" />
-      </label>
-      <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
-        <span>所属科研院所 / 高校</span>
-        <input v-model="systemConfig.institution" placeholder="如：某某大学计算机系" />
-      </label>
-    </div>
-
-    <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
-      <span>默认组会研讨地点</span>
-      <input v-model="systemConfig.default_location" placeholder="如：理科楼 302 / 腾讯会议" />
-    </label>
-
-    <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
-      <span>AI 科研助理 System Prompt（系统提示词自定义）</span>
-      <textarea v-model="systemConfig.ai_system_prompt" rows="3" placeholder="你是课题组的科研智能助手，精通文献研读与科学计算..." style="width:100%; border-radius: 8px; padding: 10px; font-family: inherit; font-size: 13px;"></textarea>
-    </label>
-
-    <div style="display: flex; justify-content: flex-end;">
-      <button type="submit" class="button primary" :disabled="systemConfigSaving">
-        <span v-if="systemConfigSaving">正在保存设置...</span>
-        <span v-else>保存全站配置</span>
-      </button>
-    </div>
-  </form>
-</section>
-
 <!-- 管理员手动创建成员弹窗 -->
 <BaseDialog
   :open="showCreateMemberModal"
@@ -3181,7 +2687,7 @@ button.danger:hover {
     <div class="form-row create-member-grid-row">
       <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
         <span>登录邮箱 <strong style="color: var(--danger)">*</strong></span>
-        <input v-model="createMemberForm.email" type="email" required placeholder="如 name@univ.edu.cn" maxlength="100" />
+        <input v-model="createMemberForm.email" type="email" required placeholder="如 name@pmo.ac.cn" maxlength="100" />
       </label>
       <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
         <span>初始登录密码 <strong style="color: var(--danger)">*</strong></span>
@@ -3225,242 +2731,5 @@ button.danger:hover {
       </button>
     </div>
   </form>
-</BaseDialog>
-
-<!-- 自定义界面配色弹窗 -->
-<BaseDialog
-  :open="showCustomThemeModal"
-  title="自定义界面配色方案"
-  :wide="true"
-  :frame-style="previewDialogStyle"
-  @close="closeCustomThemeModal"
->
-  <div class="custom-theme-dialog-content">
-    <p class="muted" style="font-size: 13px; margin-bottom: 16px; line-height: 1.6;">
-      选择或输入心仪的主强调色与背景基底色，系统将自动计算前景色对比度、悬停高亮、边框微光及层叠面板半透明质感，确保全界面无障碍可读与视觉和谐。
-    </p>
-
-    <!-- 灵感预设模板快选 -->
-    <div class="custom-templates-section">
-      <div class="custom-subheading">灵感预设模板</div>
-      <div class="custom-templates-grid">
-        <button
-          v-for="tpl in customPresetTemplates"
-          :key="tpl.id"
-          type="button"
-          class="custom-tpl-btn"
-          :class="{ 'is-selected': customThemeForm.primaryColor.toLowerCase() === tpl.primaryColor.toLowerCase() && customThemeForm.baseColor.toLowerCase() === tpl.baseColor.toLowerCase() }"
-          @click="applyPresetTemplate(tpl)"
-        >
-          <div class="custom-tpl-preview">
-            <span class="custom-tpl-dot" :style="{ backgroundColor: tpl.baseColor }"></span>
-            <span class="custom-tpl-dot" :style="{ backgroundColor: tpl.primaryColor }"></span>
-          </div>
-          <span class="custom-tpl-name">{{ tpl.name }}</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- 配色表单与实时预览两列布局 -->
-    <div class="custom-form-and-preview-grid">
-      <!-- 左列：参数配置 -->
-      <div class="custom-config-col">
-        <div class="custom-subheading">调色参数配置</div>
-
-        <label class="custom-input-label">
-          <span>方案名称</span>
-          <input
-            v-model="customThemeForm.name"
-            type="text"
-            maxlength="20"
-            placeholder="例如：极光深蓝"
-            class="custom-name-input"
-          />
-        </label>
-
-        <div class="color-picker-item">
-          <label class="color-picker-label">
-            <span class="color-picker-title">主交互强调色（Primary Accent）</span>
-            <span class="color-picker-desc">用于按钮高亮、选中态、状态圆点、边框微光</span>
-          </label>
-          <div class="color-input-combo">
-            <input
-              type="color"
-              class="native-color-picker"
-              :value="isValidHex(customThemeForm.primaryColor) ? customThemeForm.primaryColor : '#38bdf8'"
-              @input="customThemeForm.primaryColor = $event.target.value"
-            />
-            <input
-              type="text"
-              class="hex-text-input"
-              v-model="customThemeForm.primaryColor"
-              placeholder="#38bdf8"
-              maxlength="7"
-            />
-          </div>
-        </div>
-
-        <div class="color-picker-item">
-          <label class="color-picker-label">
-            <span class="color-picker-title">深色背景底色（Base Background）</span>
-            <span class="color-picker-desc">全站最底层基底深色，建议使用低明度低饱和深色</span>
-          </label>
-          <div class="color-input-combo">
-            <input
-              type="color"
-              class="native-color-picker"
-              :value="isValidHex(customThemeForm.baseColor) ? customThemeForm.baseColor : '#071326'"
-              @input="customThemeForm.baseColor = $event.target.value"
-            />
-            <input
-              type="text"
-              class="hex-text-input"
-              v-model="customThemeForm.baseColor"
-              placeholder="#071326"
-              maxlength="7"
-            />
-          </div>
-        </div>
-
-        <label class="custom-checkbox-row">
-          <input type="checkbox" v-model="customThemeForm.autoDerive" />
-          <span>智能推导卡片面板与浮层表面色（推荐开启）</span>
-        </label>
-
-        <div v-if="!customThemeForm.autoDerive" class="color-picker-item" style="margin-top: 6px;">
-          <label class="color-picker-label">
-            <span class="color-picker-title">容器卡片表面色（Panel Surface）</span>
-            <span class="color-picker-desc">用于卡片容器、导航顶栏、输入框背景</span>
-          </label>
-          <div class="color-input-combo">
-            <input
-              type="color"
-              class="native-color-picker"
-              :value="isValidHex(customThemeForm.panelColor) ? customThemeForm.panelColor : '#0d203d'"
-              @input="customThemeForm.panelColor = $event.target.value"
-            />
-            <input
-              type="text"
-              class="hex-text-input"
-              v-model="customThemeForm.panelColor"
-              placeholder="#0d203d"
-              maxlength="7"
-            />
-          </div>
-        </div>
-      </div>
-
-      <!-- 右列：实时组件效果预览 -->
-      <div class="custom-preview-col">
-        <div class="custom-subheading">实时组件效果预览</div>
-        <div
-          class="custom-live-preview-box"
-          :style="{
-            backgroundColor: previewPalette.baseColor,
-            borderColor: previewPalette.lineColor
-          }"
-        >
-          <!-- 预览卡片 -->
-          <div
-            class="preview-mockup-panel"
-            :style="{
-              backgroundColor: previewPalette.panelColor,
-              borderColor: previewPalette.lineColor
-            }"
-          >
-            <div class="preview-mockup-header">
-              <span
-                class="preview-mockup-title"
-                :style="{ color: '#f8fafc' }"
-              >
-                {{ customThemeForm.name || '自定义配色' }}
-              </span>
-              <span
-                class="preview-mockup-badge"
-                :style="{
-                  backgroundColor: previewPalette.raised,
-                  borderColor: previewPalette.lineColor,
-                  color: previewPalette.primaryColor
-                }"
-              >
-                实时演示
-              </span>
-            </div>
-
-            <p class="preview-mockup-desc" :style="{ color: '#94a3b8' }">
-              智能计算保证高亮元素上的文字具备极高对比度，面板半透明融合背景光影。
-            </p>
-
-            <div class="preview-mockup-elements">
-              <button
-                type="button"
-                class="preview-mockup-btn-primary"
-                :style="{
-                  backgroundColor: previewPalette.primaryColor,
-                  color: previewPalette.accentInk
-                }"
-              >
-                主要操作
-              </button>
-              <button
-                type="button"
-                class="preview-mockup-btn-secondary"
-                :style="{
-                  backgroundColor: previewPalette.surfaceColor,
-                  borderColor: previewPalette.lineColor,
-                  color: previewPalette.primaryColor
-                }"
-              >
-                次要按钮
-              </button>
-            </div>
-
-            <div
-              class="preview-mockup-subbox"
-              :style="{
-                backgroundColor: previewPalette.surfaceColor,
-                borderColor: previewPalette.lineColor
-              }"
-            >
-              <div
-                class="preview-subbox-indicator"
-                :style="{ backgroundColor: previewPalette.primaryColor }"
-              ></div>
-              <span :style="{ color: '#cbd5e1', fontSize: '12px' }">
-                对比度优化反色：{{ previewPalette.accentInk }}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 弹窗底部操作栏 -->
-    <div class="custom-dialog-actions">
-      <button
-        type="button"
-        class="button secondary"
-        @click="handleResetCustomTheme"
-      >
-        恢复推荐默认
-      </button>
-      <div class="dialog-action-right">
-        <button
-          type="button"
-          class="button secondary"
-          @click="closeCustomThemeModal"
-        >
-          取消
-        </button>
-        <button
-          type="button"
-          class="button primary"
-          @click="handleSaveAndApplyCustomTheme"
-        >
-          保存并应用
-        </button>
-      </div>
-    </div>
-  </div>
 </BaseDialog>
 </div></template>

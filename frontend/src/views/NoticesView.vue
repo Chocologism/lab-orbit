@@ -1,15 +1,20 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import WaveInput from '../components/WaveInput.vue'
-import { authApi, mailboxApi, noticeApi } from '../api/client'
-import { extractNoticesFromEmailsWithAi, isAiAssistantReady } from '../services/aiService'
+import NoticeRating from '../components/NoticeRating.vue'
+import SlidingSegmented from '../components/SlidingSegmented.vue'
+import ThinHoundCheckbox from '../components/ThinHoundCheckbox.vue'
+import { authApi, noticeApi } from '../api/client'
+import { isAiAssistantReady } from '../services/aiService'
 import { shanghaiToday } from '../utils/schedule'
 import { markNoticeAsRead, markAllNoticesAsRead } from '../utils/noticeUnread'
+import { useNoticeScanState } from '../composables/useNoticeScanState'
 
 const router = useRouter()
-const STORAGE_KEY = 'labhub_hide_home_notice_marquee'
+const route = useRoute()
+const STORAGE_KEY = 'csbd_hide_home_notice_marquee'
 
 const currentUser = ref(null)
 const notices = ref([])
@@ -37,14 +42,24 @@ const editForm = ref({
 })
 const savingNotice = ref(false)
 
-// AI 智能扫描弹窗状态
-const showAiScanModal = ref(false)
-const aiScanning = ref(false)
-const aiScanProgress = ref('')
-const aiExtractedNotices = ref([])
-const aiSelectedIndices = ref(new Set())
-const aiImporting = ref(false)
-const aiImportReport = ref(null)
+// AI 智能扫描全局状态
+const {
+  isNoticeScanning: aiScanning,
+  noticeScanProgress: aiScanProgress,
+  noticeScanCandidates: aiExtractedNotices,
+  noticeScanSelectedIndices: aiSelectedIndices,
+  noticeScanImporting: aiImporting,
+  noticeScanReport: aiImportReport,
+  showNoticeScanModal,
+  startNoticeScan,
+  cancelNoticeScan,
+  openNoticeScanModal,
+  closeNoticeScanModal,
+  toggleSelectCandidate: toggleSelectAiItem,
+  selectAllCandidates: selectAllAiItems,
+  deselectAllCandidates: deselectAllAiItems,
+  confirmNoticeBatchImport
+} = useNoticeScanState()
 
 const categories = [
   { key: 'all', label: '全部' },
@@ -86,10 +101,23 @@ async function loadData() {
     currentUser.value = me
     notices.value = Array.isArray(list) ? list : []
     markAllNoticesAsRead(notices.value.map(n => n.id))
+    checkRouteNotice()
   } catch (err) {
     console.error('加载通知列表失败:', err)
   } finally {
     loading.value = false
+  }
+}
+
+function onNoticeRated({ noticeId, myRating, ratingsCount }) {
+  const target = notices.value.find(n => n.id === noticeId)
+  if (target) {
+    target.my_rating = myRating
+    target.ratings_count = ratingsCount
+  }
+  if (selectedNotice.value && selectedNotice.value.id === noticeId) {
+    selectedNotice.value.my_rating = myRating
+    selectedNotice.value.ratings_count = ratingsCount
   }
 }
 
@@ -267,6 +295,20 @@ function openDetail(item) {
   resolveAttachmentsForNotice(item)
 }
 
+function checkRouteNotice() {
+  const targetId = route.query.id ? Number(route.query.id) : null
+  if (targetId && notices.value.length > 0) {
+    const item = notices.value.find(n => Number(n.id) === targetId)
+    if (item) {
+      openDetail(item)
+    }
+  }
+}
+
+watch(() => route.query.id, () => {
+  checkRouteNotice()
+})
+
 function closeDetail() {
   showDetailModal.value = false
   selectedNotice.value = null
@@ -362,132 +404,29 @@ async function handleDeleteNotice(item, e) {
 }
 
 // -----------------------------
-// AI 智能扫描最近一周邮件
+// AI 智能扫描最近一周邮件（支持后台无感运行）
 // -----------------------------
 async function openAiScan() {
-  if (!isAiAssistantReady()) {
-    alert('请先在个人中心配置并测试 AI 大模型助手。')
+  if (aiScanning.value) {
+    openNoticeScanModal()
     return
   }
-  showAiScanModal.value = true
-  aiExtractedNotices.value = []
-  aiSelectedIndices.value = new Set()
-  aiImportReport.value = null
-  await runAiEmailScan()
+  if (aiExtractedNotices.value.length > 0 && !aiImportReport.value) {
+    openNoticeScanModal()
+    return
+  }
+  openNoticeScanModal()
+  await startNoticeScan(notices.value)
 }
 
 async function runAiEmailScan() {
-  aiScanning.value = true
-  aiScanProgress.value = '正在读取最近一周已同步邮件…'
-  aiImportReport.value = null
-
-  try {
-    const emailRes = await mailboxApi.getEmails({ limit: 100 })
-    const emailList = Array.isArray(emailRes) ? emailRes : (emailRes?.items || [])
-
-    if (emailList.length === 0) {
-      aiScanProgress.value = '暂未找到已同步的邮件。建议先前往学术邮箱点击“同步最近7天邮件”。'
-      aiScanning.value = false
-      return
-    }
-
-    aiScanProgress.value = `获取到 ${emailList.length} 封候选邮件，AI 正在分析甄别教务与公共事务通知…`
-
-    const extracted = await extractNoticesFromEmailsWithAi(emailList, {
-      onProgress: (p) => {
-        aiScanProgress.value = `正在深度分析邮件 (批次 ${p.currentBatch}/${p.totalBatches}，已分析 ${p.processedEmails}/${p.totalEmails} 封)…`
-      }
-    })
-
-    if (extracted.length === 0) {
-      aiScanProgress.value = '最近一周邮件中未检测到教务或公共事务通知（报告与研讨会已自动归入学术日程）。'
-      aiScanning.value = false
-      return
-    }
-
-    // 查重比对：对比现有 notices 的 source_email_uid 与标准化标题
-    const existingUids = new Set(notices.value.map(n => String(n.source_email_uid).trim()).filter(Boolean))
-    const existingTitles = new Set(notices.value.map(n => n.title.replace(/[\s·•（）()\[\]【】《》""''“”‘’，。、：:；;！!？?·•\-—_]/g, '').toLowerCase()))
-
-    const checkedSet = new Set()
-    aiExtractedNotices.value = extracted.map((item, idx) => {
-      const uid = String(item.source_uid || '').trim()
-      const normTitle = item.title.replace(/[\s·•（）()\[\]【】《》""''“”‘’，。、：:；;！!？?·•\-—_]/g, '').toLowerCase()
-      const isUidDuplicate = uid && existingUids.has(uid)
-      const isTitleDuplicate = normTitle.length >= 4 && existingTitles.has(normTitle)
-      const isDuplicate = isUidDuplicate || isTitleDuplicate
-
-      if (!isDuplicate) {
-        checkedSet.add(idx)
-      }
-
-      return {
-        ...item,
-        isDuplicate,
-        duplicateReason: isUidDuplicate ? '邮件UID已入库' : isTitleDuplicate ? '已有类似标题通知' : ''
-      }
-    })
-
-    aiSelectedIndices.value = checkedSet
-    aiScanProgress.value = `扫描完成，共识别出 ${extracted.length} 条教务与事务通知。`
-  } catch (err) {
-    console.error('AI 扫描失败:', err)
-    aiScanProgress.value = `扫描中断: ${err.message || '网络请求超时'}`
-  } finally {
-    aiScanning.value = false
-  }
-}
-
-function toggleSelectAiItem(idx) {
-  if (aiSelectedIndices.value.has(idx)) {
-    aiSelectedIndices.value.delete(idx)
-  } else {
-    aiSelectedIndices.value.add(idx)
-  }
-}
-
-function selectAllAiItems() {
-  const set = new Set()
-  aiExtractedNotices.value.forEach((item, idx) => {
-    if (!item.isDuplicate) set.add(idx)
-  })
-  aiSelectedIndices.value = set
-}
-
-function deselectAllAiItems() {
-  aiSelectedIndices.value.clear()
+  await startNoticeScan(notices.value)
 }
 
 async function confirmBatchImport() {
-  const chosen = aiExtractedNotices.value.filter((_, idx) => aiSelectedIndices.value.has(idx))
-  if (chosen.length === 0) {
-    alert('请至少勾选一条要导入的通知')
-    return
-  }
-
-  aiImporting.value = true
-  try {
-    const payloadNotices = chosen.map(item => ({
-      title: item.title,
-      content: item.content,
-      category: item.category,
-      importance: item.importance,
-      start_date: item.start_date,
-      end_date: item.end_date,
-      attachments: item.attachments || '[]',
-      source_email_uid: item.source_uid,
-      source_email_subject: item.source_subject,
-      source_email_sender: item.source_sender
-    }))
-
-    const result = await noticeApi.batchCreate(payloadNotices)
-    aiImportReport.value = result
+  await confirmNoticeBatchImport(async () => {
     await loadData()
-  } catch (err) {
-    alert(err.message || '导入失败，请稍后重试。')
-  } finally {
-    aiImporting.value = false
-  }
+  })
 }
 
 onMounted(() => {
@@ -510,9 +449,10 @@ onMounted(() => {
       </div>
 
       <div class="header-actions">
-        <button class="action-btn ai-btn" @click="openAiScan">
-          <AppIcon name="sparkle" :size="16" />
-          <span>AI 扫描一周邮件</span>
+        <button class="action-btn ai-btn" :class="{ 'is-scanning': aiScanning }" @click="openAiScan">
+          <div v-if="aiScanning" class="loading-spinner mini-header-spin"></div>
+          <AppIcon v-else name="sparkle" :size="16" />
+          <span>{{ aiScanning ? '后台扫描中…' : 'AI 扫描一周邮件' }}</span>
         </button>
         <button class="action-btn primary-btn" @click="openCreateModal">
           <AppIcon name="plus" :size="16" />
@@ -548,7 +488,7 @@ onMounted(() => {
     <!-- 筛选过滤与搜索工具栏 -->
     <div class="filter-toolbar">
       <!-- 时效状态切换 -->
-      <div class="segmented-control" role="tablist">
+      <SlidingSegmented class="segmented-control" role="tablist">
         <button
           type="button"
           :class="{ active: currentScope === 'all' }"
@@ -570,7 +510,7 @@ onMounted(() => {
         >
           已过期 ({{ stats.total - stats.active }})
         </button>
-      </div>
+      </SlidingSegmented>
 
       <!-- 分类胶囊按钮 -->
       <div class="category-pills">
@@ -586,7 +526,7 @@ onMounted(() => {
         </button>
       </div>
 
-      <!-- 搜索框（采用与文献库/教材资料一致的 WaveInput 动效输入框） -->
+      <!-- 搜索框（采用与文献库/资料库一致的 WaveInput 动效输入框） -->
       <div class="notices-wave-container">
         <WaveInput
           v-model="searchQuery"
@@ -610,9 +550,10 @@ onMounted(() => {
       <h3>暂无符合条件的通知</h3>
       <p>您可以点击右上角的“新建通知”手动添加，或点击“AI 扫描一周邮件”自动识别导入。</p>
       <div class="empty-actions">
-        <button class="action-btn ai-btn" @click="openAiScan">
-          <AppIcon name="sparkle" :size="16" />
-          <span>AI 扫描一周邮件</span>
+        <button class="action-btn ai-btn" :class="{ 'is-scanning': aiScanning }" @click="openAiScan">
+          <div v-if="aiScanning" class="loading-spinner mini-header-spin"></div>
+          <AppIcon v-else name="sparkle" :size="16" />
+          <span>{{ aiScanning ? '后台扫描中…' : 'AI 扫描一周邮件' }}</span>
         </button>
         <button class="action-btn primary-btn" @click="openCreateModal">
           <AppIcon name="plus" :size="16" />
@@ -668,13 +609,22 @@ onMounted(() => {
             </span>
           </div>
 
-          <div v-if="canManageNotice(item)" class="card-actions" @click.stop>
-            <button class="icon-tool-btn" @click="openEditModal(item, $event)" title="编辑通知">
-              <AppIcon name="edit" :size="15" />
-            </button>
-            <button class="icon-tool-btn delete-btn" @click="handleDeleteNotice(item, $event)" title="删除通知">
-              <AppIcon name="trash" :size="15" />
-            </button>
+          <div class="card-footer-right" @click.stop>
+            <NoticeRating
+              :notice-id="item.id"
+              :ratings-count="item.ratings_count"
+              :my-rating="item.my_rating"
+              size="small"
+              @update="onNoticeRated"
+            />
+            <div v-if="canManageNotice(item)" class="card-actions">
+              <button class="icon-tool-btn" @click="openEditModal(item, $event)" title="编辑通知">
+                <AppIcon name="edit" :size="15" />
+              </button>
+              <button class="icon-tool-btn delete-btn" @click="handleDeleteNotice(item, $event)" title="删除通知">
+                <AppIcon name="trash" :size="15" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -778,6 +728,14 @@ onMounted(() => {
             </div>
 
             <div class="modal-footer">
+              <div class="modal-footer-rating">
+                <NoticeRating
+                  :notice-id="selectedNotice.id"
+                  :ratings-count="selectedNotice.ratings_count"
+                  :my-rating="selectedNotice.my_rating"
+                  @update="onNoticeRated"
+                />
+              </div>
               <div v-if="canManageNotice(selectedNotice)" class="left-tools">
                 <button class="btn-tool" @click="openEditModal(selectedNotice); closeDetail()">
                   <AppIcon name="edit" :size="14" />
@@ -788,7 +746,6 @@ onMounted(() => {
                   <span>删除</span>
                 </button>
               </div>
-              <div v-else></div>
               <button class="btn-primary" @click="closeDetail">
                 完成
               </button>
@@ -849,19 +806,15 @@ onMounted(() => {
               </div>
 
               <div class="form-item">
-                <div class="checkbox-row">
-                  <input
-                    id="has_validity_check"
-                    v-model="editForm.has_validity"
-                    type="checkbox"
-                    class="form-checkbox"
-                  />
-                  <label for="has_validity_check" class="checkbox-label">
-                    设定通知时效（到期后自动从工作台走马灯下架）
-                  </label>
-                </div>
+                <ThinHoundCheckbox
+                  v-model="editForm.has_validity"
+                  :size="18"
+                  class="checkbox-label"
+                >
+                  <span>设定通知时效（到期后自动从工作台走马灯下架）</span>
+                </ThinHoundCheckbox>
                 <span v-if="!editForm.has_validity" class="form-hint">
-                  长期有效通知将在邮件通知/发布时间满 2 周后自动从工作台走马灯下架，并完整保留在通知中心。
+                  长期有效通知将在邮件通知/发布时间满 7 天后自动从工作台走马灯下架，并完整保留在通知中心。
                 </span>
               </div>
 
@@ -915,16 +868,27 @@ onMounted(() => {
     <!-- 弹窗 3：AI 智能扫描最近一周邮件 Modal -->
     <Teleport to="body">
       <Transition name="modal-fade">
-        <div v-if="showAiScanModal" class="modal-backdrop" @click.self="showAiScanModal = false">
+        <div v-if="showNoticeScanModal" class="modal-backdrop" @click.self="closeNoticeScanModal">
           <div class="modal-card ai-scan-modal">
             <div class="modal-header">
               <div class="modal-title-with-icon">
                 <AppIcon name="sparkle" :size="20" />
                 <h3>AI 扫描识别一周内教务与公共事务通知</h3>
               </div>
-              <button class="modal-close-btn" @click="showAiScanModal = false">
-                <AppIcon name="close" :size="18" />
-              </button>
+              <div class="modal-header-actions">
+                <button
+                  v-if="aiScanning"
+                  type="button"
+                  class="btn-subtle mini header-bg-btn"
+                  title="在后台继续扫描，您可以继续使用系统其他功能"
+                  @click="closeNoticeScanModal"
+                >
+                  后台运行
+                </button>
+                <button class="modal-close-btn" title="关闭 (可后台运行)" @click="closeNoticeScanModal">
+                  <AppIcon name="close" :size="18" />
+                </button>
+              </div>
             </div>
 
             <div class="ai-scan-status-box">
@@ -944,15 +908,15 @@ onMounted(() => {
             </div>
 
             <!-- 批量导入成功报告 -->
-            <div v-if="aiImportReport" class="import-report-box">
-              <AppIcon name="check" :size="20" class="report-check-icon" />
+            <div v-if="aiImportReport" class="import-report-box" :class="{ 'has-errors': (aiImportReport.error_count || 0) > 0 }">
+              <AppIcon :name="(aiImportReport.error_count || 0) > 0 && aiImportReport.inserted_count === 0 ? 'warning' : 'check'" :size="20" class="report-check-icon" />
               <div class="report-text">
-                <strong>导入操作完成！</strong>
+                <strong>{{ (aiImportReport.error_count || 0) > 0 && aiImportReport.inserted_count === 0 ? '导入遇到问题' : '导入操作完成！' }}</strong>
                 <p>
-                  成功新增 <b>{{ aiImportReport.inserted_count }}</b> 条通知，自动跳过 <b>{{ aiImportReport.skipped_count }}</b> 条已有重复通知。
+                  成功新增 <b>{{ aiImportReport.inserted_count }}</b> 条通知，自动跳过 <b>{{ aiImportReport.skipped_count }}</b> 条已有重复通知<span v-if="(aiImportReport.error_count || 0) > 0">，<b>{{ aiImportReport.error_count }}</b> 条入库失败</span>。
                 </p>
               </div>
-              <button class="btn-primary mini" @click="showAiScanModal = false">
+              <button class="btn-primary mini" @click="closeNoticeScanModal">
                 完成
               </button>
             </div>
@@ -978,12 +942,13 @@ onMounted(() => {
                   :class="{ 'is-duplicate': item.isDuplicate, 'is-selected': aiSelectedIndices.has(idx) }"
                   @click="toggleSelectAiItem(idx)"
                 >
-                  <input
-                    type="checkbox"
+                  <ThinHoundCheckbox
                     :checked="aiSelectedIndices.has(idx)"
                     :disabled="item.isDuplicate"
+                    :size="18"
                     class="candidate-checkbox"
-                    @click.stop="toggleSelectAiItem(idx)"
+                    @click.stop
+                    @change="toggleSelectAiItem(idx)"
                   />
                   <div class="candidate-main">
                     <div class="candidate-tags">
@@ -1012,18 +977,28 @@ onMounted(() => {
             </div>
 
             <div class="modal-footer">
-              <button type="button" class="btn-subtle" @click="showAiScanModal = false">
-                取消
-              </button>
-              <button
-                v-if="!aiImportReport && aiExtractedNotices.length > 0"
-                type="button"
-                class="btn-primary"
-                :disabled="aiImporting || aiSelectedIndices.size === 0"
-                @click="confirmBatchImport"
-              >
-                {{ aiImporting ? '正在批量保存入库…' : `一键导入选中的 ${aiSelectedIndices.size} 条通知` }}
-              </button>
+              <template v-if="aiScanning">
+                <button type="button" class="btn-subtle" @click="closeNoticeScanModal">
+                  在后台继续扫描
+                </button>
+                <button type="button" class="btn-subtle btn-danger-text" @click="cancelNoticeScan">
+                  取消扫描
+                </button>
+              </template>
+              <template v-else>
+                <button type="button" class="btn-subtle" @click="closeNoticeScanModal">
+                  {{ aiImportReport ? '关闭' : '取消' }}
+                </button>
+                <button
+                  v-if="!aiImportReport && aiExtractedNotices.length > 0"
+                  type="button"
+                  class="btn-primary"
+                  :disabled="aiImporting || aiSelectedIndices.size === 0"
+                  @click="confirmBatchImport"
+                >
+                  {{ aiImporting ? '正在批量保存入库…' : `一键导入选中的 ${aiSelectedIndices.size} 条通知` }}
+                </button>
+              </template>
             </div>
           </div>
         </div>
@@ -1465,10 +1440,21 @@ onMounted(() => {
   text-overflow: ellipsis;
 }
 
+.card-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .card-actions {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.modal-footer-rating {
+  display: flex;
+  align-items: center;
 }
 
 .icon-tool-btn {
@@ -1870,6 +1856,34 @@ onMounted(() => {
   color: var(--text);
 }
 
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-bg-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.mini-header-spin {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+  margin-right: 2px;
+}
+
+.btn-danger-text {
+  color: #ef4444 !important;
+}
+
+.btn-danger-text:hover {
+  background: rgba(239, 68, 68, 0.1) !important;
+}
+
 .import-report-box {
   margin: 24px;
   padding: 20px;
@@ -1879,6 +1893,11 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.import-report-box.has-errors {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.3);
 }
 
 .report-check-icon {

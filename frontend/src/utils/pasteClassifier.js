@@ -6,7 +6,7 @@
 import { extractSingleTalkFields, parseConferenceMetadataLocally, applyInstitutionLocationPrefix, pickChinesePartIfDual } from './talkEmail'
 import { extractScheduleFromEmailWithAi, extractConferenceFromEmailWithAi, extractSingleNoticeWithAi, normalizeNoticeDates } from '../services/aiService'
 import { extractTextFromPdfUrl } from './pdfNotice'
-import { shanghaiToday } from './schedule'
+import { shanghaiToday, normalizeScheduleDate } from './schedule'
 
 /**
  * 自动识别粘贴文本的类型
@@ -35,9 +35,12 @@ export function classifyPastedText(text = '') {
   // 会议特征词
   if (/学术会议|研讨会|学术论坛|全国年会|研讨班|讲习班|暑期学校|暑假学校|冬令营|大会通知|征文通知|征稿通知|第一轮通知|第二轮通知|第三轮通知|参会通知|参会邀请|邀请函/i.test(raw)) confScore += 6
   if (/conference|symposium|workshop|annual meeting|summer school|winter school|congress|call for papers/i.test(lower)) confScore += 5
+  if (/call\s*for\s*(?:abstracts?|papers?)|abstract\s*submission|key\s*dates|scientific\s*organi[sz]ing\s*committee|registration\s*deadline/i.test(lower)) confScore += 6
   if (/征文|征稿|早鸟|截稿|摘要提交|注册费|开幕式|闭幕式|组委会|组织委员会/i.test(raw)) confScore += 4
   if (/主办单位|承办单位|协办单位|举办地点|举办城市/i.test(raw)) confScore += 3
   if (/registration|submission|deadline|early bird/i.test(lower)) confScore += 3
+  if (/(?:confirmed|invited)\s*speakers?|特邀报告人|特邀嘉宾列表/i.test(raw)) confScore += 4
+  if (/\/event\/\d+|indico/i.test(raw)) confScore += 5
 
   // 通知特征词
   if (/关于.*的通知|关于.*的通告|重要通知|紧急通告|放假调休|校历安排|节假日放假|作息时间调整/i.test(raw)) noticeScore += 6
@@ -48,12 +51,12 @@ export function classifyPastedText(text = '') {
 
   // 特殊强特征覆盖
   // 如果明确包含“报告人：”或“主讲人：”且不是会议征稿，报告权重极高
-  if (/(?:报告人|主讲人|Speaker)\s*[:：]/i.test(raw)) {
+  if (/(?:报告人|主讲人|Speaker)\s*[:：]/i.test(raw) && !/call\s*for|conference|symposium|workshop|年会|研讨会|征稿|摘要提交/i.test(raw)) {
     talkScore += 4
   }
   // 如果包含会议截稿、早鸟、会议网站等，会议权重极高
-  if (/早鸟|截稿|注册截止|征文截止/i.test(raw)) {
-    confScore += 4
+  if (/早鸟|截稿|注册截止|征文截止|call\s*for\s*abstracts?|key\s*dates/i.test(raw)) {
+    confScore += 5
   }
   // 如果包含放假、停水停电、奖学金，通知权重极高
   if (/放假|调休|停水|停电|国家奖学金|评选申报/i.test(raw)) {
@@ -64,6 +67,9 @@ export function classifyPastedText(text = '') {
   if (noticeScore > confScore && noticeScore > talkScore) {
     return 'notice'
   }
+  if (confScore >= 6 && confScore >= talkScore && confScore >= noticeScore) {
+    return 'conference'
+  }
   if (confScore > talkScore && confScore >= noticeScore) {
     return 'conference'
   }
@@ -72,7 +78,7 @@ export function classifyPastedText(text = '') {
   }
 
   // 兜底检查
-  if (/会议|研讨|论坛|年会/i.test(raw)) return 'conference'
+  if (/会议|研讨|论坛|年会|conference|symposium/i.test(raw)) return 'conference'
   if (/通知|通告|安排/i.test(raw)) return 'notice'
 
   return 'talk'
@@ -126,7 +132,7 @@ export function extractNoticeFieldsLocally(text = '', attachments = []) {
   let startDate = todayStr
   let endDate = ''
 
-  const fullDateMatch = text.match(/(?<!\d)(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})日?/)
+  const fullDateMatch = text.match(/(?:^|[^\d])(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})日?/)
   if (fullDateMatch) {
     const y = fullDateMatch[1]
     const m = fullDateMatch[2].padStart(2, '0')
@@ -141,11 +147,11 @@ export function extractNoticeFieldsLocally(text = '', attachments = []) {
 
   const deadlineCandidate = deadlineSuffixMatch?.[1] || deadlinePrefixMatch?.[1]
   if (deadlineCandidate) {
-    const cleanEnd = deadlineCandidate.match(/(?<!\d)(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})日?/)
+    const cleanEnd = deadlineCandidate.match(/(?:^|[^\d])(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})日?/)
     if (cleanEnd) {
       endDate = `${cleanEnd[1]}-${cleanEnd[2].padStart(2, '0')}-${cleanEnd[3].padStart(2, '0')}`
     } else {
-      const md = deadlineCandidate.match(/(?<!\d)(\d{1,2})[月/.-](\d{1,2})日?/)
+      const md = deadlineCandidate.match(/(?:^|[^\d])(\d{1,2})[月/.-](\d{1,2})日?/)
       if (md) {
         const curY = new Date().getFullYear()
         endDate = `${curY}-${md[1].padStart(2, '0')}-${md[2].padStart(2, '0')}`
@@ -291,6 +297,7 @@ export function extractFieldsByRule(text = '', type = 'talk', { imageUrls = [], 
         city: '',
         location: '',
         organizer: '',
+        abstract_start_date: '',
         abstract_deadline: '',
         early_bird_deadline: '',
         registration_deadline: '',
@@ -314,6 +321,10 @@ export function extractFieldsByRule(text = '', type = 'talk', { imageUrls = [], 
     return {
       ...parsedConf,
       title: confTitle || parsedConf.title || (posterUrl ? '学术会议（海报）' : '学术会议'),
+      abstract_start_date: parsedConf.abstract_start_date || '',
+      abstract_deadline: parsedConf.abstract_deadline || '',
+      date: normalizeScheduleDate(parsedConf.date || shanghaiToday()),
+      end_date: normalizeScheduleDate(parsedConf.end_date || parsedConf.date || shanghaiToday()),
       poster_url: posterUrl || parsedConf.poster_url || '',
       attachments: validFiles
     }
@@ -347,7 +358,7 @@ export function extractFieldsByRule(text = '', type = 'talk', { imageUrls = [], 
     }
   }
 
-  // 规范化机构地点前缀
+  // 规范化南大/紫台地点前缀
   parsedTalk.location = applyInstitutionLocationPrefix(parsedTalk.location, text)
   parsedTalk.title = pickChinesePartIfDual(parsedTalk.title || '学术报告')
   if (PLACEHOLDER_TEXT_REGEX.test(parsedTalk.title)) {
@@ -357,7 +368,7 @@ export function extractFieldsByRule(text = '', type = 'talk', { imageUrls = [], 
 
   return {
     title: parsedTalk.title,
-    date: parsedTalk.date || shanghaiToday(),
+    date: normalizeScheduleDate(parsedTalk.date || shanghaiToday()),
     time: parsedTalk.time || '10:00',
     speaker: parsedTalk.speaker || '',
     location: parsedTalk.location || '',
@@ -365,6 +376,7 @@ export function extractFieldsByRule(text = '', type = 'talk', { imageUrls = [], 
     poster_url: posterUrl || '',
     attachments: validFiles
   }
+
 }
 
 /**
@@ -410,10 +422,12 @@ export async function extractFieldsWithAi(text = '', type = 'talk', { config, im
     })
   }
 
+  const today = shanghaiToday()
   const dummyEmail = {
     subject: cleanInputText ? (cleanInputText.split(/\r?\n/)[0]?.slice(0, 100) || '') : '',
     body_text: cleanInputText,
     snippet: cleanInputText ? cleanInputText.slice(0, 500) : '',
+    date: today,
     poster_url: posterUrl
   }
 
@@ -425,6 +439,8 @@ export async function extractFieldsWithAi(text = '', type = 'talk', { config, im
     })
     return {
       ...res,
+      date: normalizeScheduleDate(res.date || today, today),
+      end_date: normalizeScheduleDate(res.end_date || res.date || today, today),
       poster_url: posterUrl || res.poster_url || '',
       attachments: validFiles
     }
@@ -439,7 +455,7 @@ export async function extractFieldsWithAi(text = '', type = 'talk', { config, im
 
   return {
     title: res.title || (posterUrl ? '学术报告（海报）' : '学术报告'),
-    date: res.date || shanghaiToday(),
+    date: normalizeScheduleDate(res.date || today, today),
     time: res.time || '10:00',
     speaker: res.speaker || '',
     location: res.location || '',
@@ -447,4 +463,5 @@ export async function extractFieldsWithAi(text = '', type = 'talk', { config, im
     poster_url: posterUrl || res.poster_url || '',
     attachments: validFiles
   }
+
 }

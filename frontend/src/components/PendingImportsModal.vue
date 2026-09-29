@@ -2,11 +2,12 @@
 import { computed, ref, watch } from 'vue'
 import BaseDialog from './BaseDialog.vue'
 import AppIcon from './AppIcon.vue'
+import ThinHoundCheckbox from './ThinHoundCheckbox.vue'
 import { scheduleImportApi } from '../api/client'
 import { extractFieldsWithAi, extractFieldsByRule, resolveContentForParsing } from '../utils/pasteClassifier'
 import { isAiAssistantReady, loadAiConfig, isModelVisionCapable } from '../services/aiService'
 import { notify, confirmAction } from '../composables/feedback'
-import { shanghaiToday } from '../utils/schedule'
+import { shanghaiToday, normalizeScheduleDate } from '../utils/schedule'
 
 const props = defineProps({
   open: Boolean,
@@ -37,6 +38,30 @@ function isPdfFile(file) {
     /\.pdf$/i.test(file?.url || '')
 }
 
+function mergeCardFormData(existing, fresh) {
+  const merged = { ...existing }
+  for (const [key, val] of Object.entries(fresh || {})) {
+    if (val === undefined || val === null) continue
+
+    if (typeof val === 'string') {
+      const trimmed = val.trim()
+      if (trimmed !== '') {
+        if (key === 'sub_type' && (merged.sub_type === '国际会议' || merged.sub_type === '年会') && trimmed === '研讨会') {
+          continue
+        }
+        merged[key] = trimmed
+      }
+    } else if (Array.isArray(val)) {
+      if (val.length > 0) {
+        merged[key] = val
+      }
+    } else {
+      merged[key] = val
+    }
+  }
+  return merged
+}
+
 const isAllReviewImagesSelected = computed(() => {
   const allImgs = selectedItem.value?.image_urls || []
   return allImgs.length > 0 && reviewSelectedImageUrls.value.length === allImgs.length
@@ -63,6 +88,14 @@ function toggleAllReviewImages(e) {
     reviewSelectedImageUrls.value = [...allImgs]
   } else {
     reviewSelectedImageUrls.value = []
+  }
+}
+
+function toggleReviewImgUrl(img) {
+  if (reviewSelectedImageUrls.value.includes(img)) {
+    reviewSelectedImageUrls.value = reviewSelectedImageUrls.value.filter(u => u !== img)
+  } else {
+    reviewSelectedImageUrls.value.push(img)
   }
 }
 
@@ -162,7 +195,7 @@ async function handleAiResolve(item) {
       files: resolved.targetFiles
     })
 
-    resolvingCard.value = { ...extracted }
+    resolvingCard.value = mergeCardFormData(resolvingCard.value, extracted)
     notify('AI 深度识别成功！已自动填充卡片字段，请核对后确认发布。')
   } catch (err) {
     notify(err.message || 'AI 识别失败', 'error')
@@ -280,10 +313,7 @@ async function handleReviewAiExtract() {
       files: resolved.targetFiles
     })
 
-    resolvingCard.value = {
-      ...resolvingCard.value,
-      ...extracted
-    }
+    resolvingCard.value = mergeCardFormData(resolvingCard.value, extracted)
     notify(`AI 深度识别完成！已根据【${reviewSourceSummary.value}】提取结构化信息`)
   } catch (err) {
     notify(err.message || 'AI 识别失败', 'error')
@@ -302,6 +332,8 @@ async function handleConfirmResolve() {
 
     const dataToSave = {
       ...resolvingCard.value,
+      date: resolvingCard.value.date ? normalizeScheduleDate(resolvingCard.value.date) : resolvingCard.value.date,
+      end_date: resolvingCard.value.end_date ? normalizeScheduleDate(resolvingCard.value.end_date) : resolvingCard.value.end_date,
       poster_url: resolvingCard.value.poster_url || activeImages[0] || '',
       attachments: resolvingCard.value.attachments || activeFiles
     }
@@ -311,7 +343,11 @@ async function handleConfirmResolve() {
       data: dataToSave
     })
     notify(res.message || '已成功审核并正式发布！')
-    emit('resolved', { target_type: resolvingType.value, id: selectedItem.value.id })
+    emit('resolved', {
+      target_type: resolvingType.value,
+      id: selectedItem.value.id,
+      date: dataToSave.date || dataToSave.start_date || shanghaiToday()
+    })
     selectedItem.value = null
     await fetchList()
   } catch (err) {
@@ -319,6 +355,7 @@ async function handleConfirmResolve() {
   } finally {
     submitting.value = false
   }
+
 }
 
 async function handleDeleteItem(item) {
@@ -486,11 +523,14 @@ function getTypeName(type) {
             <!-- 来源 1：文本内容 -->
             <div class="review-source-block" :class="{ 'is-active': reviewIncludeText }">
               <div class="block-header">
-                <label class="block-check-label">
-                  <input type="checkbox" v-model="reviewIncludeText" />
+                <ThinHoundCheckbox
+                  v-model="reviewIncludeText"
+                  :size="16"
+                  class="block-check-label"
+                >
                   <strong>原始文本内容</strong>
                   <span class="count-tag">({{ selectedItem.raw_text?.trim()?.length || 0 }} 字)</span>
-                </label>
+                </ThinHoundCheckbox>
               </div>
               <div v-if="selectedItem.raw_text?.trim()" class="ref-raw-box scrollable">
                 {{ selectedItem.raw_text }}
@@ -501,58 +541,63 @@ function getTypeName(type) {
             <!-- 来源 2：随附图片与海报 -->
             <div v-if="selectedItem.image_urls?.length" class="review-source-block">
               <div class="block-header">
-                <label class="block-check-label">
-                  <input
-                    type="checkbox"
-                    :checked="isAllReviewImagesSelected"
-                    :indeterminate.prop="isSomeReviewImagesSelected && !isAllReviewImagesSelected"
-                    @change="toggleAllReviewImages"
-                  />
+                <ThinHoundCheckbox
+                  :checked="isAllReviewImagesSelected"
+                  :size="16"
+                  class="block-check-label"
+                  @change="toggleAllReviewImages"
+                >
                   <strong>图片与海报</strong>
                   <span class="count-tag">({{ reviewSelectedImageUrls.length }}/{{ selectedItem.image_urls.length }})</span>
-                </label>
+                </ThinHoundCheckbox>
               </div>
               <div class="ref-images-grid">
-                <label
+                <div
                   v-for="(img, idx) in selectedItem.image_urls"
                   :key="idx"
                   class="ref-img-pick"
                   :class="{ 'is-selected': reviewSelectedImageUrls.includes(img) }"
                   :title="reviewSelectedImageUrls.includes(img) ? '已选中参与解析' : '未选中'"
                 >
-                  <input type="checkbox" :value="img" v-model="reviewSelectedImageUrls" />
-                  <img :src="img" alt="海报" />
+                  <ThinHoundCheckbox
+                    v-model="reviewSelectedImageUrls"
+                    :value="img"
+                    :size="16"
+                    class="ref-img-hound-check"
+                  />
+                  <img :src="img" alt="海报" @click="toggleReviewImgUrl(img)" />
                   <span class="img-order">#{{ idx + 1 }}</span>
-                </label>
+                </div>
               </div>
             </div>
 
             <!-- 来源 3：随附文件（含 PDF 正文自动读取） -->
             <div v-if="selectedItem.file_attachments?.length" class="review-source-block">
               <div class="block-header">
-                <label class="block-check-label">
-                  <input
-                    type="checkbox"
-                    :checked="isAllReviewFilesSelected"
-                    :indeterminate.prop="isSomeReviewFilesSelected && !isAllReviewFilesSelected"
-                    @change="toggleAllReviewFiles"
-                  />
+                <ThinHoundCheckbox
+                  :checked="isAllReviewFilesSelected"
+                  :size="16"
+                  class="block-check-label"
+                  @change="toggleAllReviewFiles"
+                >
                   <strong>随附文件</strong>
                   <span class="count-tag">({{ reviewSelectedFileIds.length }}/{{ selectedItem.file_attachments.length }})</span>
-                </label>
+                </ThinHoundCheckbox>
               </div>
               <div class="ref-files-list">
-                <label
+                <ThinHoundCheckbox
                   v-for="(f, idx) in selectedItem.file_attachments"
                   :key="f.id || idx"
+                  v-model="reviewSelectedFileIds"
+                  :value="f.id"
+                  :size="16"
                   class="ref-file-pick"
                   :class="{ 'is-selected': reviewSelectedFileIds.includes(f.id) }"
                 >
-                  <input type="checkbox" :value="f.id" v-model="reviewSelectedFileIds" />
                   <AppIcon :name="isPdfFile(f) ? 'article' : 'attachment'" :size="13" />
                   <span class="filename" :title="f.filename">{{ f.filename }}</span>
                   <span v-if="isPdfFile(f)" class="badge-mini purple" title="自动提取 PDF 正文合并解析">自动读PDF</span>
-                </label>
+                </ThinHoundCheckbox>
               </div>
             </div>
 
@@ -606,6 +651,7 @@ function getTypeName(type) {
                 <label>城市<input v-model="resolvingCard.city" type="text" class="input-text" /></label>
                 <label>类型
                   <select v-model="resolvingCard.sub_type" class="input-select">
+                    <option value="国际会议">国际会议</option>
                     <option value="研讨会">研讨会</option>
                     <option value="年会">年会</option>
                     <option value="暑期学校">暑期学校</option>
@@ -621,7 +667,11 @@ function getTypeName(type) {
               <label>具体地点<input v-model="resolvingCard.location" type="text" class="input-text" /></label>
               <label>主办单位<input v-model="resolvingCard.organizer" type="text" class="input-text" /></label>
               <div class="row-2">
+                <label>摘要开始<input v-model="resolvingCard.abstract_start_date" type="date" class="input-text" /></label>
                 <label>摘要截止<input v-model="resolvingCard.abstract_deadline" type="date" class="input-text" /></label>
+              </div>
+              <div class="row-2">
+                <label>早鸟截止<input v-model="resolvingCard.early_bird_deadline" type="date" class="input-text" /></label>
                 <label>注册截止<input v-model="resolvingCard.registration_deadline" type="date" class="input-text" /></label>
               </div>
               <label>官网网址<input v-model="resolvingCard.website_url" type="text" class="input-text" /></label>
@@ -932,7 +982,8 @@ function getTypeName(type) {
   border-color: var(--accent, #0ea5e9);
 }
 
-.ref-img-pick input[type="checkbox"] {
+.ref-img-pick input[type="checkbox"],
+.ref-img-hound-check {
   position: absolute;
   top: 2px;
   left: 2px;

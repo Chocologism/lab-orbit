@@ -4,12 +4,14 @@ import {
   setAiConnectivityPassed,
   isAiAssistantReady,
   extractJsonFromText,
+  repairIncompleteJson,
+  extractFieldsFromLooseText,
+  extractConferenceFieldsFromLooseText,
   loadPaperTranslations,
   savePaperTranslation,
   extractScheduleFromEmailWithAi,
   extractConferenceFromEmailWithAi,
   extractNoticesFromEmailsWithAi,
-  extractSingleNoticeWithAi,
   normalizeNoticeDates,
   callAiCompletion,
 
@@ -56,12 +58,12 @@ describe('aiService - Connectivity and Readiness State', () => {
     expect(store[AI_CONNECTIVITY_KEY]).toBeUndefined()
   })
 
-  it('evaluates isAiAssistantReady correctly for ollama without apiKey', () => {
+  it('evaluates isAiAssistantReady correctly for ustc_vlab without apiKey', () => {
     saveAiConfig({
-      provider: 'ollama',
-      baseUrl: 'http://localhost:11434/v1',
+      provider: 'ustc_vlab',
+      baseUrl: 'http://127.0.0.1:4000/v1',
       apiKey: '',
-      models: [{ id: 'qwen2.5:7b', name: 'Qwen 2.5 7B' }]
+      models: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }]
     })
 
     // Connectivity not yet passed
@@ -154,6 +156,63 @@ describe('aiService - Robust JSON Extraction', () => {
     expect(extractJsonFromText('')).toBeNull()
     expect(extractJsonFromText('{ 不是合法 json }')).toBeNull()
   })
+
+  it('tolerates trailing commas in JSON output', () => {
+    const raw = '{\n  "title": "暗物质探测新进展",\n  "date": "2026-09-24",\n  "speaker": "张三",\n}'
+    const result = extractJsonFromText(raw)
+    expect(result).toEqual({
+      title: '暗物质探测新进展',
+      date: '2026-09-24',
+      speaker: '张三'
+    })
+  })
+
+  it('strips <think> tags before extracting JSON', () => {
+    const raw = '<think>\nHere is some reasoning with { and }\n</think>\n```json\n{\n  "title": "高能宇宙线起源",\n  "time": "15:00"\n}\n```'
+    const result = extractJsonFromText(raw)
+    expect(result).toEqual({
+      title: '高能宇宙线起源',
+      time: '15:00'
+    })
+  })
+
+  it('repairs truncated JSON where string or braces were cut off by token limit', () => {
+    const truncated = '{\n  "title": "自适应 Fuzzy Dark matter 模拟遇上Agent时代",\n  "date": "2026-09-24",\n  "speaker": "张三 研究员",\n  "notes": "随着 Fuzzy Dark matter'
+    const result = extractJsonFromText(truncated)
+    expect(result).toEqual({
+      title: '自适应 Fuzzy Dark matter 模拟遇上Agent时代',
+      date: '2026-09-24',
+      speaker: '张三 研究员',
+      notes: '随着 Fuzzy Dark matter'
+    })
+  })
+
+  it('repairs truncated JSON with dangling key', () => {
+    const dangling = '{\n  "title": "引力透镜宇宙学",\n  "date": "2026-09-24",\n  "notes":'
+    const result = extractJsonFromText(dangling)
+    expect(result).toEqual({
+      title: '引力透镜宇宙学',
+      date: '2026-09-24'
+    })
+  })
+
+  it('extracts talk fields from loose text when JSON is missing', () => {
+    const loose = '报告题目：自适应 Fuzzy Dark matter 模拟遇上Agent时代\n报告日期：2026-09-24\n时间：15:00\n主讲人：张三 研究员\n地点：南大 天文楼302\n说明：随着 Fuzzy Dark matter 模拟发展……'
+    const result = extractFieldsFromLooseText(loose)
+    expect(result.title).toBe('自适应 Fuzzy Dark matter 模拟遇上Agent时代')
+    expect(result.date).toBe('2026-09-24')
+    expect(result.speaker).toBe('张三 研究员')
+    expect(result.location).toBe('南大 天文楼302')
+  })
+
+  it('extracts conference fields from loose text', () => {
+    const loose = '会议全称：第二届空间天文与高能天体物理研讨会\n举办城市：南京\n起始日期：2026-10-15\n结束日期：2026-10-18\n主办单位：中国天文学会'
+    const result = extractConferenceFieldsFromLooseText(loose)
+    expect(result.title).toBe('第二届空间天文与高能天体物理研讨会')
+    expect(result.city).toBe('南京')
+    expect(result.date).toBe('2026-10-15')
+    expect(result.end_date).toBe('2026-10-18')
+  })
 })
 
 describe('aiService - Paper Translation Persistence', () => {
@@ -219,8 +278,7 @@ describe('aiService - Email Schedule Extraction', () => {
       config: {
         baseUrl: 'http://127.0.0.1:4000/v1',
         model: 'deepseek-flash',
-        apiKey: 'sk-test-mock',
-        provider: 'deepseek'
+        provider: 'ustc_vlab'
       }
     })
 
@@ -233,11 +291,11 @@ describe('aiService - Email Schedule Extraction', () => {
     expect(extracted.notes).toContain('Unveiling Planetary Signatures')
   })
 
-  it('prefers Chinese when email contains dual Chinese and English metadata', async () => {
+  it('prefers Chinese when email contains dual Chinese and English metadata and adds institution prefix', async () => {
     const mockEmail = {
       id: 99,
-      subject: '学术前沿论坛通知：宇宙加速膨胀射电测量',
-      from: 'seminar@lab.edu',
+      subject: '紫台学术前沿论坛通知：宇宙加速膨胀射电测量',
+      from: 'seminar@pmo.ac.cn',
       date: '2026-09-20',
       body_text: `各位老师同学：
 题目: 宇宙加速膨胀射电测量 / Radio Measurement of Cosmic Acceleration
@@ -276,15 +334,15 @@ describe('aiService - Email Schedule Extraction', () => {
       config: {
         baseUrl: 'http://127.0.0.1:4000/v1',
         model: 'deepseek-flash',
-        apiKey: 'sk-test-mock',
-        provider: 'deepseek'
+        provider: 'ustc_vlab'
       }
     })
 
     // 优先填入中文
     expect(extracted.title).toBe('宇宙加速膨胀射电测量')
     expect(extracted.speaker).toBe('刘凡')
-    expect(extracted.location).toBe('5-516 会议室')
+    // 紫台报告在地点前填入“紫台”
+    expect(extracted.location).toBe('紫台5-516 会议室')
     // 验证 max_tokens 优化
     expect(capturedBody.max_tokens).toBe(600)
   })
@@ -319,8 +377,7 @@ describe('aiService - Reasoning Effort Sanitization and Completion Payload', () 
     const testConfig = {
       baseUrl: 'http://127.0.0.1:4000/v1',
       model: 'deepseek-flash',
-      apiKey: 'sk-test-mock',
-      provider: 'deepseek',
+      provider: 'ustc_vlab',
       models: [
         {
           id: 'deepseek-flash',
@@ -383,7 +440,7 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
       body_text: `报告题目: 宇宙第一代恒星与暗物质湮灭
 报告人: 张研究员
 时间: 2026-09-28 14:00
-地点: 实验楼 5-516 会议室
+地点: 紫台仙林 5-516 会议室
 报告摘要: 本次学术报告将系统介绍空间巡天在宇宙第一代恒星形成演化过程中的关键观测证据，深入讨论暗物质粒子湮灭对高红移星系电离结构的影响机制。我们结合最新一代流体动力学数值模拟，详细展示了高能伽马射线背景辐射各向异性谱形的最新拟合结果，并对中国空间站巡天望远镜（CSST）以及未来深空巡天探测规划进行展望。
 欢迎各位老师、同学踊跃参会！`
     })).toBe(false)
@@ -428,7 +485,7 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
     const extracted = await extractScheduleFromEmailWithAi(briefEmail, {
       config: {
         baseUrl: 'https://api.openai.com/v1',
-        model: 'deepseek-flash',
+        model: 'gpt-4o',
         apiKey: 'sk-test'
       },
       posterImageUrl: 'data:image/jpeg;base64,ZmFrZWltYWdlZGF0YQ=='
@@ -451,9 +508,9 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
     const briefEmail = {
       id: 102,
       subject: '报告通知',
-      from: 'admin@lab.edu',
+      from: 'admin@pmo.ac.cn',
       date: '2026-09-22',
-      body_text: '各位老师同学：本周五下午在学术交流中心会议室举办学术报告《空间引力波探测》，欢迎准时参加。详见海报。',
+      body_text: '各位老师同学：本周五下午在紫台仙林会议室举办学术报告《空间引力波探测》，欢迎准时参加。详见海报。',
       poster_url: 'data:image/jpeg;base64,ZmFrZWltYWdlZGF0YQ=='
     }
 
@@ -480,7 +537,7 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
                   date: '2026-09-25',
                   time: '10:00',
                   speaker: '报告人',
-                  location: '实验楼会议室',
+                  location: '紫台会议室',
                   notes: '详见海报。'
                 })
               }
@@ -530,7 +587,7 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
   })
 
   it('attaches Authorization header in convertImageUrlToDataUrl for API files', async () => {
-    store['labhub_token'] = 'valid-jwt-token-xyz'
+    store['cssbd_token'] = 'valid-jwt-token-xyz'
 
     let capturedHeaders = null
     global.fetch = vi.fn().mockImplementation(async (_url, options) => {
@@ -551,10 +608,10 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
 
   it('extractConferenceFromEmailWithAi parses conference metadata via AI successfully', async () => {
     const mockEmail = {
-      subject: '关于召开2026年现代天文学术年会会议的通知',
+      subject: '关于召开2026年引力透镜年会会议的通知',
       from: '中国天文学会 <astronomy@example.org>',
       date: '2026-09-18',
-      body_text: '定于2026年10月16日-19日在河南省开封市举行天文学术年会。'
+      body_text: '定于2026年10月16日-19日在河南省开封市举行引力透镜年会。'
     }
 
     global.fetch = vi.fn().mockImplementation(async () => ({
@@ -564,19 +621,19 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
           {
             message: {
               content: JSON.stringify({
-                title: '2026年现代天文学术年会会议',
+                title: '2026年引力透镜年会会议',
                 sub_type: '年会',
                 date: '2026-10-16',
                 end_date: '2026-10-19',
                 city: '开封',
                 location: '开封大河希尔顿逸林酒店',
-                organizer: '中国天文学会学术交流委员会',
+                organizer: '中国天文学会引力透镜专业委员会',
                 abstract_deadline: '2026-09-01',
                 early_bird_deadline: '2026-09-15',
                 registration_deadline: '2026-09-30',
-                website_url: 'https://astro2026.example.org',
-                registration_url: 'https://astro2026.example.org/reg',
-                notes: '现代天文年度前沿研讨。'
+                website_url: 'https://gl2026.example.org',
+                registration_url: 'https://gl2026.example.org/reg',
+                notes: '引力透镜年度前沿研讨。'
               })
             }
           }
@@ -592,18 +649,18 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
       }
     })
 
-    expect(res.title).toBe('2026年现代天文学术年会会议')
+    expect(res.title).toBe('2026年引力透镜年会会议')
     expect(res.sub_type).toBe('年会')
     expect(res.date).toBe('2026-10-16')
     expect(res.end_date).toBe('2026-10-19')
     expect(res.city).toBe('开封')
     expect(res.location).toBe('开封大河希尔顿逸林酒店')
-    expect(res.organizer).toBe('中国天文学会学术交流委员会')
+    expect(res.organizer).toBe('中国天文学会引力透镜专业委员会')
     expect(res.abstract_deadline).toBe('2026-09-01')
     expect(res.early_bird_deadline).toBe('2026-09-15')
     expect(res.registration_deadline).toBe('2026-09-30')
-    expect(res.website_url).toBe('https://astro2026.example.org')
-    expect(res.registration_url).toBe('https://astro2026.example.org/reg')
+    expect(res.website_url).toBe('https://gl2026.example.org')
+    expect(res.registration_url).toBe('https://gl2026.example.org/reg')
   })
 
   it('extractConferenceFromEmailWithAi invokes multimodal vision when poster is provided and model is vision-capable', async () => {
@@ -630,8 +687,8 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
                   date: '2026-11-05',
                   end_date: '2026-11-08',
                   city: '南京',
-                  location: '学术交流中心天文楼',
-                  organizer: '天文学会与空间科学实验室',
+                  location: '南京大学天文楼',
+                  organizer: '南京大学天文与空间科学学院',
                   notes: '研讨会海报提取摘要。'
                 })
               }
@@ -711,42 +768,6 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
     expect(res.title).toBe('引力波年会')
     expect(res.notes).not.toContain('请根据随附')
     expect(res.city).toBe('北京')
-  })
-
-  it('extractSingleNoticeWithAi parses notice metadata via AI successfully', async () => {
-    global.fetch = vi.fn().mockImplementation(async () => ({
-      ok: true,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({
-                title: '2026年研究生国家奖学金评选申请通知',
-                content: '请各位同学于9月25日前提交国家奖学金申请表至行政办公室。',
-                category: 'academic_affairs',
-                importance: 'important',
-                start_date: '2026-09-18',
-                end_date: '2026-09-25'
-              })
-            }
-          }
-        ]
-      })
-    }))
-
-    const res = await extractSingleNoticeWithAi('请各位同学于9月25日前提交国家奖学金申请表至行政办公室。', {
-      config: {
-        baseUrl: 'https://api.openai.com/v1',
-        model: 'deepseek-chat',
-        apiKey: 'sk-test'
-      }
-    })
-
-    expect(res.title).toBe('2026年研究生国家奖学金评选申请通知')
-    expect(res.category).toBe('academic_affairs')
-    expect(res.importance).toBe('important')
-    expect(res.start_date).toBe('2026-09-18')
-    expect(res.end_date).toBe('2026-09-25')
   })
 
   it('extractNoticesFromEmailsWithAi identifies academic affairs and facility notices while excluding talks', async () => {
@@ -845,9 +866,9 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
         date_str: '2026-09-13 14:00:00',
         snippet: '请于9月23日前提交相关申请材料。',
         attachments: JSON.stringify([
-          { id: 'att-1', filename: '申请表.docx', url: 'https://lab.edu/files/form.docx', size: 24000 }
+          { id: 'att-1', filename: '申请表.docx', url: 'https://pmo.ac.cn/files/form.docx', size: 24000 }
         ]),
-        poster_url: 'https://lab.edu/images/notice.jpg'
+        poster_url: 'https://pmo.ac.cn/images/notice.jpg'
       }
     ]
 
