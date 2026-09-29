@@ -1,5 +1,7 @@
 import axios from 'axios'
 import { applyViewMode } from '../composables/useAdminMode'
+import { isDemoMode } from '../mock/isDemo'
+import { demoAxiosAdapter } from '../mock/demoAdapter'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || ''
 
@@ -8,8 +10,11 @@ const api = axios.create({
   timeout: 15000,
 })
 
-// 请求拦截器：自动注入 Bearer Token
+// 请求拦截器：自动注入 Bearer Token 与演示沙盒适配器
 api.interceptors.request.use((config) => {
+  if (isDemoMode()) {
+    config.adapter = demoAxiosAdapter
+  }
   const token = localStorage.getItem('cssbd_token') || localStorage.getItem('labhub_token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
