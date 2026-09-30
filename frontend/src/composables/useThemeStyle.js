@@ -604,7 +604,9 @@ export function applyThemeToDOM(scheme = currentColorScheme.value, bg = currentB
     }
 
     if (actualBg === 'clouds-static') {
-      doc.style.backgroundImage = "url('/assets/forecast/forecast-clouds-drift-seamless.jpg')"
+      const basePrefix = (typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL) || '/'
+      const formattedBase = basePrefix.endsWith('/') ? basePrefix : (basePrefix + '/')
+      doc.style.backgroundImage = `url('${formattedBase}assets/forecast/forecast-clouds-drift-seamless.jpg')`
       doc.style.backgroundPosition = 'center center'
       doc.style.backgroundSize = 'cover'
       doc.style.backgroundRepeat = 'no-repeat'

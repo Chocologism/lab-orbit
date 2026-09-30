@@ -2779,7 +2779,9 @@ var LiquidGlass = class _LiquidGlass {
           this._cachedCloudsImg.onload = () => {
             this.markChanged();
           };
-          this._cachedCloudsImg.src = '/assets/forecast/forecast-clouds-drift-seamless.jpg';
+          const basePrefix = (typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL) || '/';
+          const formattedBase = basePrefix.endsWith('/') ? basePrefix : (basePrefix + '/');
+          this._cachedCloudsImg.src = formattedBase + 'assets/forecast/forecast-clouds-drift-seamless.jpg';
         }
         if (this._cachedCloudsImg && this._cachedCloudsImg.complete && this._cachedCloudsImg.naturalWidth > 0) {
           try {
