@@ -2,7 +2,11 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import path from 'path'
 
+const isGitHubPages = process.env.GITHUB_PAGES === 'true' || process.env.VITE_GITHUB_PAGES === 'true'
+const repoName = process.env.GITHUB_REPOSITORY ? `/${process.env.GITHUB_REPOSITORY.split('/')[1]}/` : '/lab-orbit/'
+
 export default defineConfig({
+  base: isGitHubPages ? repoName : '/',
   plugins: [vue()],
   resolve: {
     alias: {
