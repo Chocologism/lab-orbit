@@ -1,4 +1,4 @@
-const DB_NAME = 'cssbd_local_assets'
+const DB_NAME = 'laborbit_local_assets'
 const DB_VERSION = 2
 const STORE_NAME = 'backgrounds'
 const CACHE_KEY = 'system_default_earth_orbit'
@@ -142,7 +142,7 @@ export async function getOrLoadRawOrbitVideoUrl() {
 
       if (typeof window !== 'undefined') {
         try {
-          window.dispatchEvent(new CustomEvent('csbd-raw-orbit-ready', { detail: { url: cachedObjectUrl } }))
+          window.dispatchEvent(new CustomEvent('laborbit-raw-orbit-ready', { detail: { url: cachedObjectUrl } }))
         } catch (_) {}
       }
 

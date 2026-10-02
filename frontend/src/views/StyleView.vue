@@ -1,11 +1,13 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import BaseDialog from '../components/BaseDialog.vue'
 import ThinHoundCheckbox from '../components/ThinHoundCheckbox.vue'
 import { notify } from '../composables/feedback'
 import { useThemeStyle } from '../composables/useThemeStyle'
 import { useCustomFont } from '../composables/useCustomFont'
+import { useHomeGridEngine } from '../composables/useHomeGridEngine'
 import {
   saveLocalBackground,
   getLocalBackgroundMeta,
@@ -24,6 +26,9 @@ import {
 const {
   currentColorScheme,
   currentBgType,
+  isBgVideoPaused,
+  setBgVideoPaused,
+  toggleBgVideoPaused,
   colorSchemes,
   bgOptions,
   glassOptions,
@@ -41,6 +46,12 @@ const {
   applyPreviewPaletteToDOM,
   applyThemeToDOM
 } = useThemeStyle()
+
+function handleToggleBgVideoPaused() {
+  const nextVal = !isBgVideoPaused.value
+  setBgVideoPaused(nextVal)
+  notify(nextVal ? '已暂停视频背景并作为超清静态壁纸使用' : '已恢复动态视频背景播放')
+}
 
 function onBgDimInput(e) {
   const val = parseInt(e.target.value, 10)
@@ -371,6 +382,34 @@ async function onRestoreAllDefaultFonts() {
   notify('已恢复为系统默认字体方案')
 }
 
+const router = useRouter()
+const {
+  isHomeEditMode,
+  hasCustomLayout,
+  setHomeEditMode,
+  resetHomeGridLayout
+} = useHomeGridEngine()
+
+function handleSwitchHomeEdit(checked) {
+  setHomeEditMode(checked)
+  if (checked) {
+    notify('已开启首页排版设置，正在返回首页编辑…')
+    router.push('/')
+  } else {
+    notify('已关闭首页排版编辑模式')
+  }
+}
+
+function goToHomeEdit() {
+  setHomeEditMode(true)
+  router.push('/')
+}
+
+function onResetHomeLayout() {
+  resetHomeGridLayout()
+  notify('已恢复首页为 34be100 经典原生排版')
+}
+
 onMounted(() => {
   loadLocalBgInfo()
   loadLocalFontInfo()
@@ -389,6 +428,7 @@ onMounted(() => {
         <a href="#section-glass" class="button secondary small anchor-pill highlight-glass">卡片玻璃质感</a>
         <a href="#section-bg" class="button secondary small anchor-pill">背景效果</a>
         <a href="#section-font" class="button secondary small anchor-pill">字体方案</a>
+        <a href="#section-home-layout" class="button secondary small anchor-pill highlight-glass">首页小组件排版</a>
       </div>
     </header>
 
@@ -599,6 +639,35 @@ onMounted(() => {
         </div>
       </div>
 
+      <!-- 动态视频背景定格控制卡片 -->
+      <div class="bg-freeze-control-card">
+        <div class="bg-freeze-header">
+          <div class="bg-freeze-title-group">
+            <div class="bg-freeze-title-row">
+              <AppIcon name="clock" :size="18" />
+              <h3 class="bg-freeze-title">暂停动态视频背景</h3>
+              <span
+                class="bg-freeze-badge"
+                :class="{ 'is-paused': isBgVideoPaused }"
+              >
+                {{ isBgVideoPaused ? '已定格为静态壁纸' : '动态视频播放中' }}
+              </span>
+            </div>
+            <p class="muted bg-freeze-desc">
+              开启后，深空地球轨道或本地自定义视频将定格在当前帧，作为超清静态壁纸使用；有效释放 GPU 运算负担，大幅降低设备发热与能耗。
+            </p>
+          </div>
+          <button
+            type="button"
+            class="button small bg-freeze-toggle-btn"
+            :class="isBgVideoPaused ? 'primary' : 'secondary'"
+            @click="handleToggleBgVideoPaused"
+          >
+            {{ isBgVideoPaused ? '恢复动态播放' : '定格为静态壁纸' }}
+          </button>
+        </div>
+      </div>
+
       <!-- 背景暗化程度调节卡片 -->
       <div class="bg-dim-control-card">
         <div class="bg-dim-header">
@@ -778,11 +847,11 @@ onMounted(() => {
         <div class="font-preview-body">
           <div class="font-preview-row">
             <span class="preview-tag muted">中文排版</span>
-            <p class="font-preview-line-title">前沿交叉科研与计算实验室</p>
+            <p class="font-preview-line-title">天体物理与交叉科学课题组</p>
           </div>
           <div class="font-preview-row">
             <span class="preview-tag muted">西文排版</span>
-            <p class="font-preview-line-en">Frontier Interdisciplinary Science & Computing Laboratory</p>
+            <p class="font-preview-line-en">Astrophysics and Interdisciplinary Science Research Group</p>
           </div>
           <div class="font-preview-row">
             <span class="preview-tag muted">科学数字与符号</span>
@@ -989,6 +1058,118 @@ onMounted(() => {
         <button type="button" class="button small ghost" @click="onRestoreAllDefaultFonts">
           <AppIcon name="undo" :size="12" /> 恢复系统默认字体方案
         </button>
+      </div>
+    </section>
+
+    <!-- 5. 首页小组件与 Bento 排版 -->
+    <section id="section-home-layout" class="panel style-section theme-settings-section">
+      <div class="section-title-row">
+        <div>
+          <h2>首页小组件与 Bento 网格排版</h2>
+          <p class="section-subtitle">
+            支持 7 大科研业务卡片自由拖拽换位、6 级几何倍数比例缩放、负空间留白与随时恢复 34be100 最理想经典设计。
+          </p>
+        </div>
+      </div>
+
+      <!-- 首页排版设置 Switch 开关 -->
+      <div class="home-layout-switch-bar">
+        <div class="switch-left">
+          <div class="switch-title-wrap">
+            <span class="switch-title">首页排版设置 Switch 开关</span>
+            <span class="badge" :class="isHomeEditMode ? 'emerald' : 'muted'">{{ isHomeEditMode ? '编辑排版状态中' : '未开启' }}</span>
+          </div>
+          <p class="switch-desc">开启此 Switch 开关后将立即回到首页面，直接进入编辑排版状态，进行自由拖拽对调、挤占与添加卡片。</p>
+        </div>
+        <div class="switch-control-wrap">
+          <label class="apple-switch" title="开启后进入首页编辑排版状态">
+            <input
+              type="checkbox"
+              :checked="isHomeEditMode"
+              @change="handleSwitchHomeEdit($event.target.checked)"
+            />
+            <span class="apple-switch-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="home-layout-status-card">
+        <div class="status-left">
+          <div class="status-icon-wrap" :class="{ 'is-custom': hasCustomLayout }">
+            <AppIcon :name="hasCustomLayout ? 'layout' : 'check'" :size="24" />
+          </div>
+          <div class="status-texts">
+            <div class="status-title-row">
+              <h3>{{ hasCustomLayout ? '当前生效：自定义 Bento 网格排版' : '当前生效：经典原生排版（默认）' }}</h3>
+              <span class="badge" :class="hasCustomLayout ? 'blue' : 'emerald'">
+                {{ hasCustomLayout ? '已个性化定制' : '34be100 最理想尺寸' }}
+              </span>
+            </div>
+            <p class="status-desc">
+              {{ hasCustomLayout
+                ? '已开启自定义排版，卡片在 68px 基准行高网格中按 1×1、2×1、2×2、2×4 几何比例精准对齐。'
+                : '默认原生模板，100% 还原基准设计尺寸、LiquidGlass 液体玻璃质感与零白屏科研信息流。'
+              }}
+            </p>
+          </div>
+        </div>
+
+        <div class="status-actions">
+          <button
+            type="button"
+            class="button primary"
+            @click="goToHomeEdit"
+          >
+            <AppIcon name="layout" :size="15" />
+            <span>进入首页自由排版</span>
+          </button>
+          <button
+            v-if="hasCustomLayout"
+            type="button"
+            class="button secondary danger"
+            @click="onResetHomeLayout"
+          >
+            <AppIcon name="refresh" :size="14" />
+            <span>恢复经典排版</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 6 级几何尺寸规格与 7 大小组件预览面板 -->
+      <div class="layout-spec-overview">
+        <h4 class="spec-heading">卡片几何倍数系统与支持业务（全卡片支持 6 级尺寸）</h4>
+        <div class="spec-grid">
+          <div class="spec-card">
+            <span class="spec-tag">1×1 最小号 (Minimal)</span>
+            <strong>宽半栏 × 高 68px</strong>
+            <p>微缩指标方块，并排容纳 2 个，支持全 7 大组件快速查阅。</p>
+          </div>
+          <div class="spec-card">
+            <span class="spec-tag">2×1 小号 (Small)</span>
+            <strong>宽全栏 × 高 68px</strong>
+            <p>单行信息卡，等同 2 个最小号卡片，轻量紧凑。</p>
+          </div>
+          <div class="spec-card">
+            <span class="spec-tag">2×2 中号 (Medium)</span>
+            <strong>宽全栏 × 高 146px</strong>
+            <p>等同 2 个小号（4 个最小号），包含今日天气与精选摘要。</p>
+          </div>
+          <div class="spec-card">
+            <span class="spec-tag">2×4 大号 (Large)</span>
+            <strong>宽全栏 × 高 302px</strong>
+            <p>等同 2 个中号（8 个最小号），最近组会专栏或日程瀑布流。</p>
+          </div>
+          <div class="spec-card">
+            <span class="spec-tag">中宽 (Medium-Wide)</span>
+            <strong>1 号位半宽 × 高 180px</strong>
+            <p>1 号位专属 2 栏展台，精选会议或学术报告速览。</p>
+          </div>
+          <div class="spec-card">
+            <span class="spec-tag">宽卡片 (Wide)</span>
+            <strong>1 号位全宽 × 高 180px</strong>
+            <p>1 号位专属 4 栏全景展台，与 34be100 近期学术会议完全一致。</p>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -2515,6 +2696,283 @@ onMounted(() => {
 
   .custom-dialog-actions .dialog-action-right .button {
     flex: 1;
+  }
+}
+
+/* 视频背景定格控制卡片 */
+.bg-freeze-control-card {
+  margin-top: 20px;
+  padding: 18px 22px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.bg-freeze-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.bg-freeze-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bg-freeze-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.bg-freeze-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+.bg-freeze-badge {
+  font-size: 11.5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--line);
+  color: var(--soft);
+}
+.bg-freeze-badge.is-paused {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.bg-freeze-desc {
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+  max-width: 680px;
+}
+.bg-freeze-toggle-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 首页排版管理卡片与几何尺寸总览 */
+.home-layout-switch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 20px;
+  background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+.switch-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.switch-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.switch-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #f8fafc);
+}
+
+.switch-desc {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary, #94a3b8);
+}
+
+/* 经典 iOS / macOS 风格 Switch 开关 */
+.apple-switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 28px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.apple-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.apple-switch-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: 34px;
+}
+
+.apple-switch-slider:before {
+  position: absolute;
+  content: "";
+  height: 20px;
+  width: 20px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.apple-switch input:checked + .apple-switch-slider {
+  background-color: #10b981;
+  border-color: #10b981;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.45);
+}
+
+.apple-switch input:checked + .apple-switch-slider:before {
+  transform: translateX(22px);
+}
+
+.home-layout-status-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 24px;
+  background: var(--bg-hover, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 14px;
+  margin-bottom: 24px;
+}
+
+.status-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.status-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  flex-shrink: 0;
+}
+
+.status-icon-wrap.is-custom {
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.status-texts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.status-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.status-title-row h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary, #f8fafc);
+}
+
+.status-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary, #94a3b8);
+  max-width: 620px;
+}
+
+.status-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.layout-spec-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.spec-heading {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #f8fafc);
+}
+
+.spec-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.spec-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+  border-radius: 10px;
+}
+
+.spec-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: #818cf8;
+  text-transform: uppercase;
+}
+
+.spec-card strong {
+  font-size: 13px;
+  color: var(--text-primary, #f8fafc);
+}
+
+.spec-card p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary, #94a3b8);
+}
+
+@media (max-width: 768px) {
+  .home-layout-status-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .status-actions {
+    width: 100%;
+    justify-content: flex-start;
   }
 }
 </style>

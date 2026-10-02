@@ -35,7 +35,7 @@ export const SOURCE_OPTIONS = [
   }
 ]
 
-const CACHE_PREFIX = 'csbd_arxiv_ft_'
+const CACHE_PREFIX = 'laborbit_arxiv_ft_'
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 天缓存
 
 /**

@@ -46,11 +46,11 @@ describe('User Scope & AI Chat Session Isolation Suite', () => {
       expect(resolveUserScope({ email: 'carol@example.edu' })).toBe('carol@example.edu')
     })
 
-    it('falls back to localStorage cssbd_user / labhub_user when argument omitted', () => {
-      mockStorage['cssbd_user'] = JSON.stringify({ id: 888, username: 'testuser' })
+    it('falls back to localStorage laborbit_user / labhub_user when argument omitted', () => {
+      mockStorage['laborbit_user'] = JSON.stringify({ id: 888, username: 'testuser' })
       expect(resolveUserScope()).toBe('888')
 
-      delete mockStorage['cssbd_user']
+      delete mockStorage['laborbit_user']
       mockStorage['labhub_user'] = JSON.stringify({ username: 'lab_member' })
       expect(resolveUserScope()).toBe('lab_member')
     })
@@ -63,9 +63,9 @@ describe('User Scope & AI Chat Session Isolation Suite', () => {
 
   describe('Dynamic Storage Keys', () => {
     it('generates user-scoped storage keys when scope exists', () => {
-      expect(getAiSessionsStorageKey('userA')).toBe('csbd_ai_chat_sessions_userA')
-      expect(getAiActiveSessionIdKey('userA')).toBe('csbd_ai_active_session_id_userA')
-      expect(getRecentPapersStorageKey('userA')).toBe('csbd_arxiv_recent_papers_userA')
+      expect(getAiSessionsStorageKey('userA')).toBe('laborbit_ai_chat_sessions_userA')
+      expect(getAiActiveSessionIdKey('userA')).toBe('laborbit_ai_active_session_id_userA')
+      expect(getRecentPapersStorageKey('userA')).toBe('laborbit_arxiv_recent_papers_userA')
     })
 
     it('falls back to default global keys when no user scope exists', () => {
@@ -163,7 +163,7 @@ describe('User Scope & AI Chat Session Isolation Suite', () => {
       expect(sessionsB[0].messages).toEqual([])
     })
 
-    it('smoothly migrates legacy single chat history format (csbd_ai_chat_history)', () => {
+    it('smoothly migrates legacy single chat history format (AI_CHAT_HISTORY_KEY)', () => {
       const legacyMsgs = [
         { role: 'user', content: '早期单条会话历史', timestamp: 100 },
         { role: 'assistant', content: '回答内容', timestamp: 200 }

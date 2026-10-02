@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import { Renderer, Program, Mesh, Color, Triangle } from 'ogl'
 import * as THREE from 'three'
 import FOG from 'vanta/dist/vanta.fog.min'
-import { currentThemeStyle, currentBgType } from '../composables/useThemeStyle'
+import { currentThemeStyle, currentBgType, isBgVideoPaused } from '../composables/useThemeStyle'
 import { getLocalBackground } from '../utils/localBgStorage'
 import {
   getOrLoadRawOrbitVideoUrl,
@@ -20,6 +20,10 @@ const isLogin = computed(() => route.path === '/login')
 const localMedia = ref(null)
 const rawOrbitUrl = ref(getImmediateRawOrbitVideoUrl())
 const isOrbitPlaying = ref(false)
+
+const basePrefix = (typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL) || '/'
+const formattedBase = basePrefix.endsWith('/') ? basePrefix : (basePrefix + '/')
+const orbitFallbackPosterSrc = `${formattedBase}assets/forecast/earth-orbit-poster.jpg`
 
 const vertexShader = `
 attribute vec2 uv;
@@ -559,6 +563,16 @@ function handleLocalBgChanged() {
 
 function onOrbitPlaying() {
   isOrbitPlaying.value = true
+  if (isBgVideoPaused.value) {
+    defaultVideoRef.value?.pause()
+  }
+  onMediaLoaded()
+}
+
+function onLocalVideoPlaying() {
+  if (isBgVideoPaused.value) {
+    localVideoRef.value?.pause()
+  }
   onMediaLoaded()
 }
 
@@ -590,6 +604,7 @@ function pauseVideoForPowerSaving() {
 function resumeVideoPlayback() {
   if (typeof document !== 'undefined' && document.hidden) return
   if (isUserIdle.value) return
+  if (isBgVideoPaused.value) return
   const vid = getActiveVideo()
   if (vid && vid.paused) {
     vid.play().catch(() => {})
@@ -646,7 +661,11 @@ function startAtmosphere(bgType) {
       containerRef.value.innerHTML = ''
     }
     if (defaultVideoRef.value && !isUserIdle.value && (typeof document === 'undefined' || !document.hidden)) {
-      defaultVideoRef.value.play().catch(() => {})
+      if (isBgVideoPaused.value) {
+        defaultVideoRef.value.pause()
+      } else {
+        defaultVideoRef.value.play().catch(() => {})
+      }
     }
     loadRawOrbit()
   } else {
@@ -704,6 +723,14 @@ watch(currentBgType, (newBg) => {
   })
 })
 
+watch(isBgVideoPaused, (paused) => {
+  if (paused) {
+    pauseVideoForPowerSaving()
+  } else {
+    resumeVideoPlayback()
+  }
+})
+
 watch(() => route.path, (newPath) => {
   if (currentBgType.value === 'vanta-fog') {
     if (vantaEffect && typeof vantaEffect.setOptions === 'function') {
@@ -731,7 +758,7 @@ function handleRawOrbitReady(e) {
 onMounted(() => {
   if (typeof window !== 'undefined') {
     window.addEventListener('local-bg-changed', handleLocalBgChanged)
-    window.addEventListener('csbd-raw-orbit-ready', handleRawOrbitReady)
+    window.addEventListener('laborbit-raw-orbit-ready', handleRawOrbitReady)
     USER_EVENTS.forEach(ev => {
       window.addEventListener(ev, resetUserActivity, { passive: true })
     })
@@ -744,7 +771,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('local-bg-changed', handleLocalBgChanged)
-    window.removeEventListener('csbd-raw-orbit-ready', handleRawOrbitReady)
+    window.removeEventListener('laborbit-raw-orbit-ready', handleRawOrbitReady)
     USER_EVENTS.forEach(ev => {
       window.removeEventListener(ev, resetUserActivity)
     })
@@ -782,7 +809,7 @@ onBeforeUnmount(() => {
       <img
         v-if="!isOrbitPlaying && currentBgType === 'earth-orbit'"
         class="custom-bg-media default-bg-video earth-orbit-poster-fallback"
-        src="/assets/forecast/earth-orbit-poster.jpg"
+        :src="orbitFallbackPosterSrc"
         alt=""
         decoding="async"
         @load="onMediaLoaded"
@@ -802,6 +829,7 @@ onBeforeUnmount(() => {
         playsinline
         disablepictureinpicture
         @loadeddata="onMediaLoaded"
+        @playing="onLocalVideoPlaying"
       ></video>
       <img
         v-else

@@ -1128,7 +1128,7 @@ function handleDiscussWithAi(paper) {
   }
   try {
     sessionStorage.setItem('labhub_pending_discuss_paper', JSON.stringify(payload))
-    sessionStorage.setItem('csbd_pending_discuss_paper', JSON.stringify(payload))
+    sessionStorage.setItem('laborbit_pending_discuss_paper', JSON.stringify(payload))
   } catch (_) {}
   router.push({
     path: '/assistant',
@@ -1146,7 +1146,7 @@ onMounted(() => {
     window.addEventListener('storage', checkAiReady)
     window.addEventListener('focus', checkAiReady)
     window.addEventListener('labhub-ai-config-changed', checkAiReady)
-    window.addEventListener('csbd-ai-config-changed', checkAiReady)
+    window.addEventListener('laborbit-ai-config-changed', checkAiReady)
   }
 })
 
@@ -1155,7 +1155,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('storage', checkAiReady)
     window.removeEventListener('focus', checkAiReady)
     window.removeEventListener('labhub-ai-config-changed', checkAiReady)
-    window.removeEventListener('csbd-ai-config-changed', checkAiReady)
+    window.removeEventListener('laborbit-ai-config-changed', checkAiReady)
   }
 })
 
@@ -1174,7 +1174,7 @@ const loadFeed = async () => {
     if (request !== feedRequest) return
     currentUser.value = user
     localStorage.setItem('labhub_user', JSON.stringify(user))
-    localStorage.setItem('cssbd_user', JSON.stringify(user))
+    localStorage.setItem('laborbit_user', JSON.stringify(user))
     loadMyUpcomingArxivIds().catch(() => {})
 
     // 进入文献推荐流时，记录最新浏览进度并清除新文献提示气泡（不强制更改单篇文献的真实已读状态）

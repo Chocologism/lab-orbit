@@ -199,5 +199,72 @@ describe('siteSearchService', () => {
       expect(arxivApi.getFeed).toHaveBeenCalledTimes(1)
       expect(noticeApi.list).toHaveBeenCalledTimes(1)
     })
+
+    it('should accurately retrieve seminar schedules by presenter name (e.g. 王思齐) and presentations sharer', async () => {
+      // 模拟组会排期数据
+      seminarApi.getSeminars.mockResolvedValue([
+        {
+          id: 11,
+          date: '2026-11-25',
+          time: '10:00',
+          location: '待定',
+          presenter_name: '王思齐',
+          topic: '工作汇报（待定）',
+          status: 'upcoming',
+          presentations: []
+        },
+        {
+          id: 3,
+          date: '2026-09-23',
+          time: '10:00',
+          location: '理化大楼 1001',
+          presenter_name: '赵子涵',
+          topic: '工作汇报',
+          status: 'completed',
+          presentations: [
+            { id: 1, presenter_name: '陈晨', arxiv_id: '2609.12345' },
+            { id: 2, presenter_name: '李华', arxiv_id: '' }
+          ]
+        }
+      ])
+      arxivApi.getFeed.mockResolvedValue([])
+      libraryApi.list.mockResolvedValue([])
+      noticeApi.list.mockResolvedValue([])
+      mailboxApi.getEmails.mockResolvedValue([])
+      talkApi.list.mockResolvedValue([])
+      resourceApi.getBooks.mockResolvedValue([])
+
+      // 1. 验证“王思齐是否有组会安排”精准检索到排期
+      const results1 = await searchAllPlatformData('王思齐是否有组会安排')
+      expect(results1.length).toBeGreaterThan(0)
+      const hit1 = results1.find(r => r.id === 11 && r.type === 'seminar')
+      expect(hit1).toBeDefined()
+      expect(hit1.title).toContain('2026-11-25')
+      expect(hit1.title).toContain('王思齐 汇报')
+      expect(hit1.link).toBe('/seminars?view=timeline&target_seminar=11')
+
+      // 2. 验证纯人名“王思齐”也能精准检索
+      invalidateSearchCache('seminars')
+      const results2 = await searchAllPlatformData('王思齐')
+      expect(results2.length).toBeGreaterThan(0)
+      const hit2 = results2.find(r => r.id === 11)
+      expect(hit2).toBeDefined()
+
+      // 3. 验证 presentations 中的文献分享人（如“陈晨”）也能命中组会
+      invalidateSearchCache('seminars')
+      const results3 = await searchAllPlatformData('陈晨在组会分享什么文献')
+      expect(results3.length).toBeGreaterThan(0)
+      const hit3 = results3.find(r => r.id === 3 && r.type === 'seminar')
+      expect(hit3).toBeDefined()
+      expect(hit3.detail).toContain('陈晨')
+      expect(hit3.link).toBe('/seminars?view=timeline&target_seminar=3')
+
+      // 4. 验证日期搜索“2026-11-25”或“11月25日”
+      invalidateSearchCache('seminars')
+      const results4 = await searchAllPlatformData('11月25日 组会安排')
+      expect(results4.length).toBeGreaterThan(0)
+      const hit4 = results4.find(r => r.id === 11)
+      expect(hit4).toBeDefined()
+    })
   })
 })

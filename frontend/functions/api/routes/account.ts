@@ -43,9 +43,7 @@ app.put('/credentials', async (c) => {
   }
 
   let match = false;
-  if (current_password === '123456' || current_password === 'lab123456' || current_password === 'CSBD-2026') {
-    match = true;
-  } else if (user.hashed_password) {
+  if (user.hashed_password) {
     try {
       match = await bcrypt.compare(current_password, user.hashed_password);
     } catch (e) {
@@ -87,7 +85,7 @@ app.put('/credentials', async (c) => {
     .bind(user.id)
     .first();
 
-  const secret = c.env.JWT_SECRET || 'cssbd-hub-secure-secret-key-2026';
+  const secret = c.env.JWT_SECRET || 'laborbit-secure-secret-key-2026';
   return c.json({ access_token: await createToken(updated as UserRow, secret), token_type: 'bearer', user: updated });
 });
 

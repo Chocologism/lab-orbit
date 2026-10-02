@@ -588,7 +588,7 @@ describe('aiService - Multimodal Vision and Poster Extraction', () => {
   })
 
   it('attaches Authorization header in convertImageUrlToDataUrl for API files', async () => {
-    store['cssbd_token'] = 'valid-jwt-token-xyz'
+    store['laborbit_token'] = 'valid-jwt-token-xyz'
 
     let capturedHeaders = null
     global.fetch = vi.fn().mockImplementation(async (_url, options) => {

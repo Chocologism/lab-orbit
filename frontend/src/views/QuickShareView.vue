@@ -29,8 +29,8 @@ async function fetchPaper() {
 }
 onMounted(async () => {
   try {
-    if (localStorage.getItem('cssbd_token') || localStorage.getItem('labhub_token')) {
-      const user = await authApi.getMe(); localStorage.setItem('cssbd_user', JSON.stringify(user)); isLoggedIn.value = true
+    if (localStorage.getItem('laborbit_token') || localStorage.getItem('labhub_token')) {
+      const user = await authApi.getMe(); localStorage.setItem('laborbit_user', JSON.stringify(user)); isLoggedIn.value = true
     }
   } catch { isLoggedIn.value = false }
   finally { checking.value = false }
@@ -40,7 +40,7 @@ async function handleQuickLogin() {
   loggingIn.value = true; loginError.value = ''
   try {
     const data = await authApi.login(loginEmail.value, loginPw.value)
-    localStorage.setItem('cssbd_token', data.access_token); localStorage.setItem('cssbd_user', JSON.stringify(data.user))
+    localStorage.setItem('laborbit_token', data.access_token); localStorage.setItem('laborbit_user', JSON.stringify(data.user))
     isLoggedIn.value = true; loginPw.value = ''; await fetchPaper()
   } catch (error) { loginError.value = `登录失败：${error.message}` }
   finally { loggingIn.value = false }

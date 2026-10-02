@@ -17,7 +17,7 @@ def login(email, password="password123"):
     token = res.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
-def ensure_user(email, name, password="password123", role="student"):
+def ensure_user(email, name, password="password123", role="student", can_manage_seminars=False):
     db = SessionLocal()
     u = db.query(User).filter(User.email == email).first()
     if not u:
@@ -26,7 +26,8 @@ def ensure_user(email, name, password="password123", role="student"):
             name=name,
             real_name=name,
             hashed_password=get_password_hash(password),
-            role=role
+            role=role,
+            can_manage_seminars=can_manage_seminars
         )
         db.add(u)
         db.commit()
@@ -34,6 +35,7 @@ def ensure_user(email, name, password="password123", role="student"):
     else:
         u.real_name = name
         u.hashed_password = get_password_hash(password)
+        u.can_manage_seminars = can_manage_seminars
         db.commit()
         db.refresh(u)
     uid = u.id
@@ -140,7 +142,8 @@ def test_granular_permissions():
     
     zhang_headers = login("zhangsan_test@lab.edu", "password123")
     lisi_headers = login("lisi_test@lab.edu", "password123")
-    student_headers = login("student@lab.edu")
+    ensure_user("other_student@lab.edu", "普通无权限学生", "password123", role="student", can_manage_seminars=False)
+    student_headers = login("other_student@lab.edu", "password123")
 
     # 创建一场组会，主讲人为张三，分享人为李四
     sem_res = client.post("/api/seminars", headers=admin_headers, json={
@@ -200,3 +203,6 @@ def test_granular_permissions():
         "arxiv_id": "2402.99999"
     })
     assert bad_share.status_code == 403
+
+    client.delete(f"/api/seminars/{sem_id}", headers=admin_headers)
+    ensure_user("student@lab.edu", "张明 (博士生)", "lab123456", role="student", can_manage_seminars=True)

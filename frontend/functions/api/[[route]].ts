@@ -20,10 +20,10 @@ import video from './routes/video';
 
 const app = new Hono<{ Bindings: Env }>().basePath('/api');
 
-// 兼容不同的 D1 数据库 Binding 名称（DB, csbd_hub_db, cssbd_hub_db）
+// 兼容不同的 D1 数据库 Binding 名称（DB, laborbit_db, labhub_db）
 app.use('*', async (c, next) => {
   if (!c.env.DB) {
-    c.env.DB = (c.env as any).csbd_hub_db || (c.env as any).cssbd_hub_db;
+    c.env.DB = (c.env as any).laborbit_db || (c.env as any).labhub_db;
   }
   await next();
 });

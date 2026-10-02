@@ -55,7 +55,8 @@ const categoryOptions = computed(() => {
   customCategories.value.forEach(cat => {
     if (cat && !baseIds.has(cat)) extras.add(cat)
   })
-  entries.value.forEach(e => {
+  const list = Array.isArray(entries.value) ? entries.value : []
+  list.forEach(e => {
     if (e.kind === 'book' && e.item?.category && !baseIds.has(e.item.category)) {
       extras.add(e.item.category)
     }
@@ -65,7 +66,8 @@ const categoryOptions = computed(() => {
 })
 
 const shown = computed(() => {
-  const filtered = entries.value.filter(e => {
+  const list = Array.isArray(entries.value) ? entries.value : []
+  const filtered = list.filter(e => {
     if (kind.value !== 'all') {
       if (kind.value === 'paper') {
         if (e.kind !== 'paper') return false
@@ -138,7 +140,7 @@ const date = value => new Date(`${value}Z`).toLocaleDateString('zh-CN')
     <template v-else>
       <p class="muted">{{ shown.length }} 项收藏 · 仅自己可见</p>
       <div v-if="!shown.length" class="panel collection-empty">
-        <h2>{{ entries.length ? '该分类下没有匹配的收藏' : '收藏从一颗星开始' }}</h2>
+        <h2>{{ (entries?.length || 0) ? '该分类下没有匹配的收藏' : '收藏从一颗星开始' }}</h2>
         <p>在文献或资料库卡片右上角点击星号，即可保存到这里。</p>
         <div class="empty-actions">
           <router-link class="button secondary" to="/arxiv">浏览文献推荐</router-link>

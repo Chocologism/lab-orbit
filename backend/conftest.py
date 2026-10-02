@@ -3,6 +3,7 @@ import os
 import tempfile
 import pytest
 
+os.environ["SEED_DEMO_DATA"] = "1"
 _test_database = tempfile.TemporaryDirectory(prefix="labhub-pytest-")
 os.environ["LABHUB_DB_PATH"] = os.path.join(_test_database.name, "test.db")
 

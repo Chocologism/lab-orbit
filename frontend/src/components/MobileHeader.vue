@@ -62,7 +62,7 @@ function navigateTo(path) {
 function logout() {
   showMenu.value = false
   if (!window.confirm('确定要退出登录吗？')) return
-  for (const key of ['cssbd_token', 'cssbd_user', 'labhub_token', 'labhub_user']) {
+  for (const key of ['laborbit_token', 'laborbit_user', 'labhub_token', 'labhub_user']) {
     localStorage.removeItem(key)
   }
   router.push('/login')

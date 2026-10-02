@@ -64,14 +64,28 @@ async function getCachedData(key, fetcher) {
 }
 
 /**
- * 停用词过滤与关键词拆解
+ * 对话口语化助词与检索前缀短语（长度 >= 2，可安全从原句中移除）
+ */
+const FILLER_PHRASES = [
+  '帮我查一下', '帮我搜一下', '帮我找一下', '帮我看看', '帮我查查', '帮我找找',
+  '查一下', '搜一下', '找一下', '看一下', '找找看', '有没有', '有哪些',
+  '请问一下', '请问', '帮我', '查询', '检索', '搜索', '找找', '什么时候',
+  '是谁', '在不在', '是否有', '有没有人', '在吗', '关于'
+]
+
+/**
+ * 中文连接与从属助词（作为词与词之间的天然切分符，不作为实体词）
+ */
+const PARTICLE_DELIMITERS = ['的', '了']
+
+/**
+ * 停用词列表（用于过滤提取后的单个 Token，严禁对原句做单字盲目 replaceAll）
  */
 const STOP_WORDS = new Set([
   '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个',
   '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好',
-  '自己', '这', '那', '帮我', '一下', '请问', '怎么', '什么', '查一下', '搜一下',
-  '找一下', '检索', '查询', '找找', '有哪些', '谁在', '什么时候', '哪里', '关于',
-  'the', 'a', 'an', 'and', 'or', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'about'
+  '自己', '这', '那', '一下', '怎么', '什么', '哪里',
+  'the', 'a', 'an', 'and', 'or', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'about', 'is', 'are'
 ])
 
 export function tokenizeQuery(query) {
@@ -86,28 +100,60 @@ export function tokenizeQuery(query) {
     clean = clean.replace(m, ' ')
   }
 
-  // 2. 按长度从长到短将中文停用词替换为空格，避免粘连干扰
-  const sortedChineseStopWords = Array.from(STOP_WORDS)
-    .filter(sw => /[\u4e00-\u9fa5]/.test(sw))
-    .sort((a, b) => b.length - a.length)
-  for (const sw of sortedChineseStopWords) {
-    clean = clean.replaceAll(sw, ' ')
+  // 2. 捕获具体日期格式 (YYYY-MM-DD 或 MM-DD 或 X月X日) 并放入 tokens
+  const dateMatches = clean.match(/\b(?:\d{4}[-/年])?\d{1,2}[-/月]\d{1,2}(?:日)?\b/g) || []
+  for (const d of dateMatches) {
+    tokens.push(d)
+    const normDate = d.replace(/年|月/g, '-').replace(/日/g, '').trim()
+    if (normDate !== d) tokens.push(normDate)
   }
 
-  // 3. 提取英文单词/数字和中文字符片段
+  // 3. 仅消除多字符口语化助词/搜索前缀短语 (长度 >= 2)，严禁对单字进行全局 replaceAll 导致“组会”等核心词被拆碎破坏
+  const sortedFillerPhrases = [...FILLER_PHRASES].sort((a, b) => b.length - a.length)
+  for (const phrase of sortedFillerPhrases) {
+    if (phrase.length >= 2) {
+      clean = clean.replaceAll(phrase, ' ')
+    }
+  }
+
+  // 4. 将中文从属/完成助词（如“的”、“了”）作为安全切分符替换为空格，避免粘连成“黑洞吸积盘的论文”
+  for (const p of PARTICLE_DELIMITERS) {
+    clean = clean.replaceAll(p, ' ')
+  }
+
+  // 5. 提取英文单词/数字和中文字符片段
   const rawTokens = clean.split(/[\s,，.。!！?？;；:：、/\\|'"`~@#$%^&*()_+=\-[\]{}<>]+/).filter(Boolean)
 
   for (const t of rawTokens) {
     if (STOP_WORDS.has(t)) continue
     tokens.push(t)
-    // 若是连续较长的中文字符串，额外切分成二元和三元字组增强召回
-    if (/[\u4e00-\u9fa5]/.test(t) && t.length >= 4) {
-      for (let i = 0; i < t.length - 1; i++) {
-        tokens.push(t.slice(i, i + 2))
+
+    // 中文词元细化
+    if (/[\u4e00-\u9fa5]/.test(t)) {
+      // 3 字符姓名或专有名词（如“王思齐”），生成 2-gram 切分增强模糊召回
+      if (t.length === 3) {
+        tokens.push(t.slice(0, 2))
+        tokens.push(t.slice(1, 3))
+      }
+      // 4 字符及以上（如“组会安排”、“强引力透镜”），额外切分成二元和三元字组
+      else if (t.length >= 4) {
+        for (let i = 0; i < t.length - 1; i++) {
+          const bi = t.slice(i, i + 2)
+          if (!STOP_WORDS.has(bi)) tokens.push(bi)
+        }
+        for (let i = 0; i < t.length - 2; i++) {
+          tokens.push(t.slice(i, i + 3))
+        }
       }
     }
   }
-  return Array.from(new Set(tokens.filter(t => t.length >= 2 || /[\u4e00-\u9fa5]/.test(t))))
+
+  // 过滤掉纯单字无意义停用词，保留有效的中文词元或英文单词
+  return Array.from(new Set(tokens.filter(t => {
+    if (!t) return false
+    if (t.length === 1 && STOP_WORDS.has(t)) return false
+    return t.length >= 2 || /[\u4e00-\u9fa5]/.test(t)
+  })))
 }
 
 /**
@@ -154,8 +200,8 @@ export async function searchLiterature(tokens, rawQuery) {
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i)
-      if (key && (key.startsWith('csbd_paper_chat_') || key.startsWith('csbd_paper_discuss_'))) {
-        const paperId = key.replace(/^csbd_paper_(chat|discuss)_/, '')
+      if (key && (key.startsWith('laborbit_paper_chat_') || key.startsWith('laborbit_paper_discuss_'))) {
+        const paperId = key.replace(/^laborbit_paper_(chat|discuss)_/, '')
         const val = localStorage.getItem(key)
         if (val) discussHistories[paperId] = val.slice(0, 3000)
       }
@@ -322,7 +368,7 @@ export async function searchSchedule(tokens, rawQuery) {
 
   const results = []
 
-  // 3.1 检索组会排期
+  // 3.1 检索组会排期（含主讲人与 presentations 论文分享人）
   for (const s of seminarList) {
     const topic = s.topic || ''
     const presenter = s.presenter_name || s.name || ''
@@ -331,18 +377,47 @@ export async function searchSchedule(tokens, rawQuery) {
     const papers = Array.isArray(s.papers) ? s.papers.join(' ') : (s.papers || s.arxiv_id || '')
     const status = s.status || ''
 
-    const score = scoreTextMatch(tokens, presenter) * 3.0 +
+    // 检查分享列表 (presentations)
+    const presentations = Array.isArray(s.presentations) ? s.presentations : []
+    const sharers = presentations.map(p => p.presenter_name).filter(Boolean).join(' ')
+    const presentationPapers = presentations.map(p => p.arxiv_id).filter(Boolean).join(' ')
+
+    // 日期模糊加分: 如用户输入 "11-25" 或 "11月25日" 或 "2026-11-25"
+    let dateBonus = 0
+    if (date) {
+      const shortDate = date.slice(5) // "11-25"
+      const zhDate = date.slice(5).replace(/^0?(\d+)-0?(\d+)$/, '$1月$2日')
+      if (rawQuery.includes(shortDate) || (zhDate && rawQuery.includes(zhDate)) || rawQuery.includes(date)) {
+        dateBonus = 25
+      }
+    }
+
+    const score = scoreTextMatch(tokens, presenter) * 3.5 +
+      scoreTextMatch(tokens, sharers) * 3.0 +
       scoreTextMatch(tokens, topic) * 2.5 +
-      scoreTextMatch(tokens, papers, location) * 1.5 +
-      scoreTextMatch(tokens, date) * 1.0
+      scoreTextMatch(tokens, papers, presentationPapers, location) * 1.5 +
+      scoreTextMatch(tokens, date) * 1.2 +
+      dateBonus
 
     if (score > 8) {
+      let detail = topic ? `主题: ${topic}` : ''
+      if (sharers) {
+        detail = detail ? `${detail} | 文献分享人: ${sharers}` : `文献分享人: ${sharers}`
+      }
+      if (presentationPapers || papers) {
+        const pText = presentationPapers || papers
+        detail = detail ? `${detail} (${pText})` : `分享文献: ${pText}`
+      }
+      if (!detail) detail = '暂无详细主题'
+
+      const presenterDesc = presenter ? `${presenter} 汇报` : (sharers ? `${sharers} 分享` : '组会')
+
       results.push({
         id: s.id,
         type: 'seminar',
-        title: `【组会】${date} ${presenter ? presenter + ' 汇报' : '组会'}`,
-        detail: topic ? `主题: ${topic}` : (papers ? `分享文献: ${papers}` : '暂无详细主题'),
-        meta: `地点: ${location || '未定'} | 状态: ${status === 'completed' ? '已结束' : '待举行'}`,
+        title: `【组会】${date} ${presenterDesc}`,
+        detail,
+        meta: `主讲: ${presenter || '待定'} | 地点: ${location || '待定'} | 状态: ${status === 'completed' ? '已结束' : '待举行'}`,
         score,
         link: `/seminars?view=timeline&target_seminar=${s.id}`
       })
@@ -416,15 +491,34 @@ export async function searchResources(tokens, rawQuery) {
 }
 
 /**
+ * 日常通用问候与非站内检索通用短语（防止纯问候被误判为实体人名检索）
+ */
+const NON_SEARCH_WORDS = new Set([
+  '你好', '您好', '早安', '午安', '晚安', '哈喽', '嗨', 'hello', 'hi',
+  '谢谢', '感谢', '再见', '拜拜', '好的', '收到', '明白', '好的谢谢',
+  '推导', '计算', '证明', '解释', '总结', '概括', '介绍'
+])
+
+/**
  * 意图门控：判断用户问题是否可能涉及全站检索
  */
 export function hasPlatformSearchIntent(query) {
   if (!query || typeof query !== 'string') return false
   const q = query.trim().toLowerCase()
   if (q.length < 2) return false
+  if (NON_SEARCH_WORDS.has(q)) return false
 
-  const pattern = /(文献|论文|文章|arxiv|推荐流|文献库|通知|公告|邮件|收件箱|信件|日程|组会|周会|学术报告|讲座|会议|汇报|报告人|分享人|主讲|资料|资源|卡片|算力|使用方法|功能|怎么用|入口|谁讲|谁汇报|哪天|时间|有没有|查一下|找一下|搜一下|查看)/i
-  return pattern.test(q)
+  // 1. 明确的业务意图关键词（涵盖文献、通知、邮件、组会、排期、人员、资料等）
+  const pattern = /(文献|论文|文章|arxiv|推荐流|文献库|通知|公告|邮件|收件箱|信件|日程|组会|周会|学术报告|讲座|会议|汇报|报告人|分享人|主讲|资料|资源|卡片|算力|vlab|使用方法|功能|怎么用|入口|谁讲|谁汇报|排期|安排|名单|轮次|哪天|哪周|什么时候|轮到|在不在|有没有|查一下|找一下|搜一下|查看|是谁|在吗)/i
+  if (pattern.test(q)) return true
+
+  // 2. 纯中文短词（2~4 字，且不属于停用词或日常动词，通常为单个人名如“王思齐”、“陈晨”或精准实体词）
+  if (/^[\u4e00-\u9fa5]{2,4}$/.test(q) && !STOP_WORDS.has(q) && !NON_SEARCH_WORDS.has(q)) return true
+
+  // 3. 询问某人是否有事情/安排等句式（如“王思齐有吗”、“王思齐呢”、“王思齐有安排吗”）
+  if (/^[\u4e00-\u9fa5]{2,4}(?:有|在|呢|吗|是否|有没有)/.test(q)) return true
+
+  return false
 }
 
 /**

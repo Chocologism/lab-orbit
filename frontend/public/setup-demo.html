@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>LabOrbit - 重置至尚未初始化状态</title>
+</head>
+<body>
+  <script>
+    localStorage.setItem('laborbit_demo_settings', JSON.stringify({
+      initialized: false,
+      user_count: 0
+    }));
+    localStorage.removeItem('labhub_token');
+    localStorage.removeItem('labhub_user');
+    localStorage.removeItem('laborbit_default_v20260930_cyan_clouds');
+    localStorage.removeItem('laborbit_color_scheme');
+    localStorage.removeItem('laborbit_bg_type');
+    localStorage.removeItem('laborbit_theme_style');
+    window.location.replace('/lab-orbit/setup');
+  </script>
+</body>
+</html>

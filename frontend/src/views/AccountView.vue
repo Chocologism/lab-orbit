@@ -10,10 +10,17 @@ import ThinHoundCheckbox from '../components/ThinHoundCheckbox.vue'
 import ZoteroCollectionTree from '../components/ZoteroCollectionTree.vue'
 import { notify } from '../composables/feedback'
 import { useAdminMode, applyViewMode } from '../composables/useAdminMode'
+import { useTutorial } from '../composables/useTutorial'
 
 const user = ref(null), loading = ref(true), error = ref(''), busy = ref(false), members = ref([]), permissionBusy = ref(false)
 
 const { currentMode: adminViewMode, isAdminMode, isUserMode, setAdminMode: saveAdminMode } = useAdminMode()
+const { openTutorial } = useTutorial()
+
+function handleLaunchTutorial() {
+  const currentRole = user.value?.role || 'member'
+  openTutorial({ role: currentRole, mandatory: false })
+}
 
 const isActualAdmin = computed(() => {
   return Boolean(user.value && (user.value.actual_role === 'admin' || user.value.role === 'admin' || user.value.is_admin_account))
@@ -51,7 +58,7 @@ const realName = ref(''), nickname = ref(''), email = ref(''), identity = ref('s
 // 邀请码管理
 const inviteCodes = ref([]), inviteCodeBusy = ref(false)
 const newCode = ref(''), newNote = ref(''), newInviteRole = ref('student'), newInviteIdentity = ref('student')
-function updated(data) { user.value = data; localStorage.setItem('labhub_user', JSON.stringify(data)); localStorage.setItem('cssbd_user', JSON.stringify(data)); window.dispatchEvent(new Event('account-updated')) }
+function updated(data) { user.value = data; localStorage.setItem('labhub_user', JSON.stringify(data)); window.dispatchEvent(new Event('account-updated')) }
 async function load() { error.value = ''; loading.value = true; try { const data = await authApi.getMe(); user.value = data; realName.value = data.real_name || data.name; nickname.value = data.nickname; email.value = data.email; identity.value = data.identity || 'student'; if (data.role === 'admin') { members.value = await authApi.getMembers(); inviteCodes.value = await authApi.getInviteCodes() } } catch(e) { error.value = e.message } finally { loading.value = false } }
 const updatingSeminarMemberId = ref(null)
 
@@ -117,7 +124,7 @@ async function saveCredentials() {
   busy.value = true; error.value = ''
   try {
     const data = await accountApi.credentials({ current_password: currentPassword.value, ...(email.value.trim().toLowerCase() !== user.value.email ? {email: email.value} : {}), ...(newPassword.value ? {new_password: newPassword.value} : {}) })
-    localStorage.setItem('labhub_token', data.access_token); localStorage.setItem('cssbd_token', data.access_token); updated(data.user)
+    localStorage.setItem('labhub_token', data.access_token); localStorage.setItem('laborbit_token', data.access_token); updated(data.user)
     currentPassword.value = ''; newPassword.value = ''; confirmPassword.value = ''; notify('账户已更新，其他登录会话已失效')
   } catch(e) { error.value = e.message } finally { busy.value = false }
 }
@@ -2490,6 +2497,14 @@ async function deleteMember(member) {
       </div>
       <span class="shortcut-arrow">→</span>
     </router-link>
+    <button type="button" class="account-shortcut-card" style="text-align: left; background: none; border: none; font: inherit; cursor: pointer;" @click="handleLaunchTutorial">
+      <div class="shortcut-icon-box emerald"><AppIcon name="layout" :size="18" /></div>
+      <div class="shortcut-info">
+        <strong class="shortcut-title">功能向导</strong>
+        <span class="shortcut-desc muted">重新启动课题组协作平台全站功能指引（按当前身份定制）</span>
+      </div>
+      <span class="shortcut-arrow">→</span>
+    </button>
   </div>
 </section>
 

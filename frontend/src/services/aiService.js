@@ -10,19 +10,19 @@ import { hasPlatformSearchIntent, searchAllPlatformData } from './siteSearchServ
 
 export { normalizeScheduleDate, resolveUserScope }
 
-export const AI_STORAGE_KEY = 'csbd_ai_config'
-export const AI_CHAT_HISTORY_KEY = 'csbd_ai_chat_history'
-export const AI_SESSIONS_STORAGE_KEY = 'csbd_ai_chat_sessions'
-export const AI_ACTIVE_SESSION_ID_KEY = 'csbd_ai_active_session_id'
-export const AI_CONNECTIVITY_KEY = 'csbd_ai_connectivity_passed'
-export const PAPER_TRANSLATIONS_STORAGE_KEY = 'csbd_paper_translations'
+export const AI_STORAGE_KEY = 'laborbit_ai_config'
+export const AI_CHAT_HISTORY_KEY = 'laborbit_ai_chat_history'
+export const AI_SESSIONS_STORAGE_KEY = 'laborbit_ai_chat_sessions'
+export const AI_ACTIVE_SESSION_ID_KEY = 'laborbit_ai_active_session_id'
+export const AI_CONNECTIVITY_KEY = 'laborbit_ai_connectivity_passed'
+export const PAPER_TRANSLATIONS_STORAGE_KEY = 'laborbit_paper_translations'
 
 /**
  * 获取特定用户的会话列表本地存储键
  */
 export function getAiSessionsStorageKey(userOrScope) {
   const scope = resolveUserScope(userOrScope)
-  return scope ? `csbd_ai_chat_sessions_${scope}` : AI_SESSIONS_STORAGE_KEY
+  return scope ? `laborbit_ai_chat_sessions_${scope}` : AI_SESSIONS_STORAGE_KEY
 }
 
 /**
@@ -30,7 +30,7 @@ export function getAiSessionsStorageKey(userOrScope) {
  */
 export function getAiActiveSessionIdKey(userOrScope) {
   const scope = resolveUserScope(userOrScope)
-  return scope ? `csbd_ai_active_session_id_${scope}` : AI_ACTIVE_SESSION_ID_KEY
+  return scope ? `laborbit_ai_active_session_id_${scope}` : AI_ACTIVE_SESSION_ID_KEY
 }
 
 /**
@@ -49,7 +49,7 @@ function dispatchAiConfigChanged() {
     try {
       const createEvt = (name) => typeof CustomEvent === 'function' ? new CustomEvent(name) : { type: name }
       window.dispatchEvent(createEvt('labhub-ai-config-changed'))
-      window.dispatchEvent(createEvt('csbd-ai-config-changed'))
+      window.dispatchEvent(createEvt('laborbit-ai-config-changed'))
     } catch (_) {}
   }
 }
@@ -604,10 +604,59 @@ export function formatSearchResultsForPrompt(results) {
     lines.push(`   可点击超链接: [${cleanTitle}](${item.link})`)
   })
 
-  lines.push('\n【使用指引】')
-  lines.push('1. 请结合上述真实检索条目回答用户的查询，给出关键信息摘要（如主题、人员、时间、关键节点或核心结论）。')
+  lines.push('\n【核心回答规范】')
+  lines.push('1. 你已具备平台全站数据库的实时检索能力！上述数据即为系统从数据库中查询的最新真实数据，请直接据此为用户精准解答。')
   lines.push('2. 当提及具体的文献、通知、邮件、组会或资料卡片时，请在正文中直接使用上方提供的 Markdown 超链接（如 [条目标题](/路径)），以便用户在聊天中能一眼看出并可直接点击跳转。')
+  lines.push('3. 严禁声称“无法直连数据库”、“没有权限”或“本地服务未连通”！本地接口仅为您作为大模型的推理直连接口，与平台数据获取完全无关。')
   return lines.join('\n')
+}
+
+/**
+ * 清除助手回复中的报错引用文本段落，避免历史报错污染上下文造成大模型幻觉
+ */
+export function cleanAssistantErrorInContent(content) {
+  if (typeof content !== 'string') return content
+  return content.replace(/(?:\r?\n)*> 发生错误:[\s\S]*$/g, '').trim()
+}
+
+/**
+ * 判断是否为纯重试或继续类口令
+ */
+export function isRetryQuery(text) {
+  if (!text || typeof text !== 'string') return false
+  return /^(重试|再试一次|再试一下|重新试下|重新查询|重新检索|继续|再查一下|再搜一次|retry|again)[!！。.]*$/i.test(text.trim())
+}
+
+/**
+ * 从对话历史中解析用于检索的有效用户提问（支持从重试口令向前追溯真实业务问题）
+ */
+export function resolveSearchQuery(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return ''
+  const userMessages = messages.filter(m => m.role === 'user')
+  if (userMessages.length === 0) return ''
+
+  const lastMsg = userMessages[userMessages.length - 1]
+  const lastText = (typeof lastMsg?.content === 'string'
+    ? lastMsg.content
+    : (Array.isArray(lastMsg?.content)
+      ? lastMsg.content.filter(p => p.type === 'text').map(p => p.text).join(' ')
+      : '')).trim()
+
+  if (isRetryQuery(lastText) && userMessages.length > 1) {
+    for (let i = userMessages.length - 2; i >= 0; i--) {
+      const prevMsg = userMessages[i]
+      const prevText = (typeof prevMsg?.content === 'string'
+        ? prevMsg.content
+        : (Array.isArray(prevMsg?.content)
+          ? prevMsg.content.filter(p => p.type === 'text').map(p => p.text).join(' ')
+          : '')).trim()
+      if (prevText && !isRetryQuery(prevText)) {
+        return prevText
+      }
+    }
+  }
+
+  return lastText
 }
 
 /**
@@ -670,12 +719,7 @@ export async function sendChatMessageStream({
   }
 
   // 意图识别与平台多源语义模糊检索增强 (RAG)
-  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
-  const userQuery = typeof lastUserMsg?.content === 'string'
-    ? lastUserMsg.content
-    : (Array.isArray(lastUserMsg?.content)
-      ? lastUserMsg.content.filter(p => p.type === 'text').map(p => p.text).join(' ')
-      : '')
+  const userQuery = resolveSearchQuery(messages)
 
   if (userQuery && hasPlatformSearchIntent(userQuery)) {
     try {
@@ -685,6 +729,18 @@ export async function sendChatMessageStream({
         systemPromptContent = systemPromptContent
           ? `${systemPromptContent}\n\n${searchPrompt}`
           : searchPrompt
+      } else {
+        const emptyPrompt = [
+          '【全站多源数据库实时检索状态】',
+          `系统已实时检索了平台全部业务数据库（组会排期、学术报告、文献库、通知公告、邮件、资料库卡片），针对用户当前询问（“${userQuery}”）未检索到匹配的记录。`,
+          '【核心回答规范】',
+          '1. 请明确、客观地告知用户：在平台数据库当前的最新记录中，未找到相关排期或记录。',
+          '2. 针对组会排期查询，请为用户提供完整日程链接：[查看完整组会排期日程](/seminars)，并建议用户若有疑问可联系课题组日程管理员确认。',
+          '3. 严禁声称“无法连接到本地端口”、“无法访问数据库”、“无权限读取后端数据”等错误幻觉！你所运行的 AI 服务已具备全站检索接入，只是数据库中确实暂无该项匹配条目。'
+        ].join('\n')
+        systemPromptContent = systemPromptContent
+          ? `${systemPromptContent}\n\n${emptyPrompt}`
+          : emptyPrompt
       }
     } catch (e) {
       console.warn('[aiService] 全站检索增强执行失败，跳过注入:', e)
@@ -699,32 +755,70 @@ export async function sendChatMessageStream({
     })
   }
 
-  // 追加过滤后的上下文，支持多模态图片数组
-  for (const m of messages) {
-    if (m.role === 'user' || m.role === 'assistant') {
-      if (m.role === 'user' && Array.isArray(m.images) && m.images.length > 0) {
-        const parts = []
-        if (m.content && m.content.trim()) {
-          parts.push({ type: 'text', text: m.content })
+  // 追加过滤后的上下文，剔除报错污染并清洗多模态图片数组
+  const sanitizedMessages = []
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]
+    if (m.role !== 'user' && m.role !== 'assistant') continue
+
+    if (m.role === 'assistant') {
+      const cleaned = cleanAssistantErrorInContent(m.content)
+      // 若助手消息清洗后为空（例如该条消息原本仅仅是报错通知，未生成有效正文），则直接剔除，避免污染上下文
+      if (!cleaned) {
+        continue
+      }
+      sanitizedMessages.push({
+        role: 'assistant',
+        content: cleaned
+      })
+    } else {
+      sanitizedMessages.push(m)
+    }
+  }
+
+  // 针对“重试”指令进行历史折叠：若最后一条用户消息为重试，且上一条失败的助手消息已被剔除，
+  // 避免出现连续的两条 user 消息（很多大模型接口严禁连续 user 消息），将其恢复为带有明确指引的单条提问
+  if (sanitizedMessages.length > 0) {
+    const lastIdx = sanitizedMessages.length - 1
+    const lastMsg = sanitizedMessages[lastIdx]
+    if (lastMsg.role === 'user') {
+      const lastText = typeof lastMsg.content === 'string' ? lastMsg.content.trim() : ''
+      if (isRetryQuery(lastText) && sanitizedMessages.length > 1) {
+        const prevMsg = sanitizedMessages[lastIdx - 1]
+        if (prevMsg.role === 'user') {
+          // 前一条也是 user（中间的报错 assistant 被清洗了），直接剔除当前的“重试”，保留前一条真实提问
+          sanitizedMessages.pop()
+        } else {
+          // 前一条是有效的 assistant（部分生成），将当前提问改为具体明确的继续指令
+          lastMsg.content = `请继续围绕“${userQuery}”解答并补全未完成的内容。`
         }
-        for (const imgUrl of m.images) {
-          parts.push({
-            type: 'image_url',
-            image_url: {
-              url: imgUrl
-            }
-          })
-        }
-        fullMessages.push({
-          role: 'user',
-          content: parts
-        })
-      } else {
-        fullMessages.push({
-          role: m.role,
-          content: m.content
+      }
+    }
+  }
+
+  for (const m of sanitizedMessages) {
+    if (m.role === 'user' && Array.isArray(m.images) && m.images.length > 0) {
+      const parts = []
+      if (m.content && m.content.trim()) {
+        parts.push({ type: 'text', text: m.content })
+      }
+      for (const imgUrl of m.images) {
+        parts.push({
+          type: 'image_url',
+          image_url: {
+            url: imgUrl
+          }
         })
       }
+      fullMessages.push({
+        role: 'user',
+        content: parts
+      })
+    } else {
+      fullMessages.push({
+        role: m.role,
+        content: m.content
+      })
     }
   }
 
@@ -1353,7 +1447,7 @@ export async function convertImageUrlToDataUrl(url, signal, { maxWidth = 1600, m
   if (url.startsWith('data:')) return url
   try {
     const token = (typeof localStorage !== 'undefined')
-      ? (localStorage.getItem('cssbd_token') || localStorage.getItem('labhub_token'))
+      ? (localStorage.getItem('laborbit_token') || localStorage.getItem('labhub_token'))
       : ''
     const headers = {}
     if (token && (url.startsWith('/') || url.includes('/api/files/'))) {

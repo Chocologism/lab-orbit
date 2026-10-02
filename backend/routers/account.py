@@ -1,5 +1,7 @@
 import io
+import json
 import re
+from typing import Any, Dict, Optional
 import warnings
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -98,3 +100,41 @@ async def avatar(file: UploadFile = File(...), user=Depends(get_current_user), d
     user.avatar = store_file(db, 'avatar.jpg', 'image/jpeg', out.getvalue())
     db.commit(); db.refresh(user)
     return user
+
+
+class HomeLayoutInput(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    slot1: Optional[Dict[str, Any]] = None
+    rightGrid: Optional[list] = None
+
+
+@router.get('/home-layout')
+def get_home_layout(user=Depends(get_current_user)):
+    raw = getattr(user, 'home_layout', '') or ''
+    if not raw.strip():
+        return {'has_custom_layout': False, 'layout': None}
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return {'has_custom_layout': True, 'layout': data}
+    except Exception:
+        pass
+    return {'has_custom_layout': False, 'layout': None}
+
+
+@router.put('/home-layout')
+def save_home_layout(body: HomeLayoutInput, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    payload = body.model_dump()
+    user.home_layout = json.dumps(payload, ensure_ascii=False)
+    db.commit()
+    db.refresh(user)
+    return {'has_custom_layout': True, 'saved': True, 'layout': payload}
+
+
+@router.delete('/home-layout')
+def reset_home_layout(user=Depends(get_current_user), db: Session = Depends(get_db)):
+    user.home_layout = ''
+    db.commit()
+    db.refresh(user)
+    return {'has_custom_layout': False, 'reset': True, 'layout': None}
+

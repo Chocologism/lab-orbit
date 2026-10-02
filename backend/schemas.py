@@ -24,6 +24,7 @@ class UserOut(BaseModel):
     email: str
     role: str
     can_manage_seminars: bool = False
+    tutorial_completed: bool = False
     avatar: Optional[str] = None
     bio: Optional[str] = None
     created_at: datetime

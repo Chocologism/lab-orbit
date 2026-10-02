@@ -283,14 +283,27 @@ def import_schedule(body: ScheduleImport, current_user: User = Depends(get_curre
                 if presenter:
                     p_id = presenter.id
                     p_name = presenter.real_name or presenter.name
-            except ValueError:
-                pass
+                elif p_name.startswith(('外部', '嘉宾', '邀请')) or any(k in p_name.lower() for k in ('external', 'guest')):
+                    p_id = None
+                else:
+                    raise HTTPException(400, f'主讲人「{p_name}」未在系统中注册，请核对姓名或先邀请其注册')
+            except ValueError as exc:
+                raise HTTPException(400, str(exc))
         else:
             p_id = None
 
         key = (row.date, row.time, p_name)
         if any(k == key for k, _ in prepared):
             raise HTTPException(409, f'第 {index + 1} 行与待导入排期重复')
+
+        existing = db.query(SeminarSchedule).filter(
+            SeminarSchedule.date == row.date,
+            SeminarSchedule.time == row.time,
+            SeminarSchedule.presenter_name == p_name,
+            SeminarSchedule.status != 'cancelled'
+        ).first()
+        if existing:
+            raise HTTPException(409, f'排期 {row.date} {row.time} ({p_name}) 已存在')
 
         seminar = SeminarSchedule(
             date=row.date,
@@ -463,6 +476,13 @@ async def create_seminar(
     else:
         presenter_id = None
 
+    if req.paper_id is not None:
+        paper = db.get(ArxivPaper, req.paper_id)
+        if not paper:
+            raise HTTPException(400, "指定的文献不存在")
+        if paper.audience is not None:
+            raise HTTPException(400, "定向推荐文献不能关联到公开组会")
+
     if req.abstract.strip() and current_user.role != 'admin' and (not presenter_id or presenter_id != current_user.id):
         raise HTTPException(403, '摘要请由主讲人本人填写')
     seminar = SeminarSchedule(
@@ -472,7 +492,7 @@ async def create_seminar(
         presenter_name=presenter_name,
         presenter_id=presenter_id,
         topic=req.topic or ("工作汇报（待定）" if presenter_name else "arXiv 文献分享"),
-        paper_id=None,
+        paper_id=req.paper_id,
         slides_url=req.slides_url,
         notes=req.notes,
         abstract=req.abstract,
@@ -480,6 +500,7 @@ async def create_seminar(
     )
     references = await prepare_references(db, req.presentations)
     db.add(seminar)
+    archive_linked(db, req.paper_id)
     set_presentations(db, seminar, req.presentations, references)
     db.commit()
     db.refresh(seminar)
@@ -560,6 +581,14 @@ async def update_seminar(
     for field in ('topic', 'location', 'status'):
         if field in update_data and not update_data[field]:
             raise HTTPException(422, f'{field} 不能为空')
+    if 'paper_id' in update_data:
+        if update_data['paper_id'] is not None:
+            paper = db.get(ArxivPaper, update_data['paper_id'])
+            if not paper:
+                raise HTTPException(400, "指定的文献不存在")
+            if paper.audience is not None:
+                raise HTTPException(400, "定向推荐文献不能关联到公开组会")
+        archive_linked(db, update_data['paper_id'])
     for field, value in update_data.items():
         setattr(seminar, field, value)
 

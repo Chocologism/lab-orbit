@@ -1,11 +1,22 @@
+import { isDemoMode } from '../mock/isDemo'
+import { DEMO_FROZEN_TIME_MS } from './schedule'
+
 /**
- * 判断指定日期（默认当前日期）是否为中秋节（农历八月十五）
+ * 判断指定日期（默认当前日期，在演示模式下默认为冻结时间 2026-09-10）是否为中秋节（农历八月十五）
  * 支持利用现代原生 Intl.DateTimeFormat('zh-u-ca-chinese') 自动推算任意年份的农历八月十五，
  * 并内置公历对照表作为跨平台降级兜底。
- * @param {Date} [date=new Date()]
+ * @param {Date} [date]
  * @returns {boolean}
  */
-export function isMidAutumnFestival(date = new Date()) {
+export function isMidAutumnFestival(date) {
+  if (date === undefined) {
+    if (isDemoMode()) {
+      date = new Date(DEMO_FROZEN_TIME_MS)
+    } else {
+      date = new Date()
+    }
+  }
+
   if (!(date instanceof Date) || isNaN(date.getTime())) {
     return false
   }

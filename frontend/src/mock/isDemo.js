@@ -1,22 +1,27 @@
 import { DEMO_MEMBERS } from './demoData'
 
 export function isDemoMode() {
-  // 1. 构建环境变量指定
-  if (import.meta.env?.VITE_DEMO_MODE === 'true') return true
-
   const storage = typeof localStorage !== 'undefined' ? localStorage : (typeof globalThis !== 'undefined' ? globalThis.localStorage : null)
 
-  // 2. URL Query 显式控制（具有最高覆盖优先级）
-  if (typeof window !== 'undefined' && window.location?.search) {
+  // 1. URL Query 显式控制（具有最高覆盖优先级，支持 search 与 hash 内部 query）
+  if (typeof window !== 'undefined') {
+    let demoParam = null
     try {
-      const params = new URLSearchParams(window.location.search)
-      const demoParam = params.get('demo')
+      if (window.location?.search) {
+        const params = new URLSearchParams(window.location.search)
+        demoParam = params.get('demo')
+      }
+      if (!demoParam && window.location?.hash && window.location.hash.includes('?')) {
+        const hashQuery = window.location.hash.slice(window.location.hash.indexOf('?') + 1)
+        const params = new URLSearchParams(hashQuery)
+        demoParam = params.get('demo')
+      }
       if (demoParam === '1' || demoParam === 'true') {
         storage?.setItem('labhub_force_demo', '1')
         return true
       }
       if (demoParam === '0' || demoParam === 'false') {
-        storage?.removeItem('labhub_force_demo')
+        storage?.setItem('labhub_force_demo', '0')
         if (storage?.getItem('labhub_token')?.startsWith('demo_')) {
           storage?.removeItem('labhub_token')
           storage?.removeItem('labhub_user')
@@ -26,17 +31,25 @@ export function isDemoMode() {
     } catch {}
   }
 
-  // 3. 本地持久化开关 (一旦激活，全站跳转保持沙盒模式)
+  // 2. 本地持久化显式指定（最高优先级：'0' 为绝对禁止，'1' 为绝对开启）
+  if (storage?.getItem('labhub_force_demo') === '0') return false
   if (storage?.getItem('labhub_force_demo') === '1') return true
 
-  // 4. 当前登录身份为演示 Token (防御路由丢失 query 导致会话中断)
-  if (storage?.getItem('labhub_token')?.startsWith('demo_')) return true
+  // 3. 部署环境与域名判断：GitHub Pages 域名天然为演示体验模式
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname || ''
+    if (host.endsWith('github.io') || host.includes('github.io')) return true
+  }
 
-  if (typeof window === 'undefined') return false
+  // 4. 构建环境变量（仅在未被本地明确关闭时生效，如 build:demo）
+  if (import.meta.env?.VITE_DEMO_MODE === 'true') return true
 
-  // 5. 位于 GitHub Pages 域名
-  const host = window.location.hostname || ''
-  if (host.endsWith('github.io') || host.includes('github.io')) return true
+  // 5. 其余任何情况（标准本地或云服务器生产部署），绝对处于真实部署模式！
+  // 若存在历史遗留的 demo_ token，顺手清理，杜绝状态污染
+  if (storage?.getItem('labhub_token')?.startsWith('demo_')) {
+    storage?.removeItem('labhub_token')
+    storage?.removeItem('labhub_user')
+  }
 
   return false
 }

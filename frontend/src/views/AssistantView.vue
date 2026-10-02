@@ -45,7 +45,7 @@ const isDeactivated = ref(false)
 // 当前登录用户
 const currentUser = computed(() => {
   try {
-    const raw = localStorage.getItem('cssbd_user') || localStorage.getItem('labhub_user')
+    const raw = localStorage.getItem('laborbit_user') || localStorage.getItem('labhub_user')
     return raw ? JSON.parse(raw) : null
   } catch (e) {
     return null
@@ -88,11 +88,11 @@ watch(
 )
 
 // 侧边栏折叠状态
-const isSidebarCollapsed = ref(localStorage.getItem('labhub_ai_sidebar_collapsed') === 'true' || localStorage.getItem('csbd_ai_sidebar_collapsed') === 'true')
+const isSidebarCollapsed = ref(localStorage.getItem('labhub_ai_sidebar_collapsed') === 'true' || localStorage.getItem('laborbit_ai_sidebar_collapsed') === 'true')
 function toggleSidebar() {
   isSidebarCollapsed.value = !isSidebarCollapsed.value
   localStorage.setItem('labhub_ai_sidebar_collapsed', String(isSidebarCollapsed.value))
-  localStorage.setItem('csbd_ai_sidebar_collapsed', String(isSidebarCollapsed.value))
+  localStorage.setItem('laborbit_ai_sidebar_collapsed', String(isSidebarCollapsed.value))
 }
 
 // 当前激活会话对象
@@ -294,7 +294,7 @@ onMounted(() => {
     window.addEventListener('storage', syncConnectivityState)
     window.addEventListener('focus', syncConnectivityState)
     window.addEventListener('labhub-ai-config-changed', syncConnectivityState)
-    window.addEventListener('csbd-ai-config-changed', syncConnectivityState)
+    window.addEventListener('laborbit-ai-config-changed', syncConnectivityState)
     window.addEventListener('account-updated', reloadSessionsForCurrentUser)
   }
   if (typeof document !== 'undefined') {
@@ -365,7 +365,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('storage', syncConnectivityState)
     window.removeEventListener('focus', syncConnectivityState)
     window.removeEventListener('labhub-ai-config-changed', syncConnectivityState)
-    window.removeEventListener('csbd-ai-config-changed', syncConnectivityState)
+    window.removeEventListener('laborbit-ai-config-changed', syncConnectivityState)
     window.removeEventListener('account-updated', reloadSessionsForCurrentUser)
   }
   if (typeof document !== 'undefined') {
@@ -894,6 +894,8 @@ async function sendMessage() {
         if (messages.value[assistantMsgIndex]) {
           messages.value[assistantMsgIndex].content = pendingContent
           messages.value[assistantMsgIndex].reasoning = pendingReasoning
+          messages.value[assistantMsgIndex].isError = true
+          messages.value[assistantMsgIndex].errorMessage = err.message
         }
         currentResponse.value = pendingContent
         currentReasoning.value = pendingReasoning
@@ -940,6 +942,37 @@ function handleStopGeneration() {
   isStreaming.value = false
   streamingIndex.value = -1
   notify('已停止生成。', 'info')
+}
+
+// 重新生成指定助手消息（截断并重发前序问题）
+function handleRetryMessage(index) {
+  if (isStreaming.value) return
+  // 找到该助手消息之前紧邻的用户问题
+  let targetUserIdx = -1
+  for (let i = index - 1; i >= 0; i--) {
+    if (messages.value[i].role === 'user') {
+      targetUserIdx = i
+      break
+    }
+  }
+  if (targetUserIdx === -1) return
+  const targetUserMsg = messages.value[targetUserIdx]
+
+  const prevContent = targetUserMsg.content || ''
+  const prevImages = Array.isArray(targetUserMsg.images) ? [...targetUserMsg.images] : []
+
+  // 截断到该用户问题，保留其内容与图片，重新触发发送流程
+  messages.value = messages.value.slice(0, targetUserIdx)
+  inputContent.value = prevContent
+  pendingImages.value = prevImages.map((url, idx) => ({
+    id: `img_retry_${Date.now()}_${idx}`,
+    url,
+    name: '附图'
+  }))
+  nextTick(() => {
+    adjustTextareaHeight()
+    sendMessage()
+  })
 }
 
 // 键盘事件处理：Enter 发送，Shift+Enter 换行
@@ -1469,6 +1502,22 @@ async function handleClearChat() {
                   </span>
                   <span class="streaming-status-hint">正在生成中...</span>
                 </div>
+              </div>
+
+              <!-- 报错或中断时的快捷重新生成重试入口 -->
+              <div
+                v-if="msg.role === 'assistant' && !isStreaming && (msg.isError || (msg.content && msg.content.includes('> 发生错误:')))"
+                class="message-retry-bar"
+              >
+                <button
+                  type="button"
+                  class="message-retry-btn"
+                  title="重新生成回答"
+                  @click="handleRetryMessage(index)"
+                >
+                  <AppIcon name="refresh" :size="13" />
+                  <span>重新生成</span>
+                </button>
               </div>
 
               <!-- 生成中尚未输出正文时的打字机占位指示 (包含思考完毕等待正文或初始等待) -->
@@ -2974,6 +3023,35 @@ async function handleClearChat() {
   font-style: italic;
   max-height: 320px;
   overflow-y: auto;
+}
+
+/* 重新生成重试按钮 */
+.message-retry-bar {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.message-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.message-retry-btn:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: var(--accent);
+  transform: translateY(-1px);
 }
 
 /* 打字机动画指示 */

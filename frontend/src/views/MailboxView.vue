@@ -1480,7 +1480,7 @@ onMounted(async () => {
     window.addEventListener('storage', refreshAiState)
     window.addEventListener('focus', refreshAiState)
     window.addEventListener('labhub-ai-config-changed', refreshAiState)
-    window.addEventListener('csbd-ai-config-changed', refreshAiState)
+    window.addEventListener('laborbit-ai-config-changed', refreshAiState)
   }
   try {
     currentUser.value = await authApi.getMe()
@@ -1498,7 +1498,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('storage', refreshAiState)
     window.removeEventListener('focus', refreshAiState)
     window.removeEventListener('labhub-ai-config-changed', refreshAiState)
-    window.removeEventListener('csbd-ai-config-changed', refreshAiState)
+    window.removeEventListener('laborbit-ai-config-changed', refreshAiState)
   }
 })
 </script>

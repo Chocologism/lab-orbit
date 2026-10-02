@@ -88,13 +88,13 @@ export const THEME_STYLES = [
   }
 ]
 
-const COLOR_SCHEME_KEY = 'cssbd_color_scheme'
-const BG_TYPE_KEY = 'cssbd_bg_type'
-const LEGACY_STORAGE_KEY = 'cssbd_theme_style'
+const COLOR_SCHEME_KEY = 'laborbit_color_scheme'
+const BG_TYPE_KEY = 'laborbit_bg_type'
+const LEGACY_STORAGE_KEY = 'laborbit_theme_style'
 export const DEFAULT_MIGRATION_KEY = 'laborbit_default_v20260930_cyan_clouds'
-export const CUSTOM_COLOR_SCHEME_KEY = 'cssbd_custom_color_scheme'
-export const GLASS_STYLE_KEY = 'cssbd_glass_style'
-export const BG_DIM_KEY = 'cssbd_bg_dim_percent_v2'
+export const CUSTOM_COLOR_SCHEME_KEY = 'laborbit_custom_color_scheme'
+export const GLASS_STYLE_KEY = 'laborbit_glass_style'
+export const BG_DIM_KEY = 'laborbit_bg_dim_percent_v2'
 export const DEFAULT_BG_DIM = 100
 
 export function migratePreviousDefaultUsers() {
@@ -132,14 +132,6 @@ function getInitialBgDim() {
         return num
       }
     }
-    const oldSaved = localStorage.getItem('cssbd_bg_dim_percent')
-    if (oldSaved !== null) {
-      const oldNum = parseInt(oldSaved, 10)
-      if (!isNaN(oldNum) && oldNum >= 0 && oldNum <= 100 && oldNum !== 60) {
-        localStorage.setItem(BG_DIM_KEY, String(oldNum))
-        return oldNum
-      }
-    }
   } catch (e) {
     console.warn('Failed to read bg dim from localStorage:', e)
   }
@@ -147,6 +139,43 @@ function getInitialBgDim() {
 }
 
 export const currentBgDim = ref(getInitialBgDim())
+
+export const BG_VIDEO_PAUSED_KEY = 'laborbit_bg_video_paused'
+export const BG_VIDEO_PAUSED_EVENT = 'bg-video-paused-changed'
+
+function getInitialBgVideoPaused() {
+  if (typeof window === 'undefined') return false
+  try {
+    return localStorage.getItem(BG_VIDEO_PAUSED_KEY) === 'true'
+  } catch (e) {
+    return false
+  }
+}
+
+export const isBgVideoPaused = ref(getInitialBgVideoPaused())
+
+export function setBgVideoPaused(val) {
+  const bool = Boolean(val)
+  isBgVideoPaused.value = bool
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(BG_VIDEO_PAUSED_KEY, String(bool))
+    } catch (e) {}
+  }
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    try {
+      const evt = typeof CustomEvent === 'function'
+        ? new CustomEvent(BG_VIDEO_PAUSED_EVENT, { detail: { paused: bool } })
+        : { type: BG_VIDEO_PAUSED_EVENT, detail: { paused: bool } }
+      window.dispatchEvent(evt)
+    } catch (e) {}
+  }
+  return bool
+}
+
+export function toggleBgVideoPaused() {
+  return setBgVideoPaused(!isBgVideoPaused.value)
+}
 
 export function setBgDim(val) {
   const clamped = Math.max(0, Math.min(100, Math.round(Number(val) || 0)))
@@ -475,7 +504,7 @@ function getInitialColorScheme() {
     }
     // 从旧版兼容器迁移
     const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
-    if (legacy === 'earth-orbit') return 'obsidian-gray'
+    if (legacy === 'earth-orbit') return 'classic-cyan'
     if (legacy === 'galaxy') return 'nebula-purple'
     if (legacy === 'vanta-fog' || legacy === 'clouds-static') return 'classic-cyan'
   } catch (e) {
@@ -507,6 +536,7 @@ export const currentBgType = ref(getInitialBgType())
 
 // 兼容器：保留 currentThemeStyle 响应式对象
 function resolveLegacyTheme(scheme, bg) {
+  if (scheme === 'obsidian-gray') return 'clouds-static'
   if (scheme === 'nebula-purple') return 'galaxy'
   if (scheme === 'custom') return 'custom'
   if (bg === 'vanta-fog') return 'vanta-fog'
@@ -537,7 +567,7 @@ export function applyThemeToDOM(scheme = currentColorScheme.value, bg = currentB
   if (typeof document === 'undefined' || !document.documentElement) return
   const doc = document.documentElement
 
-  // 如果传入的是旧版风格名称（如 'galaxy' / 'vanta-fog' / 'clouds-static'），智能解构为对应的配色与背景
+  // 如果传入的是旧版风格名称（如 'earth-orbit' / 'galaxy' / 'vanta-fog' / 'clouds-static'），智能解构为对应的配色与背景
   let actualScheme = scheme
   let actualBg = bg
   if (scheme === 'earth-orbit') {
@@ -545,13 +575,13 @@ export function applyThemeToDOM(scheme = currentColorScheme.value, bg = currentB
     actualBg = 'clouds-static'
   } else if (scheme === 'galaxy') {
     actualScheme = 'nebula-purple'
-    if (!bg || bg === 'galaxy') actualBg = currentBgType.value || 'galaxy'
+    if (!bg || bg === 'galaxy' || bg === 'earth-orbit') actualBg = 'galaxy'
   } else if (scheme === 'vanta-fog') {
     actualScheme = 'classic-cyan'
-    if (!bg || bg === 'vanta-fog') actualBg = currentBgType.value || 'vanta-fog'
+    if (!bg || bg === 'vanta-fog' || bg === 'earth-orbit') actualBg = 'vanta-fog'
   } else if (scheme === 'clouds-static') {
     actualScheme = 'classic-cyan'
-    if (!bg || bg === 'clouds-static') actualBg = currentBgType.value || 'clouds-static'
+    if (!bg || bg === 'clouds-static' || bg === 'earth-orbit') actualBg = 'clouds-static'
   }
 
   if (actualScheme !== 'obsidian-gray' && actualScheme !== 'classic-cyan' && actualScheme !== 'nebula-purple' && actualScheme !== 'custom') {
@@ -560,9 +590,9 @@ export function applyThemeToDOM(scheme = currentColorScheme.value, bg = currentB
 
   actualBg = (actualBg === 'galaxy' || actualBg === 'vanta-fog' || actualBg === 'clouds-static' || actualBg === 'custom-local')
     ? actualBg
-    : (currentBgType.value || DEFAULT_BG_TYPE)
+    : DEFAULT_BG_TYPE
 
-  const legacyTheme = actualScheme === 'obsidian-gray' ? 'clouds-static' : (actualScheme === 'nebula-purple' ? 'galaxy' : (actualScheme === 'custom' ? 'custom' : 'vanta-fog'))
+  const legacyTheme = actualScheme === 'nebula-purple' ? 'galaxy' : (actualScheme === 'custom' ? 'custom' : (actualBg === 'vanta-fog' ? 'vanta-fog' : 'clouds-static'))
 
   // 1. 设置解耦属性
   doc.setAttribute('data-color-scheme', actualScheme)
@@ -674,7 +704,7 @@ export function useThemeStyle() {
 
   // 兼容旧版 setThemeStyle 调用
   function setThemeStyle(style) {
-    if (style === 'earth-orbit') {
+    if (style === 'earth-orbit' || style === 'clouds-static') {
       setColorScheme('classic-cyan')
       setBgType('clouds-static')
     } else if (style === 'galaxy') {
@@ -683,15 +713,15 @@ export function useThemeStyle() {
     } else if (style === 'vanta-fog') {
       setColorScheme('classic-cyan')
       setBgType('vanta-fog')
-    } else if (style === 'clouds-static') {
-      setColorScheme('classic-cyan')
-      setBgType('clouds-static')
     }
   }
 
   return {
     currentColorScheme,
     currentBgType,
+    isBgVideoPaused,
+    setBgVideoPaused,
+    toggleBgVideoPaused,
     currentBgDim,
     setBgDim,
     DEFAULT_BG_DIM,

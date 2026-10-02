@@ -7,14 +7,18 @@ import SeminarReminders from '../components/SeminarReminders.vue'
 import SilentLizardButton from '../components/SilentLizardButton.vue'
 import NoticeMarquee from '../components/NoticeMarquee.vue'
 
-import { arxivApi, libraryApi, resourceApi, seminarApi, talkApi } from '../api/client'
+import { arxivApi, libraryApi, mailboxApi, resourceApi, seminarApi, talkApi } from '../api/client'
 import { refreshArxivUnread, getCachedArxivUnread, clearArxivUnread, markArxivFeedViewed, ARXIV_UNREAD_EVENT } from '../utils/arxivUnread'
 import { addDays, monday, nextSeminar, shanghaiToday, sortSeminars } from '../utils/schedule'
 import { getHoliday } from '../utils/holidays'
 import { isMidAutumnFestival } from '../utils/midAutumn'
+import { isNationalDayHoliday } from '../utils/nationalDay'
 import { LiquidGlass } from '../libs/liquidglass'
 import { useWeekDrag } from '../composables/useWeekDrag'
 import { currentBgType, currentColorScheme, currentGlassStyle } from '../composables/useThemeStyle'
+import HomeWidgetRenderer from '../components/widgets/HomeWidgetRenderer.vue'
+import HomeWidgetAddDrawer from '../components/HomeWidgetAddDrawer.vue'
+import { useHomeGridEngine } from '../composables/useHomeGridEngine'
 import { useSiteConfig } from '../composables/useSiteConfig'
 import { isDemoMode } from '../mock/isDemo'
 import { DEMO_FROZEN_TIME_MS } from '../utils/schedule'
@@ -22,6 +26,7 @@ import { DEMO_FROZEN_TIME_MS } from '../utils/schedule'
 const router = useRouter()
 const { siteConfig } = useSiteConfig()
 const isMidAutumn = computed(() => isMidAutumnFestival())
+const isNationalDay = computed(() => isNationalDayHoliday())
 const weatherLocation = computed(() => siteConfig.institution ? siteConfig.institution : '学术园区')
 const today = ref(shanghaiToday()), focus = ref(today.value), now = ref(isDemoMode() ? DEMO_FROZEN_TIME_MS : Date.now())
 const forecastDashboardRef = ref(null)
@@ -58,8 +63,9 @@ function goToThisWeek() {
   })
 }
 const weather = ref({ loading: true, temperature: null, high: null, low: null, feels: null, humidity: null, wind: null, rain: null, label: '正在获取实时天气' })
-const weatherLabel = code => ({ 0:'晴', 1:'大部晴朗', 2:'局部多云', 3:'阴', 45:'雾', 48:'雾凇', 51:'小毛毛雨', 53:'毛毛雨', 55:'大毛毛雨', 61:'小雨', 63:'中雨', 65:'大雨', 71:'小雪', 73:'中雪', 75:'大雪', 80:'阵雨', 81:'中阵雨', 82:'强阵雨', 95:'雷雨', 96:'雷雨伴冰雹', 99:'强雷雨伴冰雹' }[code] || '天气观测')
+const weatherLabel = code => ({ 0:'晴', 1:'多云', 2:'多云', 3:'阴', 45:'雾', 48:'雾凇', 51:'毛毛雨', 53:'毛毛雨', 55:'毛毛雨', 61:'小雨', 63:'中雨', 65:'大雨', 71:'小雪', 73:'中雪', 75:'大雪', 80:'阵雨', 81:'中阵雨', 82:'强阵雨', 95:'雷雨', 96:'雷雨', 99:'强雷雨' }[code] || '天气观测')
 const data = reactive({ papers: [], seminars: [], library: [], books: [], talks: [] })
+const mailboxEmails = ref([])
 const state = reactive(Object.fromEntries(Object.keys(data).map(key => [key, 'loading'])))
 const api = { papers: () => arxivApi.getFeed('all'), seminars: seminarApi.getSeminars, library: () => libraryApi.list('', 'all'), books: resourceApi.getBooks, talks: talkApi.list }
 let alive = true, clock
@@ -196,6 +202,7 @@ function handleArxivUnreadState(e) {
 
 onMounted(() => {
   load()
+  syncHomeGridLayoutFromCloud()
   const initialArxiv = getCachedArxivUnread()
   unreadArxivCount.value = initialArxiv.unreadCount
   hasDirectArxiv.value = initialArxiv.hasDirect
@@ -205,26 +212,95 @@ onMounted(() => {
     hasDirectArxiv.value = s.hasDirect
   })
 
+  mailboxApi.getEmails({ refresh: false })
+    .then(res => {
+      if (Array.isArray(res)) mailboxEmails.value = res
+    })
+    .catch(() => {})
+
   const weatherCtrl = new AbortController()
-  const weatherTimeout = setTimeout(() => weatherCtrl.abort(), 1500)
-  fetch('https://api.open-meteo.com/v1/forecast?latitude=32.12&longitude=118.96&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=1&timezone=Asia%2FShanghai', { signal: weatherCtrl.signal })
+  const weatherTimeout = setTimeout(() => weatherCtrl.abort(), 2500)
+  fetch('https://api.open-meteo.com/v1/forecast?latitude=32.12&longitude=118.96&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&hourly=temperature_2m,weather_code,precipitation_probability&forecast_days=4&timezone=Asia%2FShanghai', { signal: weatherCtrl.signal })
     .then(r => r.ok ? r.json() : Promise.reject())
-    .then(({ current, daily }) => {
-      weather.value = { loading:false, temperature:Math.round(current.temperature_2m), high:Math.round(daily?.temperature_2m_max?.[0]), low:Math.round(daily?.temperature_2m_min?.[0]), feels:Math.round(current.apparent_temperature), humidity:current.relative_humidity_2m, wind:current.wind_speed_10m, rain:daily?.precipitation_probability_max?.[0] ?? null, label:weatherLabel(current.weather_code) }
+    .then(({ current, daily, hourly }) => {
+      const processedDaily = (daily?.time || []).slice(0, 4).map((d, i) => {
+        const m = Number(d.slice(5, 7))
+        const dayNum = d.slice(8, 10)
+        return {
+          date: d,
+          dateText: `${m}.${dayNum}`,
+          dayName: i === 0 ? '今天' : i === 1 ? '明天' : i === 2 ? '后天' : '大后天',
+          high: Math.round(daily.temperature_2m_max?.[i] ?? 26),
+          low: Math.round(daily.temperature_2m_min?.[i] ?? 18),
+          rain: daily.precipitation_probability_max?.[i] ?? 0,
+          label: weatherLabel(daily.weather_code?.[i] ?? 0)
+        }
+      })
+
+      let processedHourly = []
+      if (hourly?.time?.length) {
+        const shanghaiNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }))
+        const nowHour = shanghaiNow.getHours()
+        const todayStr = shanghaiToday()
+        const startIdx = hourly.time.findIndex(t => t.startsWith(todayStr) && Number(t.slice(11, 13)) >= nowHour)
+        const validIdx = startIdx >= 0 ? startIdx : 0
+        processedHourly = hourly.time.slice(validIdx, validIdx + 8).map((t, idx) => {
+          const realIdx = validIdx + idx
+          return {
+            time: t.slice(11, 16),
+            temp: Math.round(hourly.temperature_2m?.[realIdx] ?? 22),
+            rain: hourly.precipitation_probability?.[realIdx] ?? 0,
+            label: weatherLabel(hourly.weather_code?.[realIdx] ?? 0)
+          }
+        })
+      }
+
+      weather.value = {
+        loading: false,
+        temperature: Math.round(current.temperature_2m),
+        high: Math.round(daily?.temperature_2m_max?.[0] ?? 28),
+        low: Math.round(daily?.temperature_2m_min?.[0] ?? 19),
+        feels: Math.round(current.apparent_temperature),
+        humidity: current.relative_humidity_2m,
+        wind: current.wind_speed_10m,
+        rain: daily?.precipitation_probability_max?.[0] ?? 0,
+        label: weatherLabel(current.weather_code),
+        daily: processedDaily,
+        hourly: processedHourly
+      }
       nextTick(() => {
         liquidGlassInstance?.markChanged()
       })
     })
     .catch(() => {
-      weather.value = { loading:false, temperature:24, high:28, low:19, feels:25, humidity:62, wind:12, rain:10, label: siteConfig.institution ? `晴朗 · ${siteConfig.institution}` : '晴朗 · 园区' }
+      weather.value = {
+        loading: false,
+        temperature: 24,
+        high: 28,
+        low: 19,
+        feels: 25,
+        humidity: 62,
+        wind: 12,
+        rain: 10,
+        label: siteConfig.institution ? `晴朗 · ${siteConfig.institution}` : '晴朗 · 园区',
+        daily: [
+          { dayName: '今天', dateText: '今日', low: 19, high: 28, label: '晴朗', rain: 10 },
+          { dayName: '明天', dateText: '明日', low: 18, high: 27, label: '多云', rain: 20 },
+          { dayName: '后天', dateText: '后天', low: 17, high: 25, label: '阴天', rain: 35 },
+          { dayName: '大后天', dateText: '大后天', low: 18, high: 26, label: '晴朗', rain: 5 }
+        ],
+        hourly: [
+          { time: '现在', temp: 24, label: '晴朗', rain: 10 },
+          { time: '21:00', temp: 23, label: '晴朗', rain: 10 },
+          { time: '22:00', temp: 22, label: '晴朗', rain: 10 },
+          { time: '23:00', temp: 21, label: '多云', rain: 15 },
+          { time: '00:00', temp: 20, label: '多云', rain: 15 },
+          { time: '01:00', temp: 19, label: '晴朗', rain: 10 }
+        ]
+      }
     })
     .finally(() => clearTimeout(weatherTimeout))
-  clock = setInterval(() => {
-    if (!isDemoMode()) {
-      now.value = Date.now()
-      today.value = shanghaiToday()
-    }
-  }, 60000)
+  clock = setInterval(() => { now.value = Date.now(); today.value = shanghaiToday() }, 60000)
 
   nextTick(() => {
     setupLiquidGlass()
@@ -247,6 +323,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('atmosphere-media-ready', onAtmosphereMediaReady)
   window.removeEventListener('glass-style-changed', onGlassStyleChanged)
   window.removeEventListener('bg-dim-changed', onBgDimChanged)
+  cleanupDragListeners()
   if (liquidGlassInstance) {
     try {
       liquidGlassInstance.destroy()
@@ -257,6 +334,12 @@ onBeforeUnmount(() => {
 const hasError = computed(() => Object.values(state).includes('error'))
 const loading = computed(() => Object.values(state).includes('loading'))
 const next = computed(() => nextSeminar(data.seminars, now.value))
+const upcomingSeminars = computed(() => {
+  const todayVal = today.value || shanghaiToday()
+  return sortSeminars(data.seminars || [])
+    .filter(item => item.status !== 'cancelled' && item.date >= todayVal)
+    .slice(0, 4)
+})
 const week = computed(() => Array.from({ length: 7 }, (_, i) => addDays(monday(focus.value), i)))
 const weekReady = computed(() => state.seminars === 'ready' && state.talks === 'ready')
 const deduplicatedTalks = computed(() => {
@@ -522,13 +605,347 @@ function onDayClick(e, day) {
     return
   }
 }
+
+// 首页 7 大业务卡片与 6 级几何尺寸系统网格排布引擎
+const {
+  isHomeEditMode,
+  hasCustomLayout,
+  isCustomLayoutActive,
+  slot1Config,
+  rightGridConfig,
+  totalGridRows,
+  gridMatrixData,
+  toggleHomeEditMode,
+  resetHomeGridLayout,
+  syncHomeGridLayoutFromCloud,
+  moveGridWidget,
+  removeWidgetFromLayout,
+  addWidgetToLayout,
+  saveHomeGridLayout,
+  startDragSession,
+  previewDragOver,
+  commitDragSession,
+  cancelDragSession,
+  clearDragSnapshot
+} = useHomeGridEngine()
+
+const slot1LeftItem = computed(() => {
+  if (slot1Config.value.type !== 'medium-wide') return null
+  return slot1Config.value.items.find(it => (typeof it.slot1Index === 'number' ? it.slot1Index : slot1Config.value.items.indexOf(it)) === 0) || null
+})
+
+const slot1RightItem = computed(() => {
+  if (slot1Config.value.type !== 'medium-wide') return null
+  return slot1Config.value.items.find(it => (typeof it.slot1Index === 'number' ? it.slot1Index : slot1Config.value.items.indexOf(it)) === 1) || null
+})
+
+const showAddDrawer = ref(false)
+
+// Pointer 真实跟手拖拽引擎与悬浮删除条状态
+const isPointerDragging = ref(false)
+const dragItem = ref(null)
+const dragStartPos = ref({ x: 0, y: 0 })
+const dragPointerPos = ref({ x: 0, y: 0 })
+const dragCardRect = ref({ width: 0, height: 0, offsetX: 0, offsetY: 0 })
+const isOverDeleteZone = ref(false)
+const deleteZoneRef = ref(null)
+
+function onCardPointerDown(e, item, isSlot1 = false) {
+  if (!isHomeEditMode.value || e.button !== 0) return
+  if (e.target.closest('button')) {
+    return
+  }
+
+  // 防止意外选中文本并清除任何残留选区
+  window.getSelection()?.removeAllRanges()
+  e.preventDefault()
+
+  const cardEl = e.currentTarget
+  const rect = cardEl.getBoundingClientRect()
+
+  dragItem.value = { ...item, isSlot1 }
+  dragStartPos.value = { x: e.clientX, y: e.clientY }
+  dragPointerPos.value = { x: e.clientX, y: e.clientY }
+  dragCardRect.value = {
+    width: rect.width,
+    height: rect.height,
+    offsetX: e.clientX - rect.left,
+    offsetY: e.clientY - rect.top
+  }
+
+  window.addEventListener('pointermove', onGlobalPointerMove, { passive: false })
+  window.addEventListener('pointerup', onGlobalPointerUp)
+  window.addEventListener('pointercancel', onGlobalPointerCancel)
+  window.addEventListener('keydown', onGlobalKeyDown)
+}
+
+function onGlobalPointerMove(e) {
+  if (!dragItem.value) return
+
+  if (!isPointerDragging.value) {
+    const dist = Math.hypot(e.clientX - dragStartPos.value.x, e.clientY - dragStartPos.value.y)
+    if (dist > 4) {
+      window.getSelection()?.removeAllRanges()
+      isPointerDragging.value = true
+      if (!dragItem.value.isSlot1) {
+        startDragSession(dragItem.value.id)
+      }
+    }
+  }
+
+  if (isPointerDragging.value) {
+    e.preventDefault()
+    window.getSelection()?.removeAllRanges()
+    dragPointerPos.value = { x: e.clientX, y: e.clientY }
+
+    // 1. 双重检测屏幕底部“移到此处删除”碰撞
+    let inDz = false
+    if (deleteZoneRef.value) {
+      const dzRect = deleteZoneRef.value.getBoundingClientRect()
+      inDz = (
+        e.clientX >= dzRect.left - 45 &&
+        e.clientX <= dzRect.right + 45 &&
+        e.clientY >= dzRect.top - 45 &&
+        e.clientY <= dzRect.bottom + 45
+      )
+    }
+    // 视口底部兜底：光标接近屏幕底部中央时自动激活删除区
+    if (!inDz && e.clientY >= window.innerHeight - 100 && Math.abs(e.clientX - window.innerWidth / 2) < 220) {
+      inDz = true
+    }
+    isOverDeleteZone.value = inDz
+    if (inDz) {
+      return
+    }
+
+    // 2. 检测右侧 Bento 网格碰撞并灵敏磁吸（仅当拖拽的不是 1 号位时）
+    if (!dragItem.value.isSlot1) {
+      const gridEl = forecastRightRef.value?.$el || forecastRightRef.value
+      if (gridEl) {
+        const gridRect = gridEl.getBoundingClientRect()
+        // 扩展灵敏磁吸感应边界
+        if (
+          e.clientX >= gridRect.left - 60 &&
+          e.clientX <= gridRect.right + 60 &&
+          e.clientY >= gridRect.top - 60 &&
+          e.clientY <= gridRect.bottom + 60
+        ) {
+          // 双栏卡片（Small / Medium / Large）强制锁定为第 1 列，单栏卡片按卡片水平中心检测
+          let targetCol = 1
+          if (dragItem.value.colSpan === 1) {
+            const cardCenterX = (e.clientX - dragCardRect.value.offsetX + dragCardRect.value.width / 2) - gridRect.left
+            targetCol = cardCenterX < gridRect.width / 2 ? 1 : 2
+          }
+
+          // 行号计算：基于拖拽卡片顶边相对于网格顶边的垂直距离，保证提起卡片瞬间行号精准不变
+          const cardTopY = (e.clientY - dragCardRect.value.offsetY) - gridRect.top
+          const rowStride = gridRect.height / totalGridRows.value
+          const maxTargetRow = Math.max(1, totalGridRows.value - (dragItem.value.rowSpan || 1) + 1)
+          const targetRow = Math.min(
+            maxTargetRow,
+            Math.max(1, Math.round(cardTopY / rowStride) + 1)
+          )
+
+          previewDragOver(dragItem.value.id, targetCol, targetRow)
+        }
+      }
+    } else if (dragItem.value.isSlot1 && slot1Config.value.type === 'medium-wide') {
+      // 检测 1 号位中宽卡片位置切换或互换
+      const slot1El = document.querySelector('.home-custom-slot1-wrapper')
+      if (slot1El) {
+        const rect = slot1El.getBoundingClientRect()
+        if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+          const hoveredIdx = e.clientX < rect.left + rect.width / 2 ? 0 : 1
+          if (slot1Config.value.items.length === 2) {
+            const curIdx = slot1Config.value.items.findIndex(it => it.id === dragItem.value.id)
+            if (curIdx !== -1) {
+              const curSlotIdx = typeof slot1Config.value.items[curIdx].slot1Index === 'number' ? slot1Config.value.items[curIdx].slot1Index : curIdx
+              if (curSlotIdx !== hoveredIdx) {
+                const otherIdx = curIdx === 0 ? 1 : 0
+                slot1Config.value.items[curIdx].slot1Index = hoveredIdx
+                slot1Config.value.items[otherIdx].slot1Index = curSlotIdx
+                slot1Config.value.items.sort((a, b) => (a.slot1Index ?? 0) - (b.slot1Index ?? 0))
+                slot1Config.value = {
+                  type: 'medium-wide',
+                  items: [...slot1Config.value.items]
+                }
+              }
+            }
+          } else if (slot1Config.value.items.length === 1) {
+            const singleItem = slot1Config.value.items[0]
+            const curSlotIdx = typeof singleItem.slot1Index === 'number' ? singleItem.slot1Index : 0
+            if (curSlotIdx !== hoveredIdx) {
+              singleItem.slot1Index = hoveredIdx
+              slot1Config.value = {
+                type: 'medium-wide',
+                items: [{ ...singleItem, slot1Index: hoveredIdx }]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+function onGlobalPointerUp(e) {
+  cleanupDragListeners()
+
+  if (isPointerDragging.value && dragItem.value) {
+    if (isOverDeleteZone.value) {
+      // 彻底删除，并清空快照防止覆盖回滚
+      removeWidgetFromLayout(dragItem.value.id, !!dragItem.value.isSlot1)
+      clearDragSnapshot()
+    } else {
+      if (!dragItem.value.isSlot1) {
+        commitDragSession()
+      } else {
+        saveHomeGridLayout(slot1Config.value, rightGridConfig.value)
+        cancelDragSession()
+      }
+    }
+    nextTick(() => {
+      setupLiquidGlass()
+      liquidGlassInstance?.markChanged()
+    })
+  }
+
+  isPointerDragging.value = false
+  dragItem.value = null
+  isOverDeleteZone.value = false
+}
+
+function onGlobalPointerCancel() {
+  cleanupDragListeners()
+  if (isPointerDragging.value) {
+    cancelDragSession()
+    nextTick(() => {
+      setupLiquidGlass()
+      liquidGlassInstance?.markChanged()
+    })
+  }
+  isPointerDragging.value = false
+  dragItem.value = null
+  isOverDeleteZone.value = false
+}
+
+function onGlobalKeyDown(e) {
+  if (e.key === 'Escape') {
+    onGlobalPointerCancel()
+  }
+}
+
+function cleanupDragListeners() {
+  window.removeEventListener('pointermove', onGlobalPointerMove)
+  window.removeEventListener('pointerup', onGlobalPointerUp)
+  window.removeEventListener('pointercancel', onGlobalPointerCancel)
+  window.removeEventListener('keydown', onGlobalKeyDown)
+  document.body.classList.remove('is-bento-dragging')
+}
+
+watch(isPointerDragging, (val) => {
+  if (val) {
+    document.body.classList.add('is-bento-dragging')
+  } else {
+    document.body.classList.remove('is-bento-dragging')
+  }
+})
+
+const targetPlacementCell = ref(null)
+const targetSlot1Index = ref(null)
+const drawerInitialWidgetId = ref(null)
+const drawerInitialSize = ref(null)
+
+function openAddDrawerForSlot1(idx = 0) {
+  targetSlot1Index.value = idx
+  targetPlacementCell.value = null
+  drawerInitialWidgetId.value = 'conferences'
+  drawerInitialSize.value = slot1Config.value.type === 'medium-wide' ? 'medium-wide' : 'wide'
+  showAddDrawer.value = true
+}
+
+function onEmptyCellClick(col, row) {
+  if (!isHomeEditMode.value) return
+  targetSlot1Index.value = null
+  drawerInitialWidgetId.value = null
+  drawerInitialSize.value = null
+  targetPlacementCell.value = { col, row }
+  showAddDrawer.value = true
+}
+
+function handleAddWidget({ widgetId, size }) {
+  let preferredPos = null
+  if (size === 'medium-wide') {
+    preferredPos = { slot1Index: targetSlot1Index.value ?? 1 }
+  } else if (targetPlacementCell.value) {
+    preferredPos = targetPlacementCell.value
+  }
+  addWidgetToLayout(widgetId, size, preferredPos)
+  targetPlacementCell.value = null
+  targetSlot1Index.value = null
+  nextTick(() => {
+    setupLiquidGlass()
+    liquidGlassInstance?.markChanged()
+  })
+}
+
+function handleResetLayout() {
+  resetHomeGridLayout()
+  nextTick(() => {
+    setupLiquidGlass()
+    liquidGlassInstance?.markChanged()
+  })
+}
+
+watch([isCustomLayoutActive, isHomeEditMode], () => {
+  nextTick(() => {
+    setupLiquidGlass()
+    liquidGlassInstance?.markChanged()
+  })
+})
 </script>
 <template>
   <div class="forecast-home">
     <header class="forecast-topline">
       <NoticeMarquee />
-      <span class="home-date">{{ prettyDate }}</span>
+      <div class="topline-right-group">
+        <button
+          type="button"
+          class="home-layout-btn"
+          :class="{ 'is-active': isHomeEditMode }"
+          :title="isHomeEditMode ? '完成并保存排版' : '自定义桌面卡片与排版'"
+          @click="toggleHomeEditMode"
+        >
+          <AppIcon :name="isHomeEditMode ? 'check' : 'layout'" :size="14" />
+          <span>{{ isHomeEditMode ? '完成排版' : '自定义排版' }}</span>
+        </button>
+        <span class="home-date">{{ prettyDate }}</span>
+      </div>
     </header>
+
+    <!-- 桌面排版编辑工具栏 (浮动居顶) -->
+    <transition name="edit-bar-slide">
+      <div v-if="isHomeEditMode" class="home-edit-mode-bar">
+        <div class="edit-bar-info">
+          <span class="edit-pill">桌面排版编辑模式</span>
+          <span class="edit-hint">按住卡片可自由拖拽换位</span>
+        </div>
+        <div class="edit-bar-actions">
+          <button type="button" class="edit-btn add-btn" @click="showAddDrawer = true">
+            <AppIcon name="plus" :size="15" />
+            <span>添加卡片</span>
+          </button>
+          <button type="button" class="edit-btn reset-btn" title="一键清除自定义，恢复最理想的经典尺寸与排版" @click="handleResetLayout">
+            <AppIcon name="refresh" :size="14" />
+            <span>恢复经典排版</span>
+          </button>
+          <button type="button" class="edit-btn finish-btn" @click="toggleHomeEditMode">
+            <AppIcon name="check" :size="15" />
+            <span>完成</span>
+          </button>
+        </div>
+      </div>
+    </transition>
 
     <p v-if="hasError" class="home-error" role="status">部分数据暂时无法读取。<button :disabled="loading" @click="load">重新加载</button></p>
     <div
@@ -539,7 +956,7 @@ function onDayClick(e, day) {
       <section class="forecast-main">
         <div class="forecast-intro">
           <h1 class="group-title-heading">
-            <span>{{ siteConfig.labName || '科研协作平台' }}</span>
+            <span>{{ siteConfig.labName || '天体物理与交叉科学课题组' }}</span>
             <img
               v-if="isMidAutumn"
               src="/assets/icons/moon.svg"
@@ -547,8 +964,15 @@ function onDayClick(e, day) {
               class="mid-autumn-moon-badge"
               title="中秋快乐"
             />
+            <img
+              v-else-if="isNationalDay"
+              src="/assets/icons/national-flag.svg"
+              alt="国庆红旗"
+              class="national-day-flag-badge"
+              title="国庆快乐"
+            />
           </h1>
-          <p class="group-name-en">{{ siteConfig.siteSlogan || 'Frontier Interdisciplinary Science & Computing Workspace' }}</p>
+          <p class="group-name-en">{{ siteConfig.siteSlogan || 'Astrophysics and Interdisciplinary Science Research Group' }}</p>
           <div class="forecast-actions">
             <router-link :to="calendarLink(today)" class="perfect-goat-btn">
               <span class="goat-text">打开学术日程</span>
@@ -680,7 +1104,9 @@ function onDayClick(e, day) {
         </section>
 
         <!-- 近期学术会议模块（置于本周日程下侧） -->
+        <!-- 模式 A：原生经典 1 号位 (34be100 近期学术会议) -->
         <section
+          v-if="!isCustomLayoutActive"
           class="glass-card home-conf-section liquid-glass-card"
           aria-label="近期学术会议"
         >
@@ -728,8 +1154,164 @@ function onDayClick(e, day) {
             <p>近期暂无即将举行的学术会议</p>
           </div>
         </section>
+
+        <!-- 模式 B：自定义 Bento 网格 1 号位 (Slot 1) -->
+        <div
+          v-else
+          class="home-custom-slot1-wrapper"
+          :class="{
+            'is-medium-wide-layout': slot1Config.type === 'medium-wide',
+            'is-wide-layout': slot1Config.type === 'wide'
+          }"
+        >
+          <!-- 全宽卡片 (Wide) -->
+          <template v-if="slot1Config.type === 'wide' && slot1Config.items.length > 0">
+            <div
+              v-for="item in slot1Config.items"
+              :key="item.id"
+              class="custom-slot1-item slot1-wide"
+              :class="{
+                'is-draggable': isHomeEditMode,
+                'is-currently-dragged': isPointerDragging && dragItem?.id === item.id
+              }"
+              @pointerdown="onCardPointerDown($event, item, true)"
+            >
+              <HomeWidgetRenderer
+                :widget-id="item.widgetId"
+                :size="item.size"
+                :is-edit-mode="isHomeEditMode"
+                :conferences="upcomingConferences"
+                :format-conf-date="formatHomeConfDate"
+                :get-conf-badge="getHomeConfDeadlineBadge"
+                :next-seminar="next"
+                :upcoming-seminars="upcomingSeminars"
+                :seminars-state="state.seminars"
+                :weekday-fn="weekday"
+                :weather-data="weather"
+                :weather-location="weatherLocation"
+                :library-count="count('library', '篇')"
+                :library-items="data.library"
+                :resources-count="count('books', '册')"
+                :resources-items="data.books"
+                :arxiv-count="count('papers', '篇')"
+                :unread-arxiv-count="unreadArxivCount"
+                :has-direct-arxiv="hasDirectArxiv"
+                :arxiv-items="data.papers"
+                :mailbox-emails="mailboxEmails"
+                @mark-arxiv="markArxivFeedViewed"
+              />
+            </div>
+          </template>
+
+          <!-- 中宽双位排布 (Medium-Wide) -->
+          <template v-else-if="slot1Config.type === 'medium-wide' && (slot1LeftItem || slot1RightItem)">
+            <!-- 槽位 0 (左侧中宽) -->
+            <div
+              v-if="slot1LeftItem"
+              :key="slot1LeftItem.id"
+              class="custom-slot1-item slot1-medium-wide slot1-col-1"
+              :class="{
+                'is-draggable': isHomeEditMode,
+                'is-currently-dragged': isPointerDragging && dragItem?.id === slot1LeftItem.id
+              }"
+              @pointerdown="onCardPointerDown($event, slot1LeftItem, true)"
+            >
+              <HomeWidgetRenderer
+                :widget-id="slot1LeftItem.widgetId"
+                :size="slot1LeftItem.size"
+                :is-edit-mode="isHomeEditMode"
+                :conferences="upcomingConferences"
+                :format-conf-date="formatHomeConfDate"
+                :get-conf-badge="getHomeConfDeadlineBadge"
+                :next-seminar="next"
+                :upcoming-seminars="upcomingSeminars"
+                :seminars-state="state.seminars"
+                :weekday-fn="weekday"
+                :weather-data="weather"
+                :weather-location="weatherLocation"
+                :library-count="count('library', '篇')"
+                :library-items="data.library"
+                :resources-count="count('books', '册')"
+                :resources-items="data.books"
+                :arxiv-count="count('papers', '篇')"
+                :unread-arxiv-count="unreadArxivCount"
+                :has-direct-arxiv="hasDirectArxiv"
+                :arxiv-items="data.papers"
+                :mailbox-emails="mailboxEmails"
+                @mark-arxiv="markArxivFeedViewed"
+              />
+            </div>
+            <div
+              v-else-if="isHomeEditMode"
+              class="slot1-empty-half-slot slot1-col-1"
+              @click="openAddDrawerForSlot1(0)"
+              title="点击添加第 1 个中宽小组件"
+            >
+              <span class="empty-cell-plus">+</span>
+              <span class="empty-cell-label">添加中宽小组件</span>
+            </div>
+            <div
+              v-else
+              class="slot1-empty-spacer slot1-col-1"
+            ></div>
+
+            <!-- 槽位 1 (右侧中宽) -->
+            <div
+              v-if="slot1RightItem"
+              :key="slot1RightItem.id"
+              class="custom-slot1-item slot1-medium-wide slot1-col-2"
+              :class="{
+                'is-draggable': isHomeEditMode,
+                'is-currently-dragged': isPointerDragging && dragItem?.id === slot1RightItem.id
+              }"
+              @pointerdown="onCardPointerDown($event, slot1RightItem, true)"
+            >
+              <HomeWidgetRenderer
+                :widget-id="slot1RightItem.widgetId"
+                :size="slot1RightItem.size"
+                :is-edit-mode="isHomeEditMode"
+                :conferences="upcomingConferences"
+                :format-conf-date="formatHomeConfDate"
+                :get-conf-badge="getHomeConfDeadlineBadge"
+                :next-seminar="next"
+                :upcoming-seminars="upcomingSeminars"
+                :seminars-state="state.seminars"
+                :weekday-fn="weekday"
+                :weather-data="weather"
+                :weather-location="weatherLocation"
+                :library-count="count('library', '篇')"
+                :library-items="data.library"
+                :resources-count="count('books', '册')"
+                :resources-items="data.books"
+                :arxiv-count="count('papers', '篇')"
+                :unread-arxiv-count="unreadArxivCount"
+                :has-direct-arxiv="hasDirectArxiv"
+                :arxiv-items="data.papers"
+                :mailbox-emails="mailboxEmails"
+                @mark-arxiv="markArxivFeedViewed"
+              />
+            </div>
+            <div
+              v-else-if="isHomeEditMode"
+              class="slot1-empty-half-slot slot1-col-2"
+              @click="openAddDrawerForSlot1(1)"
+              title="点击添加第 2 个中宽小组件"
+            >
+              <span class="empty-cell-plus">+</span>
+              <span class="empty-cell-label">添加中宽小组件</span>
+            </div>
+          </template>
+
+          <div v-else-if="isHomeEditMode" class="slot1-empty-state">
+            <span class="empty-hint">1 号位已留白（可添加全宽或两个半宽卡片）</span>
+            <button type="button" class="btn-slot1-add" @click="openAddDrawerForSlot1(0)">添加 1 号位小组件</button>
+          </div>
+        </div>
       </section>
+
+      <!-- 模式 A：原生经典右栏 (34be100 静态 DOM) -->
       <aside
+        v-if="!isCustomLayoutActive"
         ref="forecastRightRef"
         class="forecast-right"
         :class="{ 'liquid-glass-active': liquidGlassActive }"
@@ -777,11 +1359,623 @@ function onDayClick(e, day) {
           </router-link>
         </div>
       </aside>
+
+      <!-- 模式 B：自定义 Bento 网格右栏 -->
+      <TransitionGroup
+        v-else
+        tag="aside"
+        name="bento-reorder"
+        ref="forecastRightRef"
+        class="forecast-right custom-bento-grid"
+        :class="{ 'liquid-glass-active': liquidGlassActive, 'is-in-edit-mode': isHomeEditMode }"
+        :style="{ '--grid-total-rows': totalGridRows }"
+        aria-label="自定义工作区网格"
+      >
+        <!-- 编辑模式下的留空单元格背景插槽（辅助拖拽投放） -->
+        <div
+          v-for="cell in (isHomeEditMode ? gridMatrixData.emptyCells : [])"
+          :key="`cell-${cell.col}-${cell.row}`"
+          class="grid-empty-cell-slot"
+          :style="{
+            gridColumn: `${cell.col} / span 1`,
+            gridRow: `${cell.row} / span 1`
+          }"
+          title="空位：按最小尺寸 1×1 绘制，可拖拽卡片至此处或点击添加"
+          @click="onEmptyCellClick(cell.col, cell.row)"
+        >
+          <span class="empty-cell-plus">+</span>
+        </div>
+
+        <!-- 业务卡片项 -->
+        <div
+          v-for="item in rightGridConfig"
+          :key="item.id"
+          class="bento-grid-item"
+          :class="[
+            `grid-item-${item.widgetId}`,
+            `size-${item.size}`,
+            {
+              'is-draggable': isHomeEditMode,
+              'is-currently-dragged': isPointerDragging && dragItem?.id === item.id
+            }
+          ]"
+          :style="{
+            gridColumn: `${item.col} / span ${item.colSpan}`,
+            gridRow: `${item.row} / span ${item.rowSpan}`
+          }"
+          @pointerdown="onCardPointerDown($event, item)"
+        >
+          <HomeWidgetRenderer
+            :widget-id="item.widgetId"
+            :size="item.size"
+            :is-edit-mode="isHomeEditMode"
+            :conferences="upcomingConferences"
+            :format-conf-date="formatHomeConfDate"
+            :get-conf-badge="getHomeConfDeadlineBadge"
+            :next-seminar="next"
+            :upcoming-seminars="upcomingSeminars"
+            :seminars-state="state.seminars"
+            :weekday-fn="weekday"
+            :weather-data="weather"
+            :weather-location="weatherLocation"
+            :library-count="count('library', '篇')"
+            :library-items="data.library"
+            :resources-count="count('books', '册')"
+            :resources-items="data.books"
+            :arxiv-count="count('papers', '篇')"
+            :unread-arxiv-count="unreadArxivCount"
+            :has-direct-arxiv="hasDirectArxiv"
+            :arxiv-items="data.papers"
+            :mailbox-emails="mailboxEmails"
+            @mark-arxiv="markArxivFeedViewed"
+          />
+        </div>
+      </TransitionGroup>
     </div>
+
+    <!-- 拖拽浮动跟手卡片 (Ghost Element) -->
+    <Teleport to="body">
+      <div
+        v-if="isPointerDragging && dragItem"
+        class="bento-drag-floating-card"
+        :class="[`widget-kind-${dragItem.widgetId}`, `widget-size-${dragItem.size}`]"
+        :style="{
+          left: `${dragPointerPos.x - dragCardRect.offsetX}px`,
+          top: `${dragPointerPos.y - dragCardRect.offsetY}px`,
+          width: `${dragCardRect.width}px`,
+          height: `${dragCardRect.height}px`
+        }"
+      >
+        <HomeWidgetRenderer
+          :widget-id="dragItem.widgetId"
+          :size="dragItem.size"
+          :is-edit-mode="false"
+          :conferences="upcomingConferences"
+          :format-conf-date="formatHomeConfDate"
+          :get-conf-badge="getHomeConfDeadlineBadge"
+          :next-seminar="next"
+          :upcoming-seminars="upcomingSeminars"
+          :seminars-state="state.seminars"
+          :weekday-fn="weekday"
+          :weather-data="weather"
+          :library-count="count('library', '篇')"
+          :library-items="data.library"
+          :resources-count="count('books', '册')"
+          :resources-items="data.books"
+          :arxiv-count="count('papers', '篇')"
+          :unread-arxiv-count="unreadArxivCount"
+          :has-direct-arxiv="hasDirectArxiv"
+          :arxiv-items="data.papers"
+          :mailbox-emails="mailboxEmails"
+        />
+      </div>
+    </Teleport>
+
+    <!-- 屏幕底部“移到此处删除”悬浮胶囊区 -->
+    <Teleport to="body">
+      <Transition name="delete-zone-slide">
+        <div
+          v-if="isPointerDragging"
+          ref="deleteZoneRef"
+          class="home-drag-delete-zone"
+          :class="{ 'is-active': isOverDeleteZone }"
+        >
+          <span class="delete-icon">
+            <AppIcon name="trash" :size="20" />
+          </span>
+          <span>{{ isOverDeleteZone ? '松开即删除此小组件' : '移到此处删除' }}</span>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- 类似手机系统的添加小组件悬浮按钮 -->
+    <transition name="fade">
+      <button
+        v-if="isHomeEditMode"
+        type="button"
+        class="floating-add-widget-fab"
+        title="添加小组件至首页"
+        @click="targetPlacementCell = null; targetSlot1Index = null; drawerInitialWidgetId = null; drawerInitialSize = null; showAddDrawer = true"
+      >
+        <AppIcon name="plus" :size="18" />
+        <span>添加小组件</span>
+      </button>
+    </transition>
+
+    <!-- 添加小组件抽屉 -->
+    <HomeWidgetAddDrawer
+      :open="showAddDrawer"
+      :initial-widget-id="drawerInitialWidgetId"
+      :initial-size="drawerInitialSize"
+      @close="showAddDrawer = false"
+      @add="handleAddWidget"
+    />
   </div>
 </template>
 
 <style scoped>
+/* 顶部右侧工具组与自定义排版按钮 */
+.topline-right-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.home-layout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary, #94a3b8);
+  background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.home-layout-btn:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--text-primary, #f8fafc);
+  transform: translateY(-1px);
+}
+
+.home-layout-btn.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* 浮动排版编辑工具栏 */
+.home-edit-mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px;
+  margin-bottom: 18px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 14px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 20px color-mix(in srgb, var(--accent) 20%, transparent);
+  z-index: 40;
+}
+
+.edit-bar-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.edit-pill {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  border-radius: 20px;
+}
+
+.edit-hint {
+  font-size: 12.5px;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.edit-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.edit-btn.add-btn {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+  color: var(--text-primary, #f8fafc);
+}
+
+.edit-btn.add-btn:hover {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.edit-btn.reset-btn {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+}
+
+.edit-btn.reset-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+}
+
+.edit-btn.finish-btn {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong, var(--accent)) 100%);
+  border: none;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.edit-btn.finish-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* 动效过渡 */
+.edit-bar-slide-enter-active,
+.edit-bar-slide-leave-active {
+  transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.edit-bar-slide-enter-from,
+.edit-bar-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+/* 自定义 Bento 网格容器：卡片尺寸严格复刻经典排版，通过间距自适应延展对齐左侧 1 号位底边 */
+.forecast-right.custom-bento-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  grid-template-rows: repeat(var(--grid-total-rows, 9), 70px) !important;
+  row-gap: 12px !important;
+  column-gap: 12px !important;
+  align-content: space-between !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  box-sizing: border-box !important;
+  position: relative !important;
+}
+
+.bento-grid-item {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s ease, opacity 0.2s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.bento-grid-item.is-draggable {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.bento-grid-item.is-draggable:active {
+  cursor: grabbing;
+}
+
+.bento-grid-item.is-draggable :deep(*),
+.custom-slot1-item.is-draggable :deep(*) {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-user-drag: none !important;
+}
+
+/* 正在被拖拽的卡片在原槽位中的半透明吸附占位框 */
+.bento-grid-item.is-currently-dragged {
+  opacity: 0.35 !important;
+  filter: grayscale(0.6);
+  pointer-events: none;
+  outline: 2px dashed var(--accent, #b89bf8);
+  outline-offset: -2px;
+  border-radius: 16px;
+}
+
+/* 拖拽重排平滑过渡动画 (Vue TransitionGroup FLIP) */
+.bento-reorder-move {
+  transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1) !important;
+  z-index: 10;
+}
+
+.grid-empty-cell-slot {
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.015);
+  transition: all 0.2s ease;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.grid-empty-cell-slot:hover {
+  background: color-mix(in srgb, var(--accent, #b89bf8) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent, #b89bf8) 50%, transparent);
+  color: var(--accent, #b89bf8);
+}
+
+.empty-cell-plus {
+  font-size: 18px;
+  font-weight: 300;
+}
+
+/* 浮动跟随指针的 3D 卡片 */
+.bento-drag-floating-card {
+  position: fixed !important;
+  z-index: 99999 !important;
+  pointer-events: none !important;
+  transform: scale(1.04) rotate(1.2deg);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 0 1.5px color-mix(in srgb, var(--accent, #b89bf8) 75%, transparent);
+  border-radius: 16px;
+  overflow: hidden;
+  opacity: 0.95;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+/* 底部“移到此处删除”悬浮胶囊区 */
+.home-drag-delete-zone {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 99998;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 28px;
+  border-radius: 999px;
+  background: rgba(30, 20, 30, 0.85);
+  border: 1.5px dashed rgba(239, 68, 68, 0.45);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  color: #fca5a5;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  transition: all 0.24s cubic-bezier(0.2, 0, 0, 1);
+  pointer-events: auto;
+  user-select: none;
+}
+
+.home-drag-delete-zone.is-active {
+  background: rgba(220, 38, 38, 0.9);
+  border-color: #ef4444;
+  color: #ffffff;
+  transform: translateX(-50%) scale(1.1);
+  box-shadow: 0 16px 40px rgba(239, 68, 68, 0.5), 0 0 20px rgba(239, 68, 68, 0.35);
+}
+
+.home-drag-delete-zone .delete-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease;
+}
+
+.home-drag-delete-zone.is-active .delete-icon {
+  transform: rotate(-10deg) scale(1.15);
+}
+
+/* 底部删除条的进出动画 */
+.delete-zone-slide-enter-active,
+.delete-zone-slide-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.delete-zone-slide-enter-from,
+.delete-zone-slide-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(40px);
+}
+
+.home-custom-slot1-wrapper {
+  margin-top: 16px;
+  width: 100%;
+}
+
+.home-custom-slot1-wrapper.is-medium-wide-layout {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 16px !important;
+  align-items: stretch !important;
+}
+
+.home-custom-slot1-wrapper.is-wide-layout {
+  display: block !important;
+  width: 100% !important;
+}
+
+.custom-slot1-item {
+  width: 100%;
+  position: relative;
+  transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s ease, opacity 0.2s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.slot1-col-1 {
+  grid-column: 1;
+}
+
+.slot1-col-2 {
+  grid-column: 2;
+}
+
+.slot1-empty-spacer {
+  min-height: 140px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.slot1-empty-half-slot {
+  border: 1.5px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--soft);
+  transition: all 0.2s ease;
+}
+
+.slot1-empty-half-slot:hover {
+  background: color-mix(in srgb, var(--accent, #b89bf8) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent, #b89bf8) 50%, transparent);
+  color: var(--accent, #b89bf8);
+}
+
+.empty-cell-label {
+  font-size: 13px;
+  color: inherit;
+}
+
+.custom-slot1-item.is-draggable {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.custom-slot1-item.is-draggable:active {
+  cursor: grabbing;
+}
+
+.custom-slot1-item.is-currently-dragged {
+  opacity: 0.35 !important;
+  filter: grayscale(0.6);
+  pointer-events: none;
+  outline: 2px dashed var(--accent, #b89bf8);
+  outline-offset: -2px;
+  border-radius: 16px;
+}
+
+.slot1-empty-state {
+  padding: 24px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 16px;
+  text-align: center;
+  color: var(--text-secondary, #94a3b8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.btn-slot1-add {
+  padding: 6px 14px;
+  font-size: 12.5px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent, #b89bf8) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #b89bf8) 45%, transparent);
+  color: var(--accent, #b89bf8);
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.btn-slot1-add:hover {
+  background: color-mix(in srgb, var(--accent, #b89bf8) 35%, transparent);
+  color: #ffffff;
+}
+
+/* 类似手机桌面“添加小组件”的悬浮按钮 */
+.floating-add-widget-fab {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 22px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent, #b89bf8) 0%, var(--accent-strong, #8b5cf6) 100%);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  box-shadow: 0 4px 20px color-mix(in srgb, var(--accent, #b89bf8) 45%, transparent), 0 2px 8px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.floating-add-widget-fab:hover {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--accent, #b89bf8) 55%, transparent), 0 3px 10px rgba(0, 0, 0, 0.4);
+}
+
+.floating-add-widget-fab:active {
+  transform: translateY(0) scale(0.98);
+}
+
+@media (max-width: 768px) {
+  .home-edit-mode-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px;
+  }
+  .edit-bar-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .forecast-right.custom-bento-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+  .home-custom-slot1-wrapper.is-medium-wide-layout {
+    grid-template-columns: 1fr !important;
+  }
+  .home-custom-slot1-wrapper.is-medium-wide-layout .slot1-col-1,
+  .home-custom-slot1-wrapper.is-medium-wide-layout .slot1-col-2 {
+    grid-column: auto !important;
+  }
+  .home-custom-slot1-wrapper.is-medium-wide-layout .slot1-empty-spacer {
+    display: none !important;
+  }
+}
+
 .group-title-heading {
   display: inline-flex;
   align-items: center;
@@ -811,6 +2005,32 @@ function onDayClick(e, day) {
 }
 @media (prefers-reduced-motion: reduce) {
   .mid-autumn-moon-badge {
+    animation: none;
+  }
+}
+.national-day-flag-badge {
+  display: inline-block;
+  width: clamp(32px, 3.6vw, 50px);
+  height: clamp(32px, 3.6vw, 50px);
+  flex-shrink: 0;
+  vertical-align: middle;
+  filter: drop-shadow(0 0 12px rgba(222, 41, 16, 0.65));
+  animation: national-day-flag-wave 3.5s ease-in-out infinite alternate;
+  user-select: none;
+  pointer-events: none;
+}
+@keyframes national-day-flag-wave {
+  0% {
+    filter: drop-shadow(0 0 8px rgba(222, 41, 16, 0.5));
+    transform: scale(1) rotate(-3deg);
+  }
+  100% {
+    filter: drop-shadow(0 0 16px rgba(255, 222, 0, 0.75));
+    transform: scale(1.05) rotate(4deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .national-day-flag-badge {
     animation: none;
   }
 }
@@ -850,7 +2070,7 @@ function onDayClick(e, day) {
   padding: 8px 16px;
   border-radius: 9999px;
   background: var(--panel-solid, rgba(12, 10, 26, 0.94));
-  border: 1.5px solid var(--line, rgba(184, 155, 248, 0.3));
+  border: 1.5px solid var(--line, color-mix(in srgb, var(--accent, #b89bf8) 30%, transparent));
   color: var(--soft);
   font-size: 12.5px;
   font-weight: 600;
@@ -870,7 +2090,7 @@ function onDayClick(e, day) {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--raised, rgba(18, 14, 38, 0.98));
-  box-shadow: 0 0 20px var(--line, rgba(184, 155, 248, 0.45));
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent, #b89bf8) 45%, transparent);
   transform: translateY(-50%) scale(1.08);
 }
 
@@ -974,9 +2194,9 @@ function onDayClick(e, day) {
   font-weight: 500;
   padding: 1px 5px;
   border-radius: 4px;
-  background: rgba(56, 189, 248, 0.12);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.2);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   white-space: nowrap;
 }
 
@@ -1513,5 +2733,15 @@ function onDayClick(e, day) {
   color: #1c1917;
   font-weight: 800;
   box-shadow: 0 2px 8px rgba(245, 158, 11, 0.6), 0 0 10px rgba(251, 191, 36, 0.4);
+}
+</style>
+
+<style>
+body.is-bento-dragging,
+body.is-bento-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-user-drag: none !important;
+  cursor: grabbing !important;
 }
 </style>

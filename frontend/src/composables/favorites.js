@@ -3,7 +3,7 @@ import { personalApi } from '../api/client'
 
 const entries = ref([]), ready = ref(false), error = ref(''), pending = ref(new Set())
 let owner, request
-const token = () => localStorage.getItem('labhub_token')
+const token = () => (typeof localStorage !== 'undefined' ? (localStorage.getItem('laborbit_token') || localStorage.getItem('labhub_token')) : '')
 const key = (kind, target) => `${kind}:${kind === 'paper' && !/^(doi:|url:)/i.test(target) ? String(target).replace(/v\d+$/i, '') : target}`
 
 export function useFavorites() {
@@ -16,22 +16,23 @@ export function useFavorites() {
     const requestedOwner = owner
     error.value = ''
     const work = personalApi.favorites().then(data => {
-      if (owner === requestedOwner) { entries.value = data; ready.value = true }
+      if (owner === requestedOwner) { entries.value = Array.isArray(data) ? data : []; ready.value = true }
     }).catch(e => { if (owner === requestedOwner) { error.value = e.message; ready.value = false }; throw e })
     request = work
     try { await work } finally { if (request === work) request = null }
   }
-  const saved = (kind, target) => entries.value.some(e => key(e.kind, e.target) === key(kind, target))
+  const saved = (kind, target) => (Array.isArray(entries.value) ? entries.value : []).some(e => key(e.kind, e.target) === key(kind, target))
   async function toggle(kind, target) {
     const id = key(kind, target), requestedOwner = owner
     if (pending.value.has(id)) return
     pending.value.add(id)
     const wasSaved = saved(kind, target)
-    const prevEntries = [...entries.value]
+    const currentList = Array.isArray(entries.value) ? entries.value : []
+    const prevEntries = [...currentList]
     if (wasSaved) {
-      entries.value = entries.value.filter(e => key(e.kind, e.target) !== id)
+      entries.value = currentList.filter(e => key(e.kind, e.target) !== id)
     } else {
-      entries.value = [...entries.value, { kind, target, created_at: new Date().toISOString() }]
+      entries.value = [...currentList, { kind, target, created_at: new Date().toISOString() }]
     }
     try {
       if (wasSaved) {

@@ -816,7 +816,7 @@ const ADMIN_STEPS = [
 
 export function useTutorial() {
   const steps = computed(() => {
-    if (userRole.value === 'admin') {
+    if (userRole.value === 'admin' || userRole.value === 'teacher') {
       return [...GENERAL_STEPS, ...ADMIN_STEPS]
     }
     return GENERAL_STEPS
@@ -893,6 +893,13 @@ export function useTutorial() {
   })
 
   function openTutorial(options = {}) {
+    if (typeof window !== 'undefined') {
+      const p = window.location.pathname || ''
+      const h = window.location.hash || ''
+      if (p.includes('/setup') || p.includes('/login') || h.includes('/setup') || h.includes('/login')) {
+        return
+      }
+    }
     userRole.value = options.role || 'student'
     isMandatory.value = !!options.mandatory
     currentStepIndex.value = 0
@@ -972,12 +979,16 @@ export function useTutorial() {
     showTutorial.value = false
   }
 
+  function closeTutorial() {
+    showTutorial.value = false
+  }
+
   function skipTutorial() {
     finishTutorial()
   }
 
   function setUserRole(role) {
-    userRole.value = (role === 'admin' || role === 'teacher') ? 'admin' : 'member'
+    userRole.value = role || 'student'
   }
 
   return {
@@ -999,6 +1010,7 @@ export function useTutorial() {
     userRole,
     setUserRole,
     openTutorial,
+    closeTutorial,
     nextStep,
     prevStep,
     jumpToStep,

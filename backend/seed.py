@@ -139,25 +139,9 @@ def _seed_default_invite_codes(db: Session) -> None:
         print(f"🎟️ 默认邀请码已写入数据库: {primary_code}")
 
 
-def init_db():
-    if os.getenv("INIT_CLEAN_DB", "").lower() in ("1", "true", "yes"):
-        init_clean_db()
-        return
-
-    from .migrations import migrate
-    migrate(engine)
-    Base.metadata.create_all(bind=engine)
-    db: Session = SessionLocal()
-
+def _seed_demo_data(db: Session) -> None:
+    print("开始初始化课题组基础演示数据 (SEED_DEMO_DATA=1)...")
     try:
-        # 如果已经存在用户，只补充种子邀请码后返回
-        if db.query(User).first():
-            print("数据库已存在数据，跳过初始数据填充（邀请码补种中）。")
-            _seed_default_invite_codes(db)
-            return
-
-        print("开始初始化课题组基础演示数据...")
-
         # 1. 成员与老师用户
         admin = User(
             name="系统管理员",
@@ -192,10 +176,19 @@ def init_db():
             email="student@lab.edu",
             hashed_password=get_password_hash("lab123456"),
             role="student",
+            can_manage_seminars=True,
             bio="科学机器学习与数值模拟算法方向",
         )
+        admin_example = User(
+            name="测试管理员",
+            email="admin@example.com",
+            hashed_password=get_password_hash("123456"),
+            role="admin",
+            can_manage_seminars=True,
+            bio="测试专用管理员",
+        )
 
-        db.add_all([admin, prof_shu, prof_wang, prof_li, student1])
+        db.add_all([admin, admin_example, prof_shu, prof_wang, prof_li, student1])
         db.commit()
         db.refresh(prof_shu)
         db.refresh(student1)
@@ -217,7 +210,7 @@ def init_db():
         paper2 = ArxivPaper(
             arxiv_id="2402.08654",
             title="Denoising Diffusion Probabilistic Models for Astronomical Image Reconstruction",
-            authors=json.dumps(["M. Zhang", "L. Wang", "K. Ting"], ensure_ascii=False),
+            authors=json.dumps(["M. Zhang", "L. Wang", "C. Chen"], ensure_ascii=False),
             abstract="Reconstructing high-fidelity astronomical observations from noisy and blurred detector data is an ill-posed inverse problem. Here we demonstrate how diffusion priors yield superior fidelity over traditional deconvolution algorithms.",
             primary_category="astro-ph.IM",
             published_date="2024-02-13",
@@ -300,11 +293,37 @@ def init_db():
         ]
         db.add_all(books)
         db.commit()
-        print("课题组初始数据成功初始化！")
+        print("课题组初始演示数据成功写入！")
     finally:
         from .services.library_service import backfill
         backfill(db)
         _seed_default_invite_codes(db)
+
+
+def init_db():
+    from .migrations import migrate
+    migrate(engine)
+    Base.metadata.create_all(bind=engine)
+    db: Session = SessionLocal()
+
+    try:
+        # 如果已经存在用户，只补充种子邀请码后返回
+        if db.query(User).first():
+            _seed_default_invite_codes(db)
+            return
+
+        # 仅当显式声明 SEED_DEMO_DATA=1 时才灌入测试模拟数据（用于无服务静态或纯测试环境）
+        if os.getenv("SEED_DEMO_DATA", "").lower() in ("1", "true", "yes"):
+            _seed_demo_data(db)
+            return
+
+        # 默认真实服务器部署：保持数据库干净（零用户、零排期、未初始化状态）
+        # 等待首个管理员在浏览器通过 /setup 首次部署向导完成配置
+        print("==================================================")
+        print("✨ LabOrbit 数据库表结构初始化就绪（纯净生产部署模式）")
+        print("💡 当前无任何管理员账号，请在浏览器中打开平台访问 /setup 进行首次部署向导配置！")
+        print("==================================================")
+    finally:
         db.close()
 
 

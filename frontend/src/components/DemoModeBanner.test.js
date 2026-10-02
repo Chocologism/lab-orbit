@@ -10,8 +10,9 @@ describe('DemoModeBanner Live Demo Dock & Persistence', () => {
   const template = parsed.descriptor.template?.content || ''
   const styles = parsed.descriptor.styles?.map(s => s.content).join('\n') || ''
 
-  it('keeps demo dock visible during tutorial without being hidden by showTutorial', () => {
-    expect(template).toContain('v-if="isDemo"')
+  it('keeps demo dock visible during tutorial without being hidden by showTutorial and suppresses on excluded routes', () => {
+    expect(template).toContain('isDemo')
+    expect(template).toContain('!isExcludedRoute')
     expect(template).not.toContain('!showTutorial')
   })
 

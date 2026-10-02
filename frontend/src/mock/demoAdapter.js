@@ -16,7 +16,8 @@ import {
   DEMO_PENDING_IMPORTS,
   DEMO_TALKS,
   DEMO_EMAILS,
-  DEMO_FEEDBACK_ITEMS
+  DEMO_FEEDBACK_ITEMS,
+  DEMO_FAVORITES
 } from './demoData'
 
 const DEMO_TODAY = DEMO_BASE_DATE_STR || '2026-09-10'
@@ -35,16 +36,17 @@ const STORAGE_KEYS = {
   EMAILS: 'laborbit_demo_emails',
   MAILBOX_CONFIG: 'laborbit_demo_mailbox_config',
   SMTP_CONFIG: 'laborbit_demo_smtp_config',
-  FEEDBACK: 'laborbit_demo_feedback'
+  FEEDBACK: 'laborbit_demo_feedback',
+  FAVORITES: 'laborbit_demo_favorites'
 }
 
 // 初始化或重置持久化数据
 export function initDemoStorage(force = false) {
   if (typeof localStorage === 'undefined') return
 
-  const isCurrentVersion = localStorage.getItem(STORAGE_KEYS.VERSION) === '4.2'
+  const isCurrentVersion = localStorage.getItem(STORAGE_KEYS.VERSION) === '4.5'
   if (!isCurrentVersion || force) {
-    localStorage.setItem(STORAGE_KEYS.VERSION, '4.2')
+    localStorage.setItem(STORAGE_KEYS.VERSION, '4.5')
     localStorage.setItem(STORAGE_KEYS.SEMINARS, JSON.stringify(DEMO_SEMINARS))
     localStorage.setItem(STORAGE_KEYS.PAPERS, JSON.stringify(DEMO_ARXIV_PAPERS))
     localStorage.setItem(STORAGE_KEYS.NOTICES, JSON.stringify(DEMO_NOTICES))
@@ -56,6 +58,7 @@ export function initDemoStorage(force = false) {
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(DEMO_SITE_CONFIG))
     localStorage.setItem(STORAGE_KEYS.EMAILS, JSON.stringify(DEMO_EMAILS))
     localStorage.setItem(STORAGE_KEYS.FEEDBACK, JSON.stringify(DEMO_FEEDBACK_ITEMS))
+    localStorage.setItem(STORAGE_KEYS.FAVORITES, JSON.stringify(DEMO_FAVORITES))
     localStorage.setItem(STORAGE_KEYS.MAILBOX_CONFIG, JSON.stringify({
       has_config: true,
       email_address: 'lab_demo@example.edu',
@@ -79,6 +82,8 @@ export function initDemoStorage(force = false) {
       use_imap_password: true,
       updated_at: '2026-09-01T00:00:00Z'
     }))
+  } else if (!localStorage.getItem(STORAGE_KEYS.FAVORITES)) {
+    localStorage.setItem(STORAGE_KEYS.FAVORITES, JSON.stringify(DEMO_FAVORITES))
   }
 }
 
@@ -945,10 +950,63 @@ export async function demoAxiosAdapter(config) {
   }
 
   // 12. 收藏夹 (Favorites) & 个人中心 (Account)
-  if (cleanUrl === '/api/favorites') {
-    return respond({ papers: [], books: [] })
+  if (cleanUrl === '/api/favorites' && method === 'get') {
+    const favs = getStored(STORAGE_KEYS.FAVORITES, DEMO_FAVORITES)
+    return respond(Array.isArray(favs) ? favs : [])
   }
+
   if (cleanUrl.startsWith('/api/favorites/')) {
+    const parts = cleanUrl.replace('/api/favorites/', '').split('/')
+    const kind = parts[0]
+    const target = decodeURIComponent(parts.slice(1).join('/'))
+    let favs = getStored(STORAGE_KEYS.FAVORITES, DEMO_FAVORITES)
+    if (!Array.isArray(favs)) favs = []
+
+    if (method === 'put') {
+      const existing = favs.find(f => f.kind === kind && String(f.target) === String(target))
+      if (!existing) {
+        let item = null
+        if (kind === 'paper') {
+          const papers = getStored(STORAGE_KEYS.PAPERS, DEMO_ARXIV_PAPERS)
+          const library = getStored(STORAGE_KEYS.LIBRARY, DEMO_LIBRARY_PAPERS)
+          item = [...papers, ...library].find(p => p.arxiv_id === target || String(p.id) === String(target))
+          if (!item) {
+            item = {
+              id: Date.now(),
+              arxiv_id: target,
+              title: `arXiv:${target}`,
+              authors: '未知作者',
+              abstract: '',
+              source_url: `https://arxiv.org/abs/${target}`,
+              pdf_url: `https://arxiv.org/pdf/${target}.pdf`
+            }
+          }
+        } else {
+          const books = getStored(STORAGE_KEYS.BOOKS, DEMO_BOOKS)
+          item = books.find(b => String(b.id) === String(target)) || {
+            id: Number(target) || Date.now(),
+            title: `资料 #${target}`,
+            category: '资料',
+            description: ''
+          }
+        }
+        favs.unshift({
+          kind,
+          target,
+          saved_at: new Date().toISOString(),
+          item
+        })
+        setStored(STORAGE_KEYS.FAVORITES, favs)
+      }
+      return respond({ saved: true })
+    }
+
+    if (method === 'delete') {
+      favs = favs.filter(f => !(f.kind === kind && String(f.target) === String(target)))
+      setStored(STORAGE_KEYS.FAVORITES, favs)
+      return respond({ saved: false })
+    }
+
     return respond({ success: true })
   }
   if (cleanUrl.startsWith('/api/account/profile') && method === 'put') {
@@ -962,6 +1020,31 @@ export async function demoAxiosAdapter(config) {
   }
   if (cleanUrl.startsWith('/api/account/avatar')) {
     return respond({ url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80' })
+  }
+  if (cleanUrl.startsWith('/api/account/home-layout')) {
+    if (method === 'get') {
+      const saved = getStored('laborbit_demo_home_layout', null)
+      return respond({
+        has_custom_layout: !!saved,
+        layout: saved
+      })
+    }
+    if (method === 'put') {
+      setStored('laborbit_demo_home_layout', body)
+      return respond({
+        has_custom_layout: true,
+        saved: true,
+        layout: body
+      })
+    }
+    if (method === 'delete') {
+      removeStored('laborbit_demo_home_layout')
+      return respond({
+        has_custom_layout: false,
+        reset: true,
+        layout: null
+      })
+    }
   }
   if (cleanUrl === '/api/files') {
     return respond({ url: 'https://example.com/file.pdf', filename: 'file.pdf' })

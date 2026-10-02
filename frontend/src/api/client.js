@@ -15,7 +15,7 @@ api.interceptors.request.use((config) => {
   if (isDemoMode()) {
     config.adapter = demoAxiosAdapter
   }
-  const token = localStorage.getItem('cssbd_token') || localStorage.getItem('labhub_token')
+  const token = localStorage.getItem('laborbit_token') || localStorage.getItem('labhub_token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -27,8 +27,8 @@ api.interceptors.response.use(
   (response) => response.data,
   (error) => {
     if (error.response && error.response.status === 401) {
-      localStorage.removeItem('cssbd_token')
-      localStorage.removeItem('cssbd_user')
+      localStorage.removeItem('laborbit_token')
+      localStorage.removeItem('laborbit_user')
       localStorage.removeItem('labhub_token')
       localStorage.removeItem('labhub_user')
       if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/quick-share')) {
@@ -79,6 +79,9 @@ export const accountApi = {
   profile: data => api.put('/api/account/profile', data),
   credentials: data => api.put('/api/account/credentials', data),
   avatar: file => { const data = new FormData(); data.append('file', file); return api.post('/api/account/avatar', data) },
+  getHomeLayout: () => api.get('/api/account/home-layout'),
+  saveHomeLayout: data => api.put('/api/account/home-layout', data),
+  resetHomeLayout: () => api.delete('/api/account/home-layout'),
 }
 
 export const arxivApi = {
@@ -194,7 +197,7 @@ export const mailboxApi = {
   clearEmails: () => api.delete('/api/mailbox/emails'),
   deleteEmail: id => api.delete(`/api/mailbox/emails/${id}`),
   syncStream: (onProgress, onDone, onError) => {
-    const token = localStorage.getItem('cssbd_token') || localStorage.getItem('labhub_token')
+    const token = localStorage.getItem('laborbit_token') || localStorage.getItem('labhub_token')
     const base = API_BASE_URL.replace(/\/$/, '')
     const url = `${base}/api/mailbox/sync-stream`
     const controller = new AbortController()

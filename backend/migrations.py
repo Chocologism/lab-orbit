@@ -4,7 +4,7 @@ from sqlalchemy import inspect, text
 
 def migrate(engine):
     additions = {
-        'users': {'real_name': "TEXT NOT NULL DEFAULT ''", 'nickname': "TEXT NOT NULL DEFAULT ''", 'token_version': 'INTEGER NOT NULL DEFAULT 0', 'can_manage_seminars': 'INTEGER NOT NULL DEFAULT 0'},
+        'users': {'real_name': "TEXT NOT NULL DEFAULT ''", 'nickname': "TEXT NOT NULL DEFAULT ''", 'token_version': 'INTEGER NOT NULL DEFAULT 0', 'can_manage_seminars': 'INTEGER NOT NULL DEFAULT 0', 'tutorial_completed': 'INTEGER NOT NULL DEFAULT 0', 'home_layout': "TEXT DEFAULT ''"},
         'seminar_schedules': {'abstract': "TEXT DEFAULT ''"},
         'seminar_presentations': {'presenter_id': 'INTEGER REFERENCES users(id)'},
         'arxiv_papers': {'journal': "TEXT DEFAULT ''", 'source_url': "TEXT DEFAULT ''"},
@@ -28,6 +28,7 @@ def migrate(engine):
             'source': "VARCHAR(200) DEFAULT ''",
             'updated_at': "DATETIME DEFAULT CURRENT_TIMESTAMP"
         },
+        'pending_schedule_imports': {'resolved_at': 'DATETIME'},
     }
     with engine.begin() as connection:
         inspector = inspect(connection)

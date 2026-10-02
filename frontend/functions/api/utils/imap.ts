@@ -102,12 +102,11 @@ export function isNoticeEmail(email: { subject?: string; snippet?: string; body_
   return false;
 }
 
-export function decryptUserPassword(token: string, secretKey: string = 'cssbd-hub-secure-secret-key-2026'): string {
+export function decryptUserPassword(token: string, secretKey: string = 'laborbit-secure-secret-key-2026'): string {
   if (!token) return '';
   const candidateKeys = Array.from(new Set([
     secretKey,
-    'cssbd-hub-secure-secret-key-2026',
-    'csbd-hub-secure-secret-key-2026',
+    'laborbit-secure-secret-key-2026',
     'labhub-secure-secret-key-2026',
   ])).filter(Boolean);
 

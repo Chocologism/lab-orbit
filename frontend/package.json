@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:demo": "GITHUB_PAGES=true VITE_DEMO_MODE=true vite build --outDir dist-demo",
     "test": "vitest run",
     "preview": "vite preview",
+    "preview:demo": "vite preview --outDir dist-demo --base /lab-orbit/ --port 4173",
     "pages:dev": "wrangler pages dev ./dist",
     "pages:deploy": "wrangler pages deploy ./dist --project-name=lab-hub-preview"
   },

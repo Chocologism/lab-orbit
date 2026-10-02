@@ -115,6 +115,9 @@ def test_import_is_atomic_and_associates_registered_presenter():
     unknown = client.post('/api/seminars', headers=headers, json=dict(row, date='2033-02-04', presenter_id=None, presenter_name='External speaker'))
     assert unknown.status_code == 200 and unknown.json()['presenter_id'] is None
     assert unknown.json()['abstract'] == ''
+    with SessionLocal() as db:
+        db.query(SeminarSchedule).filter(SeminarSchedule.date.in_(['2033-01-14', '2033-02-04'])).delete(synchronize_session=False)
+        db.commit()
 
 
 def test_additive_migration_keeps_existing_data(tmp_path):

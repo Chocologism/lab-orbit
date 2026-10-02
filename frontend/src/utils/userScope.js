@@ -7,7 +7,7 @@
  * 解析当前用户存储作用域标识（用于本地 localStorage 按用户隔离）
  * 优先级：
  * 1. 显式传入的 userOrScope（字符串、数字或含 id/username/email 的对象）
- * 2. 当前浏览器中持久化的登录用户（cssbd_user / labhub_user）
+ * 2. 当前浏览器中持久化的登录用户（laborbit_user / labhub_user）
  * 3. 若均不存在，返回 ''（空字符串，用于表示未登录/公共/默认环境，可向下兼容旧版全局键）
  *
  * @param {string|number|object|null|undefined} [userOrScope]
@@ -30,7 +30,7 @@ export function resolveUserScope(userOrScope) {
   // 尝试从浏览器 localStorage 获取当前已登录用户
   if (typeof localStorage !== 'undefined') {
     try {
-      const raw = localStorage.getItem('cssbd_user') || localStorage.getItem('labhub_user')
+      const raw = localStorage.getItem('laborbit_user') || localStorage.getItem('labhub_user')
       if (raw) {
         const parsed = JSON.parse(raw)
         if (parsed && typeof parsed === 'object') {

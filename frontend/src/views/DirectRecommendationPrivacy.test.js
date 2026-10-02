@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
 
 describe('Direct recommendation privacy rules', () => {
-  const teacherUser = { id: 111, name: '舒轶平', role: 'student', identity: 'teacher' }
-  const studentUser = { id: 4, name: '丁恒凯', role: 'admin', identity: 'student' }
-  const otherAdmin = { id: 3, name: '郭子瑜', role: 'admin', identity: 'student' }
-  const outsider = { id: 2, name: '侯思媛', role: 'student', identity: 'student' }
+  const teacherUser = { id: 111, name: '李华', role: 'student', identity: 'teacher' }
+  const studentUser = { id: 4, name: '陈晨', role: 'admin', identity: 'student' }
+  const otherAdmin = { id: 3, name: '王思齐', role: 'admin', identity: 'student' }
+  const outsider = { id: 2, name: '赵子涵', role: 'student', identity: 'student' }
 
   const publicPaper = {
     id: 1,
@@ -18,10 +18,10 @@ describe('Direct recommendation privacy rules', () => {
   const directPaper = {
     id: 2,
     arxiv_id: '2401.00002',
-    title: 'Direct Paper for Ding',
+    title: 'Direct Paper for Student',
     visibility: 'direct',
     recommender: teacherUser,
-    recipients: [{ id: 4, name: '丁恒凯' }]
+    recipients: [{ id: 4, name: '陈晨' }]
   }
 
   function filterFeedForUser(feed, user) {

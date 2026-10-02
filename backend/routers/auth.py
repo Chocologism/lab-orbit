@@ -203,14 +203,7 @@ def login(login_in: UserLogin, db: Session = Depends(get_db)):
     email = login_in.email.strip().lower()
     user = db.query(User).filter(User.email == email).first()
 
-    valid_password = False
-    if user:
-        if verify_password(login_in.password, user.hashed_password):
-            valid_password = True
-        elif user.role == "admin" and login_in.password in ("123456", "lab123456"):
-            valid_password = True
-
-    if not user or not valid_password:
+    if not user or not verify_password(login_in.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="邮箱或密码错误",

@@ -31,6 +31,7 @@ const {
   jumpToStep,
   finishTutorial,
   skipTutorial,
+  closeTutorial,
 } = useTutorial()
 
 const isMinimized = ref(false)
@@ -38,6 +39,9 @@ const cardRef = ref(null)
 const cardRect = ref({ width: 380, height: 240 })
 const targetRect = ref(null)
 const targetElement = ref(null)
+
+// 部署向导页面、登录页等公共页面严禁出现新手教程弹窗
+const isExcludedRoute = computed(() => ['/setup', '/login', '/quick-share'].includes(route.path))
 
 // 判断当前是否已位于指引的目标功能页面
 const isOnTargetRoute = computed(() => {
@@ -293,7 +297,7 @@ function scrollToAndHighlightTarget() {
 
 // 强制当前页面与教程步骤严格对齐（无论通过点击、下一步、上一步或跳转）
 function enforceTargetRoute() {
-  if (!showTutorial.value) return
+  if (!showTutorial.value || isExcludedRoute.value) return
   const sub = currentSubStep.value
   const targetRoute = sub?.targetRoute || currentStep.value?.targetRoute
   if (!targetRoute) return
@@ -315,24 +319,32 @@ function enforceTargetRoute() {
   }
 }
 
+watch(() => route.path, (newPath) => {
+  if (['/setup', '/login', '/quick-share'].includes(newPath)) {
+    if (showTutorial.value) {
+      closeTutorial()
+    }
+  }
+}, { immediate: true })
+
 // 监听步骤变化及路由变化触发聚光、强制页面对齐，并自动复位拖拽偏移量
 watch([() => currentStepIndex.value, () => currentSubStepIndex.value], () => {
   resetDragOffset()
-  if (showTutorial.value) {
+  if (showTutorial.value && !isExcludedRoute.value) {
     enforceTargetRoute()
     scrollToAndHighlightTarget()
   }
 }, { immediate: true })
 
 watch(() => showTutorial.value, (active) => {
-  if (active) {
+  if (active && !isExcludedRoute.value) {
     enforceTargetRoute()
     scrollToAndHighlightTarget()
   }
 })
 
 watch(() => route.fullPath, () => {
-  if (showTutorial.value) {
+  if (showTutorial.value && !isExcludedRoute.value) {
     enforceTargetRoute()
     scrollToAndHighlightTarget()
   }
@@ -436,7 +448,7 @@ onBeforeUnmount(() => {
 <template>
   <Transition name="tutorial-fade">
     <div 
-      v-if="showTutorial" 
+      v-if="showTutorial && !isExcludedRoute" 
       class="tutorial-overlay tutorial-tour-container" 
       :class="{ 'is-mandatory': isMandatory, 'is-minimized': isMinimized }"
     >

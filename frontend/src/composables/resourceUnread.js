@@ -8,14 +8,14 @@ const unreadBookIds = ref(new Set())
 const preferredCategory = ref('')
 
 function getViewedKey() {
-  const token = localStorage.getItem('cssbd_token') || localStorage.getItem('labhub_token') || 'guest'
-  const user = localStorage.getItem('cssbd_user') || localStorage.getItem('labhub_user') || ''
+  const token = localStorage.getItem('laborbit_token') || localStorage.getItem('labhub_token') || 'guest'
+  const user = localStorage.getItem('laborbit_user') || localStorage.getItem('labhub_user') || ''
   let id = 'guest'
   try {
     const parsed = JSON.parse(user)
     if (parsed?.id) id = String(parsed.id)
   } catch {}
-  return `csbd_resource_viewed_records_${id}_${token.slice(-8)}`
+  return `laborbit_resource_viewed_records_${id}_${token.slice(-8)}`
 }
 
 function getViewedRecords() {
@@ -86,7 +86,7 @@ export function computeUnreadBooks(books = [], favorites = []) {
 export function useResourceUnread() {
   async function refresh() {
     try {
-      const token = localStorage.getItem('cssbd_token') || localStorage.getItem('labhub_token')
+      const token = localStorage.getItem('laborbit_token') || localStorage.getItem('labhub_token')
       if (!token) {
         unreadResourceCount.value = 0
         unreadBookIds.value = new Set()

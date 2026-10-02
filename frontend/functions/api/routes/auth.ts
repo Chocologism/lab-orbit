@@ -97,10 +97,7 @@ app.post('/login', async (c) => {
   }
 
   let match = false;
-  // 1. 优先校验应急过渡密码（0ms CPU，防止高并发下 bcrypt 运算耗尽 Worker CPU 限制）
-  if (password === '123456' || password === 'lab123456' || password === 'CSBD-2026') {
-    match = true;
-  } else if (user.hashed_password) {
+  if (user.hashed_password) {
     try {
       match = await bcrypt.compare(password, user.hashed_password);
     } catch (err) {
@@ -112,7 +109,7 @@ app.post('/login', async (c) => {
     return c.json({ detail: '用户不存在或密码错误' }, 401);
   }
 
-  const secret = c.env.JWT_SECRET || 'csbd-hub-secure-secret-key-2026';
+  const secret = c.env.JWT_SECRET || 'laborbit-secure-secret-key-2026';
   const token = await createToken(user, secret);
 
   await ensureUserPresenceSchema(c.env.DB);
@@ -186,7 +183,7 @@ app.post('/register', async (c) => {
     return c.json({ detail: '注册失败，请稍后重试' }, 500);
   }
 
-  const secret = c.env.JWT_SECRET || 'cssbd-hub-secure-secret-key-2026';
+  const secret = c.env.JWT_SECRET || 'laborbit-secure-secret-key-2026';
   const token = await createToken(user, secret);
 
   const { hashed_password: _, ...safeUser } = user;

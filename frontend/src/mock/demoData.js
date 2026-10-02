@@ -600,7 +600,7 @@ export const DEMO_TALKS = [
     speaker: '王思齐 博士后',
     date: formatOffsetDate(4),
     time: '10:00',
-    location: '天文楼 216 会议室',
+    location: '学术研讨室 216',
     notes: '青年学者前沿交流',
     event_type: 'talk',
     poster_url: '',
@@ -613,15 +613,83 @@ export const DEMO_TALKS = [
     date: formatOffsetDate(18),
     end_date: formatOffsetDate(21),
     time: '全天',
-    city: '南京',
-    location: '国际会议大酒店',
+    city: '上海',
+    location: '张江前沿科学研究大厦 国际学术报告厅',
     organizer: '中国天文学会 / 空间天文专业委员会',
     event_type: 'conference',
     sub_type: '学术研讨会',
-    abstract_deadline: formatOffsetDate(10),
-    registration_deadline: formatOffsetDate(15),
-    notes: '重点关注下一代空间望远镜科学数据处理',
+    abstract_deadline: formatOffsetDate(4),
+    registration_deadline: formatOffsetDate(14),
+    notes: '重点关注下一代空间望远镜科学数据处理、管线研发与大样本测光巡天星表融合。',
     source: '会议通知'
+  },
+  {
+    id: 703,
+    title: '第十七届高能天体物理与多信使天文学国际研讨会 (HEMA 2026)',
+    speaker: '',
+    date: formatOffsetDate(8),
+    end_date: formatOffsetDate(11),
+    time: '全天',
+    city: '北京',
+    location: '中关村学术交流中心 报告厅',
+    organizer: '前沿科学与计算中心 / 高能天体物理联合工作组',
+    event_type: 'conference',
+    sub_type: '国际会议',
+    abstract_deadline: formatOffsetDate(-3),
+    registration_deadline: formatOffsetDate(3),
+    notes: '涵盖引力波电磁对应体巡天、甚高能伽马射线物理与快速射电暴辐射机制。',
+    source: '邮件导入'
+  },
+  {
+    id: 704,
+    title: '2026 全国星系宇宙学与暗能量前沿学术论坛',
+    speaker: '',
+    date: formatOffsetDate(25),
+    end_date: formatOffsetDate(28),
+    time: '全天',
+    city: '成都',
+    location: '天府国际会议中心 蜀都厅',
+    organizer: '理论物理与宇宙学前沿学术委员会',
+    event_type: 'conference',
+    sub_type: '学术年会',
+    abstract_deadline: formatOffsetDate(10),
+    registration_deadline: formatOffsetDate(18),
+    notes: '探讨重子声学振荡 (BAO)、弱引力透镜宇宙学约束、原初非高斯性及下一代大视场光谱巡天。',
+    source: '会议通知'
+  },
+  {
+    id: 705,
+    title: '大规模天文数据科学与 AI for Science 暑期高级讲习班',
+    speaker: '',
+    date: formatOffsetDate(32),
+    end_date: formatOffsetDate(37),
+    time: '全天',
+    city: '杭州',
+    location: '未来科技城国际学术交流中心',
+    organizer: '国家重大科技基础设施科学数据中心',
+    event_type: 'conference',
+    sub_type: '讲习班',
+    abstract_deadline: formatOffsetDate(15),
+    registration_deadline: formatOffsetDate(22),
+    notes: '面向青年学者与研究生，系统讲解大规模分布式图计算、天体物理预训练大模型与贝叶斯逆问题反演。',
+    source: '教务通知'
+  },
+  {
+    id: 706,
+    title: '第六届系外行星轨道演化与宜居环境国际研讨会 (ExoPlanets VI)',
+    speaker: '',
+    date: formatOffsetDate(42),
+    end_date: formatOffsetDate(46),
+    time: '全天',
+    city: '广州',
+    location: '大学城国际学术会议中心',
+    organizer: '国际天文学联合会 (IAU) 科学工作组 / 行星科学前沿研究中心',
+    event_type: 'conference',
+    sub_type: '国际会议',
+    abstract_deadline: formatOffsetDate(20),
+    registration_deadline: formatOffsetDate(30),
+    notes: '聚焦空间凌星巡天探测新成果、宜居带系外行星大气生物标志物反演与动力学演化模拟。',
+    source: '国际会议'
   }
 ]
 
@@ -788,6 +856,33 @@ export const DEMO_FEEDBACK_ITEMS = [
         read_at: null
       }
     ]
+  }
+]
+
+export const DEMO_FAVORITES = [
+  {
+    kind: 'paper',
+    target: '2403.08852',
+    saved_at: '2026-09-08T10:00:00Z',
+    item: DEMO_ARXIV_PAPERS[0]
+  },
+  {
+    kind: 'book',
+    target: '1',
+    saved_at: '2026-09-09T14:00:00Z',
+    item: DEMO_BOOKS[0]
+  },
+  {
+    kind: 'book',
+    target: '2',
+    saved_at: '2026-09-09T15:30:00Z',
+    item: DEMO_BOOKS[1]
+  },
+  {
+    kind: 'book',
+    target: '4',
+    saved_at: '2026-09-10T09:00:00Z',
+    item: DEMO_BOOKS[3]
   }
 ]
 

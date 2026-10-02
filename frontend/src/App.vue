@@ -8,6 +8,7 @@ import FeedbackHost from './components/FeedbackHost.vue'
 import NoticeScanBanner from './components/NoticeScanBanner.vue'
 import ForecastAtmosphere from './components/ForecastAtmosphere.vue'
 import MidAutumnMooncakes from './components/MidAutumnMooncakes.vue'
+import NationalDayCelebration from './components/NationalDayCelebration.vue'
 import SystemTutorialModal from './components/SystemTutorialModal.vue'
 import DemoModeBanner from './components/DemoModeBanner.vue'
 import { enterPage, leavePage } from './composables/motion'
@@ -23,15 +24,16 @@ const showNavbar = computed(() => !['/login', '/quick-share', '/setup'].includes
 const isHome = computed(() => route.path === '/')
 const isAssistant = computed(() => route.path === '/assistant')
 const isDemo = computed(() => isDemoMode())
+const isExcludedRoute = computed(() => ['/setup', '/login', '/quick-share'].includes(route.path))
 
 const isPinned = ref(localStorage.getItem('sidebar_pinned') === 'true')
 
-const { openTutorial } = useTutorial()
+const { openTutorial, closeTutorial } = useTutorial()
 let hasCheckedTutorial = false
 
 async function checkTutorialEligibility() {
   const token = localStorage.getItem('labhub_token')
-  if (!token || route.path === '/setup' || route.path === '/login') return
+  if (!token || route.path === '/setup' || route.path === '/login' || route.path === '/quick-share') return
 
   if (hasCheckedTutorial) return
   try {
@@ -45,7 +47,9 @@ async function checkTutorialEligibility() {
 
 watch(() => route.path, (to, from) => {
   isPinned.value = localStorage.getItem('sidebar_pinned') === 'true'
-  if (to !== '/setup' && to !== '/login') {
+  if (to === '/setup' || to === '/login' || to === '/quick-share') {
+    closeTutorial()
+  } else {
     checkTutorialEligibility()
   }
 }, { immediate: true })
@@ -60,6 +64,7 @@ function onUpdatePinned(val) {
   <div class="app-shell" :class="{ 'is-home': isHome, 'has-sidebar': showNavbar, 'sidebar-collapsed': !isPinned && showNavbar }">
     <ForecastAtmosphere />
     <MidAutumnMooncakes />
+    <NationalDayCelebration />
     <a href="#main-content" class="skip-link">跳到主要内容</a>
     <MobileHeader v-if="showNavbar" />
     <Navbar v-if="showNavbar" :pinned="isPinned" @update:pinned="onUpdatePinned" />
@@ -76,8 +81,8 @@ function onUpdatePinned(val) {
     <FeedbackHost />
     <NoticeScanBanner />
     <SystemTutorialModal />
-    <DemoModeBanner />
-    <div v-if="isDemo" class="demo-watermark-overlay" aria-hidden="true"></div>
+    <DemoModeBanner v-if="isDemo && !isExcludedRoute" />
+    <div v-if="isDemo && !isExcludedRoute" class="demo-watermark-overlay" aria-hidden="true"></div>
   </div>
 </template>
 

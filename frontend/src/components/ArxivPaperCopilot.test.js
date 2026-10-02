@@ -28,7 +28,7 @@ describe('ArxivPaperCopilot & ArxivPdfViewer Architecture Tests', () => {
   })
 
   it('correctly persists recent arXiv paper reading history in LocalStorage', () => {
-    const key = 'csbd_arxiv_recent_papers'
+    const key = 'laborbit_arxiv_recent_papers'
     const recent = [
       { id: '1801.01505', title: 'Solar Energetic Particles' },
       { id: '2401.00001', title: 'Deep Learning Galaxies' }
@@ -42,7 +42,7 @@ describe('ArxivPaperCopilot & ArxivPdfViewer Architecture Tests', () => {
   })
 
   it('stores and restores split screen ratio percent', () => {
-    const key = 'csbd_arxiv_split_pct'
+    const key = 'laborbit_arxiv_split_pct'
     localStorage.setItem(key, '60')
     expect(parseFloat(localStorage.getItem(key))).toBe(60)
   })
@@ -99,7 +99,7 @@ describe('ArxivPaperCopilot & ArxivPdfViewer Architecture Tests', () => {
   })
 
   it('persists and toggles PDF dark / light background theme mode', () => {
-    const themeKey = 'csbd_arxiv_pdf_theme'
+    const themeKey = 'laborbit_arxiv_pdf_theme'
     expect(localStorage.getItem(themeKey)).toBeNull()
 
     // Default to dark
@@ -185,8 +185,8 @@ describe('ArxivPaperCopilot & ArxivPdfViewer Architecture Tests', () => {
 
   it('verifies multi-session storage and migration for single paper (Figure 2 & Figure 3)', () => {
     const paperId = '1801.01505'
-    const sessionsKey = `csbd_arxiv_copilot_sessions_${paperId}`
-    const legacyKey = `csbd_arxiv_copilot_session_${paperId}`
+    const sessionsKey = `laborbit_arxiv_copilot_sessions_${paperId}`
+    const legacyKey = `laborbit_arxiv_copilot_session_${paperId}`
 
     // 模拟旧版单会话数据
     const legacyMessages = [

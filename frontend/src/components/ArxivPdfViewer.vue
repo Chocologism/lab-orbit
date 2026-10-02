@@ -530,7 +530,7 @@ const emit = defineEmits([
 // 当前登录用户
 const currentUser = computed(() => {
   try {
-    const raw = localStorage.getItem('cssbd_user') || localStorage.getItem('labhub_user')
+    const raw = localStorage.getItem('laborbit_user') || localStorage.getItem('labhub_user')
     return raw ? JSON.parse(raw) : null
   } catch (e) {
     return null
@@ -663,12 +663,12 @@ let lastScrollLeft = 0
 let lastScrollTop = 0
 
 // PDF 背景主题模式：'dark' (暗色护眼，对齐图 4) | 'light' (明亮白底)
-const pdfTheme = ref(localStorage.getItem('csbd_arxiv_pdf_theme') || 'dark')
+const pdfTheme = ref(localStorage.getItem('laborbit_arxiv_pdf_theme') || 'dark')
 
 function togglePdfTheme() {
   pdfTheme.value = pdfTheme.value === 'dark' ? 'light' : 'dark'
   try {
-    localStorage.setItem('csbd_arxiv_pdf_theme', pdfTheme.value)
+    localStorage.setItem('laborbit_arxiv_pdf_theme', pdfTheme.value)
   } catch (_) {}
   notify(pdfTheme.value === 'dark' ? '已开启暗色护眼背景' : '已切换为明亮白底背景', 'info')
 }

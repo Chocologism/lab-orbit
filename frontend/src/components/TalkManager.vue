@@ -66,7 +66,7 @@ function toggleAllTalks() {
 
 function getUser() {
   try {
-    return JSON.parse(localStorage.getItem('csbd_user') || localStorage.getItem('cssbd_user') || localStorage.getItem('labhub_user') || '{}')
+    return JSON.parse(localStorage.getItem('laborbit_user') || localStorage.getItem('labhub_user') || '{}')
   } catch {
     return {}
   }

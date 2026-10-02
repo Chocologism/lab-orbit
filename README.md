@@ -277,7 +277,7 @@ docker compose -f deploy/docker-compose.yml up -d
 
 | 贡献者 / 协作伙伴 | 角色定位 | 贡献范畴 |
 | :--- | :--- | :--- |
-| **[@Chocologism](https://github.com/Chocologism)** (Hengkai Ding) | Project Lead / Core Maintainer | 需求设计、业务逻辑、前端交互与部署运维 💻 🎨 🚀 |
+| **[@Chocologism](https://github.com/Chocologism)** | Project Lead / Core Maintainer | 需求设计、业务逻辑、前端交互与部署运维 💻 🎨 🚀 |
 | **Google DeepMind Antigravity** | AI Pair Programmer | 前端 Vue 3 组件生态、全栈架构重构、海报识别与 Cloudflare 适配 🤖 💡 🛠️ |
 | **OpenAI Codex** | AI Pair Programmer | 后端 FastAPI 路由、数据库模型、测试用例补全与接口联调 🤖 🧪 ⚡ |
 
@@ -541,7 +541,7 @@ This project was architected and led by human maintainers in collaboration with 
 
 | Contributor / Partner | Role | Focus Areas |
 | :--- | :--- | :--- |
-| **[@Chocologism](https://github.com/Chocologism)** (Hengkai Ding) | Project Lead / Core Maintainer | Architecture design, domain logic, frontend UX, deployment 💻 🎨 🚀 |
+| **[@Chocologism](https://github.com/Chocologism)** | Project Lead / Core Maintainer | Architecture design, domain logic, frontend UX, deployment 💻 🎨 🚀 |
 | **Google DeepMind Antigravity** | AI Pair Programmer | Vue 3 UI ecosystem, full-stack refactoring, poster OCR, Cloudflare edge 🤖 💡 🛠️ |
 | **OpenAI Codex** | AI Pair Programmer | FastAPI routing, data schemas, test suites, API wiring 🤖 🧪 ⚡ |
 

@@ -27,19 +27,19 @@ describe('smtpNotice utilities', () => {
       dateStr: '2026-09-23',
       timeStr: '10:00',
       location: '5-511 / 腾讯会议 911-575-921',
-      presenterName: '樊思媛',
-      presentationsText: '丁恺航，郭子瑜',
+      presenterName: '赵子涵',
+      presentationsText: '陈晨，王思齐',
       topic: '当自适应 Fuzzy Dark matter 模拟遇上Agent时代',
       abstract: '随着 Fuzzy Dark Matter 模拟逐渐进入大质量阻晕和多尺度问题...',
-      adminName: '邱文豪'
+      adminName: '李华'
     })
 
     expect(body).toContain('大家好，\n\n下次组会安排如下：\n- 时间：9月23日（周三）上午10点\n- 地点：5-511\n- 线上：腾讯会议 911-575-921')
-    expect(body).toContain('主讲人：樊思媛')
+    expect(body).toContain('主讲人：赵子涵')
     expect(body).toContain('题目：当自适应 Fuzzy Dark matter 模拟遇上Agent时代')
     expect(body).toContain('摘要：随着 Fuzzy Dark Matter 模拟逐渐进入大质量阻晕和多尺度问题...')
-    expect(body).toContain('Arxiv主讲人：丁恺航，郭子瑜')
-    expect(body).toContain('请大家准时参加，谢谢！\n\n祝好，\n邱文豪')
+    expect(body).toContain('Arxiv主讲人：陈晨，王思齐')
+    expect(body).toContain('请大家准时参加，谢谢！\n\n祝好，\n李华')
   })
 
   it('generates standard HTML notice with red location highlight', () => {
@@ -47,21 +47,21 @@ describe('smtpNotice utilities', () => {
       dateStr: '2026-09-23',
       timeStr: '10:00',
       location: '5-511 / 腾讯会议 911-575-921',
-      presenterName: '樊思媛',
-      presentationsText: '丁恺航，郭子瑜',
+      presenterName: '赵子涵',
+      presentationsText: '陈晨，王思齐',
       topic: '当自适应 Fuzzy Dark matter 模拟遇上Agent时代',
       abstract: '随着 Fuzzy Dark Matter 模拟逐渐进入大质量阻晕和多尺度问题...',
-      adminName: '邱文豪'
+      adminName: '李华'
     })
 
     expect(html).toContain('<span style="color: #e53333; font-weight: bold;">5-511</span>')
-    expect(html).toContain('<strong>主讲人</strong>：樊思媛')
+    expect(html).toContain('<strong>主讲人</strong>：赵子涵')
     expect(html).toContain('<strong>题目</strong>：当自适应 Fuzzy Dark matter 模拟遇上Agent时代')
-    expect(html).toContain('<strong>Arxiv主讲人</strong>：丁恺航，郭子瑜')
+    expect(html).toContain('<strong>Arxiv主讲人</strong>：陈晨，王思齐')
   })
 
   it('formats custom edited notice text into html with red location highlight', () => {
-    const customText = `大家好，\n\n下次组会安排如下：\n- 时间：9月23日（周三）上午10点\n- 地点：5-511\n- 线上：腾讯会议 911-575-921\n\n主讲人：樊思媛\n题目：测试\n摘要：无\n\nArxiv主讲人：无\n\n请大家准时参加，谢谢！\n\n祝好，\n邱文豪`
+    const customText = `大家好，\n\n下次组会安排如下：\n- 时间：9月23日（周三）上午10点\n- 地点：5-511\n- 线上：腾讯会议 911-575-921\n\n主讲人：赵子涵\n题目：测试\n摘要：无\n\nArxiv主讲人：无\n\n请大家准时参加，谢谢！\n\n祝好，\n李华`
     const html = formatNoticeBodyToHtml(customText)
     expect(html).toContain('<span style="color: #e53333; font-weight: bold;">5-511</span>')
     expect(html).toContain('• <strong>时间</strong>：')

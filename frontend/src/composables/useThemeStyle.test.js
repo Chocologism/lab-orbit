@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 describe('useThemeStyle', () => {
-  const STORAGE_KEY = 'cssbd_theme_style'
+  const STORAGE_KEY = 'laborbit_theme_style'
   let store = {}
   let attrs = {}
 
@@ -53,7 +53,7 @@ describe('useThemeStyle', () => {
     setThemeStyle('clouds-static')
     expect(currentThemeStyle.value).toBe('clouds-static')
     expect(localStorage.setItem).toHaveBeenCalledWith(STORAGE_KEY, 'clouds-static')
-    expect(document.documentElement.setAttribute).toHaveBeenCalledWith('data-theme-style', 'vanta-fog')
+    expect(document.documentElement.setAttribute).toHaveBeenCalledWith('data-theme-style', 'clouds-static')
     expect(document.documentElement.setAttribute).toHaveBeenCalledWith('data-bg-style', 'clouds-static')
   })
 
@@ -72,13 +72,13 @@ describe('useThemeStyle', () => {
     // Change color scheme to obsidian-gray
     setColorScheme('obsidian-gray')
     expect(currentColorScheme.value).toBe('obsidian-gray')
-    expect(localStorage.setItem).toHaveBeenCalledWith('cssbd_color_scheme', 'obsidian-gray')
+    expect(localStorage.setItem).toHaveBeenCalledWith('laborbit_color_scheme', 'obsidian-gray')
     expect(document.documentElement.setAttribute).toHaveBeenCalledWith('data-color-scheme', 'obsidian-gray')
 
     // Change background type to galaxy
     setBgType('galaxy')
     expect(currentBgType.value).toBe('galaxy')
-    expect(localStorage.setItem).toHaveBeenCalledWith('cssbd_bg_type', 'galaxy')
+    expect(localStorage.setItem).toHaveBeenCalledWith('laborbit_bg_type', 'galaxy')
     expect(document.documentElement.setAttribute).toHaveBeenCalledWith('data-bg-type', 'galaxy')
   })
 
@@ -89,38 +89,51 @@ describe('useThemeStyle', () => {
 
     setGlassStyle('frosted')
     expect(currentGlassStyle.value).toBe('frosted')
-    expect(localStorage.setItem).toHaveBeenCalledWith('cssbd_glass_style', 'frosted')
+    expect(localStorage.setItem).toHaveBeenCalledWith('laborbit_glass_style', 'frosted')
     expect(document.documentElement.setAttribute).toHaveBeenCalledWith('data-glass-style', 'frosted')
 
     setGlassStyle('liquid')
     expect(currentGlassStyle.value).toBe('liquid')
-    expect(localStorage.setItem).toHaveBeenCalledWith('cssbd_glass_style', 'liquid')
+    expect(localStorage.setItem).toHaveBeenCalledWith('laborbit_glass_style', 'liquid')
     expect(document.documentElement.setAttribute).toHaveBeenCalledWith('data-glass-style', 'liquid')
   })
 
   it('migrates previous default users on legacy themes to classic-cyan and clouds-static', async () => {
     const { migratePreviousDefaultUsers, DEFAULT_MIGRATION_KEY } = await import('./useThemeStyle')
-    store['cssbd_color_scheme'] = 'obsidian-gray'
-    store['cssbd_bg_type'] = 'earth-orbit'
+    store['laborbit_color_scheme'] = 'obsidian-gray'
+    store['laborbit_bg_type'] = 'earth-orbit'
     delete store[DEFAULT_MIGRATION_KEY]
 
     migratePreviousDefaultUsers()
 
-    expect(store['cssbd_color_scheme']).toBe('classic-cyan')
-    expect(store['cssbd_bg_type']).toBe('clouds-static')
+    expect(store['laborbit_color_scheme']).toBe('classic-cyan')
+    expect(store['laborbit_bg_type']).toBe('clouds-static')
     expect(store[DEFAULT_MIGRATION_KEY]).toBe('1')
   })
 
   it('preserves user custom color scheme and local media during migration', async () => {
     const { migratePreviousDefaultUsers, DEFAULT_MIGRATION_KEY } = await import('./useThemeStyle')
-    store['cssbd_color_scheme'] = 'custom'
-    store['cssbd_bg_type'] = 'custom-local'
+    store['laborbit_color_scheme'] = 'custom'
+    store['laborbit_bg_type'] = 'custom-local'
     delete store[DEFAULT_MIGRATION_KEY]
 
     migratePreviousDefaultUsers()
 
-    expect(store['cssbd_color_scheme']).toBe('custom')
-    expect(store['cssbd_bg_type']).toBe('custom-local')
+    expect(store['laborbit_color_scheme']).toBe('custom')
+    expect(store['laborbit_bg_type']).toBe('custom-local')
     expect(store[DEFAULT_MIGRATION_KEY]).toBe('1')
+  })
+
+  it('supports pausing/freezing background video and persists to localStorage', async () => {
+    const { useThemeStyle, isBgVideoPaused } = await import('./useThemeStyle')
+    const { setBgVideoPaused, toggleBgVideoPaused } = useThemeStyle()
+
+    setBgVideoPaused(true)
+    expect(isBgVideoPaused.value).toBe(true)
+    expect(localStorage.setItem).toHaveBeenCalledWith('laborbit_bg_video_paused', 'true')
+
+    toggleBgVideoPaused()
+    expect(isBgVideoPaused.value).toBe(false)
+    expect(localStorage.setItem).toHaveBeenCalledWith('laborbit_bg_video_paused', 'false')
   })
 })

@@ -808,7 +808,7 @@ const emit = defineEmits(['paper-change'])
 const currentUser = computed(() => {
   try {
     const raw = typeof localStorage !== 'undefined'
-      ? (localStorage.getItem('cssbd_user') || localStorage.getItem('labhub_user'))
+      ? (localStorage.getItem('laborbit_user') || localStorage.getItem('labhub_user'))
       : null
     return raw ? JSON.parse(raw) : null
   } catch (_) {
@@ -844,7 +844,7 @@ watch(() => props.preferredSource, (newSource) => {
 })
 
 // 分屏与布局状态
-const leftWidthPercent = ref(parseFloat(localStorage.getItem('csbd_arxiv_split_pct')) || 55)
+const leftWidthPercent = ref(parseFloat(localStorage.getItem('laborbit_arxiv_split_pct')) || 55)
 const isDraggingSplitter = ref(false)
 const workspaceRef = ref(null)
 const isMobile = ref(false)
@@ -1414,8 +1414,8 @@ function getSessionsStorageKey(id) {
   const clean = cleanArxivId(id)
   const scope = resolveUserScope(currentUser.value)
   return scope
-    ? `csbd_arxiv_copilot_sessions_${scope}_${clean}`
-    : `csbd_arxiv_copilot_sessions_${clean}`
+    ? `laborbit_arxiv_copilot_sessions_${scope}_${clean}`
+    : `laborbit_arxiv_copilot_sessions_${clean}`
 }
 
 function loadSessionsForPaper(id) {
@@ -1431,7 +1431,7 @@ function loadSessionsForPaper(id) {
   } catch (_) {}
 
   // 若当前为特定用户作用域（targetKey 非旧版全局格式），检查旧版未隔离的全局历史并平滑迁移
-  const legacyGlobalKey = `csbd_arxiv_copilot_sessions_${clean}`
+  const legacyGlobalKey = `laborbit_arxiv_copilot_sessions_${clean}`
   if (targetKey !== legacyGlobalKey) {
     try {
       const legacyRaw = localStorage.getItem(legacyGlobalKey)
@@ -1449,7 +1449,7 @@ function loadSessionsForPaper(id) {
 
   // 平滑迁移旧单会话
   try {
-    const legacyKey = `csbd_arxiv_copilot_session_${clean}`
+    const legacyKey = `laborbit_arxiv_copilot_session_${clean}`
     const rawLegacy = localStorage.getItem(legacyKey)
     if (rawLegacy) {
       const legacyMsgs = JSON.parse(rawLegacy)
@@ -1548,9 +1548,9 @@ function removeAllSessionsForPaper(paperId) {
   const clean = cleanArxivId(paperId)
   if (!clean || typeof localStorage === 'undefined') return
   const scope = resolveUserScope(currentUser.value)
-  const scopedKey = scope ? `csbd_arxiv_copilot_sessions_${scope}_${clean}` : `csbd_arxiv_copilot_sessions_${clean}`
-  const legacyGlobalKey = `csbd_arxiv_copilot_sessions_${clean}`
-  const legacySingleKey = `csbd_arxiv_copilot_session_${clean}`
+  const scopedKey = scope ? `laborbit_arxiv_copilot_sessions_${scope}_${clean}` : `laborbit_arxiv_copilot_sessions_${clean}`
+  const legacyGlobalKey = `laborbit_arxiv_copilot_sessions_${clean}`
+  const legacySingleKey = `laborbit_arxiv_copilot_session_${clean}`
 
   try {
     localStorage.removeItem(scopedKey)
@@ -1651,7 +1651,7 @@ function startDraggingSplitter(e) {
     isDraggingSplitter.value = false
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('mouseup', onMouseUp)
-    localStorage.setItem('csbd_arxiv_split_pct', String(leftWidthPercent.value))
+    localStorage.setItem('laborbit_arxiv_split_pct', String(leftWidthPercent.value))
   }
 
   window.addEventListener('mousemove', onMouseMove)
@@ -1660,7 +1660,7 @@ function startDraggingSplitter(e) {
 
 function resetSplitRatio() {
   leftWidthPercent.value = 55
-  localStorage.setItem('csbd_arxiv_split_pct', '55')
+  localStorage.setItem('laborbit_arxiv_split_pct', '55')
 }
 
 // 辅助方法

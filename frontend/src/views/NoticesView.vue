@@ -14,7 +14,7 @@ import { useNoticeScanState } from '../composables/useNoticeScanState'
 
 const router = useRouter()
 const route = useRoute()
-const STORAGE_KEY = 'csbd_hide_home_notice_marquee'
+const STORAGE_KEY = 'laborbit_hide_home_notice_marquee'
 
 const currentUser = ref(null)
 const notices = ref([])

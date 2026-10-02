@@ -1,10 +1,10 @@
 # Contributors to LabOrbit
 
-LabOrbit is created and maintained by **Hengkai Ding** (@Chocologism) through modern **Vibe-Coding** engineering workflows, built in close pair-programming collaboration with frontier AI assistants.
+LabOrbit is created and maintained by **@Chocologism** through modern **Vibe-Coding** engineering workflows, built in close pair-programming collaboration with frontier AI assistants.
 
 ## Core Maintainer & Author
 
-- **Hengkai Ding** ([@Chocologism](https://github.com/Chocologism))
+- **[@Chocologism](https://github.com/Chocologism)**
   - Project Lead, System Architecture, Academic Workflow Design, Frontend UX, Deployment & Maintenance
 
 ## AI Pair Programmers & Virtual Collaborators

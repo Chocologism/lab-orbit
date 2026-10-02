@@ -27,15 +27,15 @@ import { resolveUserScope } from './userScope.js'
 
 export { resolveUserScope }
 
-export const RECENT_PAPERS_STORAGE_KEY = 'csbd_arxiv_recent_papers'
-export const META_CACHE_PREFIX = 'csbd_arxiv_meta_'
+export const RECENT_PAPERS_STORAGE_KEY = 'laborbit_arxiv_recent_papers'
+export const META_CACHE_PREFIX = 'laborbit_arxiv_meta_'
 
 /**
  * 获取特定用户的最近文献本地存储键
  */
 export function getRecentPapersStorageKey(userOrScope) {
   const scope = resolveUserScope(userOrScope)
-  return scope ? `csbd_arxiv_recent_papers_${scope}` : RECENT_PAPERS_STORAGE_KEY
+  return scope ? `laborbit_arxiv_recent_papers_${scope}` : RECENT_PAPERS_STORAGE_KEY
 }
 
 /**
@@ -359,7 +359,7 @@ export async function resolveArxivPaperMetadata(rawId, { signal, timeout = 6000 
 
     const headers = { 'Content-Type': 'application/json' }
     if (typeof localStorage !== 'undefined') {
-      const token = localStorage.getItem('cssbd_token') || localStorage.getItem('labhub_token')
+      const token = localStorage.getItem('laborbit_token') || localStorage.getItem('labhub_token')
       if (token) headers['Authorization'] = `Bearer ${token}`
     }
 

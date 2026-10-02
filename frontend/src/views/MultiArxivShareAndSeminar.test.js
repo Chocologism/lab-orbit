@@ -412,7 +412,7 @@ describe('Multi-arXiv Sharing and Seminar Multi-paper Flow', () => {
     })
 
     it('identifies papers already shared or scheduled by user as my seminar share to disable re-linking', () => {
-      const currentUser = { id: 1, name: 'dinghengkai', real_name: '丁恒凯' }
+      const currentUser = { id: 1, name: 'chenchen', real_name: '陈晨' }
       const myUpcomingArxivSet = new Set(['2609.17852'])
 
       function checkIsMySeminarShare(paper) {
@@ -434,11 +434,11 @@ describe('Multi-arXiv Sharing and Seminar Multi-paper Flow', () => {
         return false
       }
 
-      // Case 1: Paper already has seminar_id and recommended by Ding Hengkai
+      // Case 1: Paper already has seminar_id and recommended by Chen Chen
       const paper1 = {
         arxiv_id: '2609.17852',
         seminar_id: 10,
-        recommender: { id: 1, name: '丁恒凯' },
+        recommender: { id: 1, name: '陈晨' },
         recommend_comment: '组会 arXiv 分享'
       }
       expect(checkIsMySeminarShare(paper1)).toBe(true)
@@ -481,7 +481,7 @@ describe('Multi-arXiv Sharing and Seminar Multi-paper Flow', () => {
     })
 
     it('validates backend belongs function matches presenter by name even if presenter_id is null or unset', () => {
-      const user = { id: 1, name: 'dinghengkai', real_name: '丁恒凯', nickname: '' }
+      const user = { id: 1, name: 'chenchen', real_name: '陈晨', nickname: '' }
       const userNames = new Set(
         [user.name, user.real_name, user.nickname]
           .filter(Boolean)
@@ -501,9 +501,9 @@ describe('Multi-arXiv Sharing and Seminar Multi-paper Flow', () => {
       // Presenter ID matches
       expect(belongs(1, 'Other Name')).toBe(true)
       // Presenter ID is null, but Chinese real_name matches
-      expect(belongs(null, '丁恒凯')).toBe(true)
+      expect(belongs(null, '陈晨')).toBe(true)
       // Presenter ID is null, but username matches
-      expect(belongs(null, 'dinghengkai')).toBe(true)
+      expect(belongs(null, 'chenchen')).toBe(true)
       // Neither matches
       expect(belongs(null, '张三')).toBe(false)
       expect(belongs(2, '李四')).toBe(false)

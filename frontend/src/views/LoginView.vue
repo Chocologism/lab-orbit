@@ -153,6 +153,7 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authApi } from '../api/client'
+import { syncHomeGridLayoutFromCloud } from '../composables/useHomeGridEngine'
 import WaveInput from '../components/WaveInput.vue'
 import { useSiteConfig } from '../composables/useSiteConfig'
 
@@ -219,10 +220,8 @@ watch(isRegister, () => {
 })
 
 const remember = (data) => {
-  localStorage.setItem('csbd_token', data.access_token)
-  localStorage.setItem('csbd_user', JSON.stringify(data.user))
-  localStorage.setItem('cssbd_token', data.access_token)
-  localStorage.setItem('cssbd_user', JSON.stringify(data.user))
+  localStorage.setItem('laborbit_token', data.access_token)
+  localStorage.setItem('laborbit_user', JSON.stringify(data.user))
   localStorage.setItem('labhub_token', data.access_token)
   localStorage.setItem('labhub_user', JSON.stringify(data.user))
   localStorage.setItem('sidebar_collapsed', 'true')
@@ -234,6 +233,7 @@ const handleLogin = async () => {
   try {
     const data = await authApi.login(loginForm.value.email, loginForm.value.password)
     remember(data)
+    await syncHomeGridLayoutFromCloud({ uploadLocalIfCloudEmpty: true }).catch(() => {})
     router.push(route.query.redirect || '/')
   } catch (error) {
     errorMsg.value = error.message
@@ -258,10 +258,11 @@ const handleRegister = async () => {
       regForm.value.invite_code
     )
     remember(data)
+    await syncHomeGridLayoutFromCloud({ uploadLocalIfCloudEmpty: true }).catch(() => {})
     try {
-      localStorage.setItem('cssbd_color_scheme', 'classic-cyan')
-      localStorage.setItem('cssbd_bg_type', 'clouds-static')
-      localStorage.setItem('cssbd_theme_style', 'clouds-static')
+      localStorage.setItem('laborbit_color_scheme', 'classic-cyan')
+      localStorage.setItem('laborbit_bg_type', 'clouds-static')
+      localStorage.setItem('laborbit_theme_style', 'clouds-static')
       localStorage.setItem('laborbit_default_v20260930_cyan_clouds', '1')
     } catch (e) {}
     router.push('/')

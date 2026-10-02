@@ -9,7 +9,7 @@ describe('Zotero Web API & RIS Export Integration', () => {
   const paperSample = {
     arxiv_id: 'arXiv:2401.09999v2',
     title: 'Strong Lensing Reconstruction via Deep Learning and Wavelets',
-    authors: ['Hengkai Ding', 'Jane Doe', 'John Smith'],
+    authors: ['Alex Doe', 'Jane Doe', 'John Smith'],
     abstract: 'We present a novel method for strong gravitational lensing reconstruction using multi-frequency data.',
     published: '2024-01-15T08:00:00Z',
     journal: 'ApJ Letters',
@@ -28,7 +28,7 @@ describe('Zotero Web API & RIS Export Integration', () => {
 
       expect(ris).toContain('TY  - PREP')
       expect(ris).toContain('TI  - Strong Lensing Reconstruction via Deep Learning and Wavelets')
-      expect(ris).toContain('AU  - Hengkai Ding')
+      expect(ris).toContain('AU  - Alex Doe')
       expect(ris).toContain('AU  - Jane Doe')
       expect(ris).toContain('AU  - John Smith')
       expect(ris).toContain('AB  - We present a novel method for strong gravitational lensing reconstruction using multi-frequency data.')

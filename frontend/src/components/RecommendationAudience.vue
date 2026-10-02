@@ -6,7 +6,7 @@ const props = defineProps({ modelValue: { type: Object, required: true } })
 const emit = defineEmits(['update:modelValue'])
 const members = ref([]), search = ref(''), loading = ref(false), error = ref('')
 let currentId
-try { currentId = JSON.parse(localStorage.getItem('cssbd_user') || localStorage.getItem('labhub_user') || '{}').id } catch {}
+try { currentId = JSON.parse(localStorage.getItem('laborbit_user') || localStorage.getItem('labhub_user') || '{}').id } catch {}
 const filtered = computed(() => members.value.filter(u => u.id !== currentId && `${u.name} ${u.email}`.toLocaleLowerCase().includes(search.value.toLocaleLowerCase())))
 function setMode(visibility) { emit('update:modelValue', { visibility, recipient_ids: [] }) }
 function toggle(id, checked) { emit('update:modelValue', { ...props.modelValue, recipient_ids: checked ? [...new Set([...props.modelValue.recipient_ids, id])] : props.modelValue.recipient_ids.filter(value => value !== id) }) }

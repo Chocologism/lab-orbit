@@ -5,9 +5,9 @@
 
 import { arxivApi } from '../api/client'
 
-export const ARXIV_UNREAD_EVENT = 'csbd-arxiv-unread-updated'
-const STORAGE_KEY = 'csbd_arxiv_unread_summary'
-const LAST_VIEWED_KEY = 'csbd_arxiv_last_viewed_paper_id'
+export const ARXIV_UNREAD_EVENT = 'laborbit-arxiv-unread-updated'
+const STORAGE_KEY = 'laborbit_arxiv_unread_summary'
+const LAST_VIEWED_KEY = 'laborbit_arxiv_last_viewed_paper_id'
 
 /**
  * 纯函数：根据文献流列表与当前用户 ID 计算新文献篇数及是否包含定向推送给自己的文献

@@ -261,6 +261,9 @@ def test_flexible_presenter_and_sharers_and_import():
     # 清理创建的组会
     client.delete(f"/api/seminars/{s1['id']}", headers=admin_headers)
     client.delete(f"/api/seminars/{s2['id']}", headers=admin_headers)
+    with SessionLocal() as db:
+        db.query(SeminarSchedule).filter(SeminarSchedule.date.in_([import_date_a, import_date_b])).delete(synchronize_session=False)
+        db.commit()
 
 
 def test_admin_delete_library_paper():

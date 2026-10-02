@@ -130,7 +130,7 @@ def test_normal_user_can_update_talk_time_but_cannot_delete():
     update_res = client.put(f"/api/talks/{talk_id}", json={
         "date": "2026-11-01",
         "time": "16:00",
-        "title": "台站学术报告·原初黑洞探讨",
+        "title": "学术报告·原初黑洞探讨",
         "speaker": "张专家",
         "location": "大会议室",
         "event_type": "talk"
