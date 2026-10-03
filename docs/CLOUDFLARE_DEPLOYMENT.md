@@ -1,6 +1,6 @@
-# LabHub Cloudflare Serverless 全托管部署与无缝迁移指南
+# LabOrbit Cloudflare Serverless 全托管部署与无缝迁移指南
 
-本指南指导如何将课题组协作平台（LabHub）**彻底脱离对物理服务器的依赖**，完整迁移到 Cloudflare 全托管 Serverless 架构，实现 **100% 永久零成本、免运维、全公网高速直连**。
+本指南指导如何将课题组协作平台（LabOrbit）**彻底脱离对物理服务器的依赖**，完整迁移到 Cloudflare 全托管 Serverless 架构，实现 **100% 永久零成本、免运维、全公网高速直连**。
 
 ---
 
@@ -102,14 +102,18 @@ npx wrangler login
 npm run build
 npm run pages:deploy
 ```
-如果是首次部署，终端会提示确认项目名称，直接回车确认（默认 `labhub`）。
+如果是首次部署，终端会提示确认项目名称，建议输入 `lab-orbit`。
 
 部署完成后，终端会立即给出一个全球可访问的 HTTPS 网址，例如：
 ```text
-✨ Deployment complete! Take a peek over at https://labhub.pages.dev
+✨ Deployment complete! Take a peek over at https://lab-orbit.pages.dev
 ```
 
-打开该网址，现有所有账号即可直接输入原密码登录使用！
+### 访问与全站初始化：
+- **如果是全新部署（全新 D1 数据库）**：
+  直接在浏览器中打开该网址（`https://lab-orbit.pages.dev`）。系统路由守卫检测到数据库尚无用户，**会自动强制重定向至 `/setup` 初始化向导**，引导您两步创建首位超级管理员账号并配置课题组名称；
+- **如果是从旧有系统迁移数据**：
+  若已在上一步成功执行了 `data_d1.sql` 历史数据导入，现有所有成员账号可直接在登录页输入原密码无缝登录！
 
 ---
 

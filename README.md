@@ -208,14 +208,37 @@ docker compose -f deploy/docker-compose.yml up -d
 
 ### 2. 初始配置说明
 
-- **首次初始化向导**：
-  首次安装后，访问 `http://127.0.0.1:8000/setup` 注册第一位系统管理员账号。管理员注册完成后，初始化页面会自动禁用。
-- **注册邀请码**：
-  新成员注册时需要提供邀请码。系统默认邀请码为 `LAB-2026`，管理员可在系统设置或环境变量中根据需要修改。
-- **角色说明**：
-  - **管理员**：负责系统设置、成员管理、批量导入排期以及处理组内反馈；
-  - **教师 / 课题组长**：可发布置顶通知、重点推荐文献、指派主讲人；
-  - **组员**：正常推荐文献、填报主讲信息、借阅教材资料。
+系统采用「首位注册即管理员」的极简两步向导机制，在完成首次部署或配置新域名后即可快速完成全站初始化：
+
+#### 如何进入系统初始化向导：
+
+- **自建服务 / 本地与 Docker 部署**：
+  服务启动后，直接访问 `http://127.0.0.1:8000`（或您的服务器 IP/域名）。系统路由守卫检测到未初始化时会自动跳转至 `/setup`；亦可手动访问 `http://127.0.0.1:8000/setup`。
+- **Cloudflare 全托管部署（Pages + D1）**：
+  按照上述步骤部署完成后，直接在浏览器中打开 Cloudflare Pages 为您生成的默认项目域名（如 `https://lab-orbit.pages.dev`）或已绑定的自定义二级域名（如 `https://lab.yourdomain.org`）。前端边缘检测到 D1 数据库内尚无用户时，**会自动强制重定向至 `/setup` 初始化页面**；也可以在域名后直接访问 `https://your-domain.pages.dev/setup`。
+- **配置了 Nginx / Caddy 反向代理或私有自定义域名**：
+  访问您的自定义公网/校网域名根路径（如 `https://hub.physics.edu.cn/`），站点同样会自动检测并引导进入 `/setup` 页面。
+
+> 💡 **特别提醒（与 GitHub Pages 演示模式的区别）**：
+> 官方 GitHub Pages 演示站（`*.github.io`）因为预置了完整的脱敏学术演示数据，会自动激活只读沙盒模式；而在您自己的 Cloudflare Pages、独立服务器或自建域名上部署时，属于全新的生产环境实例，初次打开均会自动进入此初始化向导。
+
+#### 初始化向导步骤与配置内容：
+
+1. **步骤一：设立超级管理员**：填写首任管理员用户名、真实姓名、工作邮箱与登录密码（建议由课题组负责人或指定运维学生填写）；
+2. **步骤二：课题组品牌与协作配置**：
+   - **课题组名称与缩写**：例如「天体物理与交叉科学课题组」（缩写 `LabOrbit`），系统标题与导航徽标将自动同步更新；
+   - **所属机构与地点**：填入学院/系所名称及默认研讨室（如“物理楼 302 / 腾讯会议”）；
+   - **初始注册邀请码**：设定用于吸纳本组组员的注册口令（系统默认预填 `LAB-2026`，可自由设定）。
+
+#### 安全自锁与成员邀请：
+
+- **安全自锁防重置**：完成第二步并点击确认后，管理员账号自动登入并进入主工作台。此时系统后端 API（`POST /api/system/setup`）与前端路由守卫将**永久锁定并禁用 `/setup` 路径**。任何后续针对 `/setup` 的未授权访问都会被拦截并重定向回首页或登录页，彻底杜绝数据覆盖或恶意重置风险。
+- **邀请课题组组员**：
+  初始化完成后，管理员可将设定的注册邀请码告知本组师生，成员在登录页（`/login`）点击“注册新账号”输入该邀请码即可自主加入。
+- **角色与权限层级说明**：
+  - **管理员 (Admin)**：负责系统全局设置、成员角色调整（如授予组会管理权）、批量导入排期以及处理组内反馈；
+  - **教师 / 课题组长 (Teacher/PI)**：发布置顶公告、重点星标推荐文献、指定组会主讲人与审核协作草案；
+  - **组员 (Student)**：正常推荐前沿文献、登记组会题目课件、借阅/下载教材资料与沉淀阅读笔记。
 
 ---
 
@@ -472,14 +495,37 @@ For detailed configuration steps, see the [Cloudflare Deployment Guide](docs/CLO
 
 ### 2. Initial Setup & Roles
 
-- **First-Time Setup**:
-  Visit `http://127.0.0.1:8000/setup` to register the first administrator account. Once registered, this initialization page is automatically disabled.
-- **Invite Code**:
-  New users need an invite code to register. The default code is `LAB-2026`, which can be changed in the system settings or environment variables.
-- **Roles**:
-  - **Admin**: System settings, user role management, bulk CSV schedule import, and feedback handling;
-  - **Teacher / PI**: Post pinned notices, highlight recommended papers, and assign seminar speakers;
-  - **Student**: Share papers, submit seminar information, and access the resource library.
+LabOrbit features a streamlined two-step setup wizard where the first registered user is automatically granted Super Administrator privileges:
+
+#### How to Access the Setup Wizard:
+
+- **Self-Hosted / Local & Docker Deployment**:
+  Visit `http://127.0.0.1:8000` (or `http://YOUR_SERVER_IP:8000`). If uninitialized, the frontend router guard will automatically redirect you to `/setup`. You can also directly navigate to `http://127.0.0.1:8000/setup`.
+- **Cloudflare Serverless Deployment (Pages + D1)**:
+  Once deployed, open your Cloudflare Pages default domain (e.g., `https://lab-orbit.pages.dev`) or your bound custom domain (e.g., `https://lab.yourdomain.org`). When the edge API detects that the D1 database has zero users, **it will automatically redirect you to `/setup`**. You can also navigate directly to `https://your-domain.pages.dev/setup`.
+- **Custom Domains & Reverse Proxies (Nginx / Caddy)**:
+  Navigating to the root path of your configured custom domain (e.g., `https://hub.physics.edu.cn/`) will automatically route you to the setup wizard.
+
+> 💡 **Note on Demo Mode vs. Production**:
+> The official GitHub Pages site (`*.github.io`) runs a pre-seeded read-only sandbox. In contrast, your own deployment on Cloudflare Pages or private servers represents a clean production instance, and will always present the initial setup wizard on first launch.
+
+#### Setup Wizard Steps:
+
+1. **Step 1: Super Administrator Creation**: Specify the initial admin's display name, real name, academic email, and password (typically completed by the PI or designated lab manager);
+2. **Step 2: Lab Branding & Settings**:
+   - **Lab Name & Acronym**: e.g., "Astrophysics and Interdisciplinary Science Research Group" (Short name: `LabOrbit`), which dynamically updates site headers and browser titles;
+   - **Institution & Venue**: Set your university/institute affiliation and default seminar location (e.g., "Physics Hall 302 / Zoom");
+   - **Default Invite Code**: Set the registration passcode for your members (defaults to `LAB-2026`).
+
+#### Security Auto-Lock & Member Onboarding:
+
+- **Permanent Auto-Lock**: Once initialized, the administrator is automatically logged in. Both the backend API (`POST /api/system/setup`) and frontend routing guards **permanently lock and disable the `/setup` page**. Any subsequent attempts to access `/setup` will be rejected and redirected to the home or login page, preventing unauthorized resets.
+- **Onboarding Members**:
+  Share the configured invite code with your students and researchers. They can register themselves at `/login` by selecting "Register" and providing the invite code.
+- **Role Hierarchy**:
+  - **Administrator (Admin)**: Full system configuration, member role adjustment, bulk CSV schedule import, and feedback management;
+  - **Teacher / PI**: Post pinned announcements, star priority literature recommendations, assign speakers, and review pending submissions;
+  - **Student**: Recommend papers, submit seminar metadata and presentation slides, and access resource archives.
 
 ---
 
